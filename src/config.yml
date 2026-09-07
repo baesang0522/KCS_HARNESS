@@ -1,5 +1,5 @@
 llm:
-  base_url: "http://10.132.214.56:8888/v1"
+  base_url: ""
   model: "gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf"
   api_key: "not-needed"
   temperature: 0.1
