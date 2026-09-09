@@ -6,12 +6,12 @@
   <DefaultLocale>ko-KR</DefaultLocale>
   <DisplayName DefaultValue="관세업무 도우미"/>
   <Description DefaultValue="관세업무 도우미 화면 프로토타입. 파일 읽기·수정 및 AI 연결 기능은 없습니다."/>
-  <IconUrl DefaultValue="https://localhost:3443/assets/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://localhost:3443/assets/icon-80.png"/>
-  <SupportUrl DefaultValue="https://localhost:3443/taskpane.html"/>
-  <AppDomains><AppDomain>https://localhost:3443</AppDomain></AppDomains>
+  <IconUrl DefaultValue="http://localhost:8000/static/excel/assets/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="http://localhost:8000/static/excel/assets/icon-80.png"/>
+  <SupportUrl DefaultValue="http://localhost:8000/static/excel/taskpane.html"/>
+  <AppDomains><AppDomain>http://localhost:8000</AppDomain></AppDomains>
   <Hosts><Host Name="Workbook"/></Hosts>
-  <DefaultSettings><SourceLocation DefaultValue="https://localhost:3443/taskpane.html"/></DefaultSettings>
+  <DefaultSettings><SourceLocation DefaultValue="http://localhost:8000/static/excel/taskpane.html"/></DefaultSettings>
   <Permissions>Restricted</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
     <Hosts><Host xsi:type="Workbook"><DesktopFormFactor>
@@ -29,8 +29,8 @@
       </Group></OfficeTab></ExtensionPoint>
     </DesktopFormFactor></Host></Hosts>
     <Resources>
-      <bt:Images><bt:Image id="Icon.16" DefaultValue="https://localhost:3443/assets/icon-16.png"/><bt:Image id="Icon.32" DefaultValue="https://localhost:3443/assets/icon-32.png"/><bt:Image id="Icon.80" DefaultValue="https://localhost:3443/assets/icon-80.png"/></bt:Images>
-      <bt:Urls><bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3443/taskpane.html"/></bt:Urls>
+      <bt:Images><bt:Image id="Icon.16" DefaultValue="http://localhost:8000/static/excel/assets/icon-16.png"/><bt:Image id="Icon.32" DefaultValue="http://localhost:8000/static/excel/assets/icon-32.png"/><bt:Image id="Icon.80" DefaultValue="http://localhost:8000/static/excel/assets/icon-80.png"/></bt:Images>
+      <bt:Urls><bt:Url id="Taskpane.Url" DefaultValue="http://localhost:8000/static/excel/taskpane.html"/></bt:Urls>
       <bt:ShortStrings><bt:String id="GetStarted.Title" DefaultValue="관세업무 도우미"/><bt:String id="Group.Label" DefaultValue="관세업무"/><bt:String id="Button.Label" DefaultValue="도우미 열기"/></bt:ShortStrings>
       <bt:LongStrings><bt:String id="GetStarted.Description" DefaultValue="홈 탭에서 도우미 열기를 선택해 화면을 살펴보세요."/><bt:String id="Button.Description" DefaultValue="관세업무 도우미 화면 프로토타입을 엽니다."/></bt:LongStrings>
     </Resources>
