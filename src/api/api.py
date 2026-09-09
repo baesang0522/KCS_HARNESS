@@ -3,7 +3,7 @@ from uuid import uuid4
 from fastapi import Request
 from langchain_core.messages import AIMessage, HumanMessage
 
-from schemas import ChatRequest, ChatResponse
+from api.schemas import ChatRequest, ChatResponse
 from models.llama_cpp import get_reasoning_content
 from runtime import CustomsHarness
 

@@ -1,0 +1,2 @@
+@microsoft/office-js 1.1.110
+Internal prototype snapshot. npm distribution is deprecated; review updates before production.

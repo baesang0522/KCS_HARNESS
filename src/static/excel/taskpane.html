@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>관세업무 도우미</title>
+  <link rel="stylesheet" href="taskpane.css">
+  <script src="vendor/office-js/office.js"></script>
+  <script defer src="taskpane.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><img src="assets/icon-32.png" width="28" height="28" alt=""><span>관세업무 도우미</span></div>
+      <button class="icon-button" id="new-chat" aria-label="새 대화" title="새 대화"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+    </header>
+    <main>
+      <div id="welcome-content">
+      <div class="eyebrow"><span class="dot"></span> EXCEL ASSISTANT <span class="badge">미리보기</span></div>
+      <section class="welcome">
+        <div class="hero-icon" aria-hidden="true">✦</div>
+        <h1>엑셀 업무에,<br>도움이 필요하신가요?</h1>
+        <p>복잡한 데이터 정리부터 분석까지.<br>하던 작업을 이어가며 도움을 받아보세요.</p>
+      </section>
+      <section class="suggestions" aria-labelledby="suggestion-title">
+        <h2 id="suggestion-title">이런 작업을 함께할 수 있어요</h2>
+        <button class="suggestion" data-prompt="해외거래처명을 정리하고, 같은 거래처로 보이는 후보를 찾아줘."><span class="card-icon violet" aria-hidden="true">✧</span><span><strong>해외거래처 정리</strong><small>다르게 적힌 상호를 한눈에</small></span><span class="arrow" aria-hidden="true">↗</span></button>
+        <button class="suggestion" data-prompt="모델·규격명에서 품번과 규격을 나누는 방법을 알려줘."><span class="card-icon blue" aria-hidden="true">▦</span><span><strong>모델·규격 살펴보기</strong><small>복잡한 표기에서 필요한 정보 찾기</small></span><span class="arrow" aria-hidden="true">↗</span></button>
+        <button class="suggestion" data-prompt="이 작업에 필요한 엑셀 수식을 제안해줘."><span class="card-icon teal" aria-hidden="true">ƒ</span><span><strong>수식 작성 도움받기</strong><small>하고 싶은 작업을 말로 설명하기</small></span><span class="arrow" aria-hidden="true">↗</span></button>
+      </section>
+      <p class="preview-note">화면 프로토타입입니다.<br>현재 파일을 읽거나 수정하지 않습니다.</p>
+      </div>
+      <section id="conversation" role="log" aria-label="대화 내용" aria-live="polite" hidden></section>
+    </main>
+    <footer>
+      <p id="notice" class="notice" role="status" aria-live="polite"></p>
+      <form id="composer" class="composer">
+        <label class="sr-only" for="message">도우미에게 요청할 내용</label>
+        <textarea id="message" rows="3" maxlength="8000" placeholder="어떤 작업을 도와드릴까요?"></textarea>
+        <div class="composer-bottom"><span>Enter 전송 · Shift+Enter 줄바꿈</span><button class="send" type="submit" aria-label="요청 보내기 (화면 미리보기)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 6-6 6 6M12 6v13"/></svg></button></div>
+      </form>
+      <div class="status-row"><span id="connection">화면 미리보기</span><span>프로토타입 · 0.1</span></div>
+      <details class="diagnostics"><summary>실행 환경 확인</summary><pre id="diagnostic"></pre></details>
+    </footer>
+  </div>
+</body>
+</html>
