@@ -13,7 +13,7 @@ diagnostic.textContent = 'Office 초기화 대기 · ' + navigator.userAgent;
 if (typeof Office !== 'undefined') {
     Office.onReady(function (info) {
         ready = info.host === Office.HostType.Excel;
-        connection.textContent = ready ? 'Excel 연결됨 · 모의 응답' : '브라우저 미리보기';
+        connection.textContent = ready ? 'Excel 연결됨' : '브라우저 미리보기';
         if (ready) {
             connection.classList.add('connected');
         }
@@ -30,7 +30,7 @@ function appendMessage(role, text) {
     var bubble = document.createElement('article');
     bubble.className = 'chat-message ' + role;
     var label = document.createElement('strong');
-    label.textContent = role === 'user' ? '나' : '도우미 · 모의 응답';
+    label.textContent = role === 'user' ? '나' : '도우미';
     var body = document.createElement('p');
     body.textContent = text;
     bubble.appendChild(label);
@@ -38,20 +38,65 @@ function appendMessage(role, text) {
     conversation.appendChild(bubble);
     scrollArea.scrollTop = scrollArea.scrollHeight;
 }
-function sendMessage() {
+
+var sending = false;
+
+async function sendMessage() {
+    if (sending) return;
+
     var value = message.value.trim();
     if (!value) {
         notice.textContent = '메시지를 입력해 주세요.';
         return;
     }
-    notice.textContent = '';
+
+    var sendButton = document.querySelector('.send');
+    var newChatButton = document.getElementById('new-chat');
+
+    sending = true;
+    sendButton.disabled = true;
+    newChatButton.disabled = true;
+    message.readOnly = true;
+
     welcome.hidden = true;
     conversation.hidden = false;
     appendMessage('user', value);
-    appendMessage('assistant', '메시지를 받았습니다. 지금은 대화창 동작을 확인하는 프로토타입입니다.\n실제 AI 답변과 엑셀 파일 읽기·수정은 아직 연결하지 않았습니다.');
     message.value = '';
-    message.focus();
+    notice.textContent = '답변을 생성하고 있습니다…';
+
+    try {
+        // 화면을 제공한 하네스 서버의 /chat으로 요청합니다.
+        var response = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: value })
+        });
+
+        if (!response.ok) {
+            throw new Error('하네스 요청 실패: HTTP ' + response.status);
+        }
+
+        var data = await response.json();
+
+        if (typeof data.answer !== 'string' || !data.answer.trim()) {
+            throw new Error('하네스에서 답변을 받지 못했습니다.');
+        }
+
+        appendMessage('assistant', data.answer);
+        notice.textContent = '';
+    } catch (error) {
+        notice.textContent = error.message
+            + ' 서버 로그와 LLM 연결을 확인하고 다시 전송해 주세요.';
+        message.value = value;
+    } finally {
+        sending = false;
+        sendButton.disabled = false;
+        newChatButton.disabled = false;
+        message.readOnly = false;
+        message.focus();
+    }
 }
+
 var suggestions = document.querySelectorAll('[data-prompt]');
 var _loop_1 = function (i) {
     suggestions[i].addEventListener('click', function () {

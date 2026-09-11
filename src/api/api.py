@@ -13,7 +13,7 @@ async def health() -> dict[str, str]:
 
 
 async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
-    runtime: CustomsHarness = request.app.state.runtime()
+    runtime: CustomsHarness = request.app.state.runtime
     request_id = str(uuid4())
 
     result = await runtime.graph.ainvoke(
