@@ -5,6 +5,7 @@ from langgraph.graph.state import CompiledStateGraph
 from agents.agent import AgentNode
 from graphs.harness_graph import build_harness_graph
 from models.llama_cpp import create_model
+from models.codex_adapter import CodexModel
 from prompts.loader import load_agent_prompt
 from settings import Settings, load_settings
 from tools.registry import get_local_tools
@@ -19,15 +20,21 @@ class CustomsHarness:
 def create_runtime() -> CustomsHarness:
     settings = load_settings()
 
-    model = create_model(
-        base_url=settings.llm.base_url,
-        model=settings.llm.model,
-        api_key=settings.llm.api_key,
-        temperature=settings.llm.temperature,
-        timeout_seconds=settings.llm.timeout_seconds,
-        max_tokens=settings.llm.max_tokens,
-        max_retries=settings.llm.max_retries,
-    )
+    if settings.llm.provider == "codex_cli":
+        model = CodexModel(
+            timeout_seconds=settings.llm.timeout_seconds,
+        )
+
+    else:
+        model = create_model(
+            base_url=settings.llm.base_url,
+            model=settings.llm.model,
+            api_key=settings.llm.api_key,
+            temperature=settings.llm.temperature,
+            timeout_seconds=settings.llm.timeout_seconds,
+            max_tokens=settings.llm.max_tokens,
+            max_retries=settings.llm.max_retries,
+        )
 
     tools = get_local_tools(
         workspace_root=settings.workspace.root_path,
