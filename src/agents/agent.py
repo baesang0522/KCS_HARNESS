@@ -5,10 +5,11 @@ from langchain_core.messages import SystemMessage
 from langchain_core.tools import BaseTool
 
 from agents.agent_state import AgentState
+from models.codex_adapter import CodexModel
 
 
 class AgentNode:
-    def __init__(self, model: BaseChatModel, tools: Sequence[BaseTool], system_prompt: str):
+    def __init__(self, model: BaseChatModel | CodexModel, tools: Sequence[BaseTool], system_prompt: str):
         self.model = model.bind_tools(tools) if tools else model
         self.system_prompt = system_prompt
 

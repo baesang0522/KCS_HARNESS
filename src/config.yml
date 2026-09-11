@@ -1,4 +1,5 @@
 llm:
+  provider: codex_cli
   base_url: "여기에 56 8888 /v1 url 등록"
   model: "gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf"
   api_key: "not-needed"

@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -9,6 +10,10 @@ CONFIG_PATH = Path(__file__).with_name("config.yml")
 class LLMSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    provider: Literal["openai_compatible", "codex_cli"] = (
+        # "openai_compatible"
+        "codex_cli"
+    )
     base_url:str
     model:str
     api_key:str = "not-needed"
