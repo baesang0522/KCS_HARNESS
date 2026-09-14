@@ -6,11 +6,15 @@ from fastapi.staticfiles import StaticFiles
 
 from api.router import router
 from runtime import create_runtime
+from repositories.memory_conversation_repository import (
+    MemoryConversationRepository,
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.runtime = create_runtime()
+    app.state.conversations = MemoryConversationRepository()
     yield
 
 app = FastAPI(
