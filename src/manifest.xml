@@ -12,7 +12,7 @@
   <AppDomains><AppDomain>http://localhost:8000</AppDomain></AppDomains>
   <Hosts><Host Name="Workbook"/></Hosts>
   <DefaultSettings><SourceLocation DefaultValue="http://localhost:8000/static/excel/taskpane.html"/></DefaultSettings>
-  <Permissions>Restricted</Permissions>
+  <Permissions>ReadWriteDocument</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
     <Hosts><Host xsi:type="Workbook"><DesktopFormFactor>
       <GetStarted><Title resid="GetStarted.Title"/><Description resid="GetStarted.Description"/><LearnMoreUrl resid="Taskpane.Url"/></GetStarted>

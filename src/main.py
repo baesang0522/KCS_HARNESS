@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from api.router import router
+from api.normalization import router as normalization_router
 from runtime import create_runtime
 from repositories.memory_conversation_repository import (
     MemoryConversationRepository,
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI):
 
     app.state.runtime = runtime
     app.state.conversations = repository
+    app.state.normalization_jobs = {}
 
     yield
 
@@ -49,3 +51,4 @@ app.mount(
     name="static",
 )
 app.include_router(router)
+app.include_router(normalization_router)

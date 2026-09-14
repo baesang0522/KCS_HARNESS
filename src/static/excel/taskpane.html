@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="taskpane.css">
   <script src="vendor/office-js/office.js"></script>
   <script defer src="taskpane.js"></script>
+  <script defer src="normalization.js"></script>
 </head>
 <body>
   <div class="app">
@@ -15,6 +16,46 @@
       <button class="icon-button" id="new-chat" aria-label="새 대화" title="새 대화"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
     </header>
     <main>
+      <section class="normalization-panel">
+        <h2>모델규격 정제</h2>
+        <p>머리글을 포함한 연속된 세 열의 데이터 범위를 선택하세요.</p>
+
+        <button type="button" id="norm-select">
+          선택 범위 가져오기
+        </button>
+
+        <div id="norm-mapping" hidden>
+          <p id="norm-source"></p>
+
+          <label>
+            거래품명
+            <select id="norm-trade"></select>
+          </label>
+
+          <label>
+            신고품명
+            <select id="norm-declared"></select>
+          </label>
+
+          <label>
+            모델규격
+            <select id="norm-spec"></select>
+          </label>
+
+          <pre id="norm-preview"></pre>
+
+          <button type="button" id="norm-analyze">
+            이 열로 LLM 확인
+          </button>
+        </div>
+
+        <button type="button" id="norm-refresh" disabled>
+          작업 상태 조회
+        </button>
+
+        <p id="norm-status" role="status"></p>
+        <pre id="norm-result"></pre>
+      </section>
       <div id="welcome-content">
       <div class="eyebrow"><span class="dot"></span> EXCEL ASSISTANT <span class="badge">미리보기</span></div>
       <section class="welcome">
@@ -28,7 +69,7 @@
         <button class="suggestion" data-prompt="모델·규격명에서 품번과 규격을 나누는 방법을 알려줘."><span class="card-icon blue" aria-hidden="true">▦</span><span><strong>모델·규격 살펴보기</strong><small>복잡한 표기에서 필요한 정보 찾기</small></span><span class="arrow" aria-hidden="true">↗</span></button>
         <button class="suggestion" data-prompt="이 작업에 필요한 엑셀 수식을 제안해줘."><span class="card-icon teal" aria-hidden="true">ƒ</span><span><strong>수식 작성 도움받기</strong><small>하고 싶은 작업을 말로 설명하기</small></span><span class="arrow" aria-hidden="true">↗</span></button>
       </section>
-      <p class="preview-note">화면 프로토타입입니다.<br>현재 파일을 읽거나 수정하지 않습니다.</p>
+      <p class="preview-note">선택한 범위의 일부 데이터를 읽어 확인합니다.<br>원본 셀은 수정하지 않습니다.</p>
       </div>
       <section id="conversation" role="log" aria-label="대화 내용" aria-live="polite" hidden></section>
     </main>
