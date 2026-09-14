@@ -13,7 +13,15 @@ from repositories.memory_conversation_repository import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.runtime = create_runtime()
+    runtime = create_runtime()
+
+    if runtime.settings.storage.provider != "memory":
+        raise RuntimeError(
+            "PostgreSQL 저장소는 아직 구현되지 않았습니다. "
+            "현재 실행 테스트는 KCS_ENV=external로 진행하세요."
+        )
+
+    app.state.runtime = runtime
     app.state.conversations = MemoryConversationRepository()
     yield
 

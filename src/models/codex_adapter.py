@@ -32,7 +32,8 @@ OUTPUT_SCHEMA = {
 
 
 class CodexModel:
-    def __init__(self, timeout_seconds: float = 120):
+    def __init__(self, model:str, timeout_seconds: float = 120):
+        self.model = model
         self.timeout_seconds = timeout_seconds
         self.tools = {}
 
@@ -105,7 +106,7 @@ class CodexModel:
             process = await asyncio.create_subprocess_exec(
                 "codex",
                 "exec",
-                "--model", "gpt-5.6-luna",
+                "--model", self.model,
                 "--skip-git-repo-check",
                 "--sandbox", "read-only",
                 "--output-schema", str(schema_path),
