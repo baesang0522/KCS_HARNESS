@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/nomalization/jobs")
+router = APIRouter(prefix="/normalization/jobs")
 
 CellText = Annotated[str, Field(max_length=1000)]
 ColumnIndex = Annotated[int, Field(ge=0, le=2)]
