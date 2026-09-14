@@ -12,7 +12,7 @@ class StorageSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: Literal["memory", "postgres"]
-    url_env: str = "여기다 url 주소 입력"
+    url_env: str = "KCS_DATABASE_URL"
 
 
 class LLMSettings(BaseModel):

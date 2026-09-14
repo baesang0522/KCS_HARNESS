@@ -2,12 +2,16 @@ import logging
 from uuid import UUID
 
 from fastapi import HTTPException, Request
+from contextlib import asynccontextmanager
 from langchain_core.messages import AIMessage, HumanMessage
 from starlette import status
 
 from api.schemas import ChatRequest, ChatResponse
 from models.llama_cpp import get_reasoning_content
-from repositories.memory_conversation_repository import StoredTurn
+from repositories.conversation_repository import (
+    ConversationNotFound,
+    StoredTurn,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,16 +20,24 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-def get_conversation(request: Request, conversation_id: str):
+@asynccontextmanager
+async def edit_conversation(request: Request, conversation_id: str):
+    repository = request.app.state.conversations
+
     try:
-        return request.app.state.conversations.get(conversation_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="대화가 없습니다. 서버 시작 후에는 새 대화를 시작하세요") from None
+        async with repository.edit(conversation_id) as conversation:
+            yield conversation
+
+    except ConversationNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail="대화가 없습니다. 새 대화를 시작하세요.",
+        ) from None
 
 
 async def create_conversation(request: Request):
     try:
-        conversation_id = request.app.state.conversations.create()
+        conversation_id = await request.app.state.conversations.create()
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -34,18 +46,27 @@ async def create_conversation(request: Request):
 
 async def read_conversation(conversation_id: UUID, request: Request):
     cid = str(conversation_id)
-    get_conversation(request, cid)
 
-    return {"conversation_id": cid, "messages": request.app.state.conversations.list_messages(cid)}
+    try:
+        messages = await request.app.state.conversations.list_messages(cid)
+
+    except ConversationNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail="대화가 없습니다. 새 대화를 시작하세요.",
+        ) from None
+
+    return {
+        "conversation_id": cid,
+        "messages": messages,
+    }
 
 
 async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     runtime = request.app.state.runtime
     cid = str(payload.conversation_id)
     rid = str(payload.request_id)
-    conversation = get_conversation(request, cid)
-
-    async with conversation.lock:
+    async with edit_conversation(request, cid) as conversation:
         for turn in conversation.turns:
             if turn.request_id == rid:
                 if turn.question != payload.message:
@@ -127,7 +148,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             ) from error
 
             # 모델 호출이 성공한 뒤 질문·답변을 함께 저장한다.
-        conversation.turns.append(
+        await conversation.save_turn(
             StoredTurn(
                 request_id=rid,
                 question=payload.message,
