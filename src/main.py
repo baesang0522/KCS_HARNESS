@@ -13,8 +13,28 @@ from repositories.memory_conversation_repository import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.runtime = create_runtime()
-    app.state.conversations = MemoryConversationRepository()
+    runtime = create_runtime()
+
+    if runtime.settings.storage.provider == "memory":
+        repository = MemoryConversationRepository()
+
+    else:
+        from utils.database import PostgresDatabase
+        from repositories.postgres_conversation_repository import (
+            PostgresConversationRepository,
+        )
+
+        database = PostgresDatabase(runtime.settings.storage)
+
+        repository = PostgresConversationRepository(
+            connection_factory=database.connection,
+        )
+
+        await repository.initialize()
+
+    app.state.runtime = runtime
+    app.state.conversations = repository
+
     yield
 
 app = FastAPI(

@@ -22,6 +22,7 @@ def create_runtime() -> CustomsHarness:
 
     if settings.llm.provider == "codex_cli":
         model = CodexModel(
+            model=settings.llm.model,
             timeout_seconds=settings.llm.timeout_seconds,
         )
 
