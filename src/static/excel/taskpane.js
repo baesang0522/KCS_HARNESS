@@ -1,5 +1,5 @@
 "use strict";
-// UI-only prototype: no workbook access or LLM requests.
+// Chat UI and Excel workflow controls.
 var connection = document.getElementById('connection');
 var message = document.getElementById('message');
 var notice = document.getElementById('notice');
@@ -37,8 +37,16 @@ function appendMessage(role, text) {
     bubble.appendChild(body);
     conversation.appendChild(bubble);
     scrollArea.scrollTop = scrollArea.scrollHeight;
+    return bubble;
 }
 
+function enterConversation() {
+    welcome.hidden = true;
+    conversation.hidden = false;
+}
+
+var pendingBubble = null;
+var workflowBusy = false;
 var sending = false;
 var conversationId = null;
 var pendingRequest = null;
@@ -79,6 +87,11 @@ function setBusy(value) {
     document.querySelector('.send').disabled = value;
     document.getElementById('new-chat').disabled = value;
     message.readOnly = value;
+    document.getElementById('attach-range').disabled = value;
+    document.querySelectorAll('[data-prompt]').forEach(function (button) {
+        button.disabled = value;
+    });
+    document.dispatchEvent(new CustomEvent('chat-busy', {detail: value}));
 }
 
 async function requestJson(path, options) {
@@ -111,6 +124,8 @@ async function createConversation() {
 }
 
 function renderMessages(messages) {
+    document.dispatchEvent(new Event('chat-reset'));
+    pendingBubble = null;
     conversation.textContent = '';
     welcome.hidden = messages.length > 0;
     conversation.hidden = messages.length === 0;
@@ -177,7 +192,7 @@ async function initializeConversation() {
 }
 
 async function sendMessage() {
-    if (sending) return;
+    if (sending || workflowBusy) return false;
 
     var value = message.value.trim();
 
@@ -195,6 +210,9 @@ async function sendMessage() {
     }
 
     setBusy(true);
+    enterConversation();
+    if (!pendingBubble) pendingBubble = appendMessage('user', value);
+    message.value = '';
     notice.textContent = '답변을 생성하고 있습니다…';
 
     try {
@@ -211,7 +229,7 @@ async function sendMessage() {
             saveSession();
         }
 
-        await requestJson('/chat', {
+        var reply = await requestJson('/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(pendingRequest)
@@ -221,14 +239,10 @@ async function sendMessage() {
         saveSession();
         message.value = '';
 
-        try {
-            await refreshConversation();
-            notice.textContent = '';
-        } catch (refreshError) {
-            notice.textContent =
-                '답변은 서버에 저장됐지만 화면을 갱신하지 못했습니다. ' +
-                '같은 질문을 다시 보내지 말고 대화창을 다시 열어 주세요.';
-        }
+        pendingBubble = null;
+        appendMessage('assistant', reply.answer);
+        notice.textContent = '';
+        return true;
 
     } catch (error) {
         notice.textContent = error.message;
@@ -243,7 +257,7 @@ async function sendMessage() {
 document.getElementById('new-chat').addEventListener(
     'click',
     async function () {
-        if (sending) return;
+        if (sending || workflowBusy) return;
 
         setBusy(true);
 
@@ -261,18 +275,16 @@ document.getElementById('new-chat').addEventListener(
     }
 );
 
-var suggestions = document.querySelectorAll('[data-prompt]');
-var _loop_1 = function (i) {
-    suggestions[i].addEventListener('click', function () {
-        if (sending) return;
-
-        message.value = suggestions[i].getAttribute('data-prompt') || '';
-        message.focus();
+document.querySelectorAll('[data-prompt]').forEach(function (button) {
+    button.addEventListener('click', async function () {
+        if (sending || workflowBusy) return;
+        message.value = button.getAttribute('data-prompt') || '';
+        var success = await sendMessage();
+        if (success && button.dataset.workflow === 'normalization') {
+            window.normalizationUI.open();
+        }
     });
-};
-for (var i = 0; i < suggestions.length; i++) {
-    _loop_1(i);
-}
+});
 document.getElementById('composer').addEventListener('submit', function (event) {
     event.preventDefault();
     sendMessage();
