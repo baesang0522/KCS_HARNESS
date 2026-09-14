@@ -8,7 +8,61 @@
     var sourceText = document.getElementById("norm-source");
     var preview = document.getElementById("norm-preview");
     var statusText = document.getElementById("norm-status");
-    var resultText = document.getElementById("norm-result");
+    var panel = document.getElementById("normalization-panel");
+    var attachButton = document.getElementById("attach-range");
+    var resultBubble = null;
+    var resultText = null;
+    var refreshing = false;
+
+    function openPanel() {
+        enterConversation();
+        panel.hidden = false;
+        if (!conversation.contains(panel)) conversation.appendChild(panel);
+        scrollArea.scrollTop = scrollArea.scrollHeight;
+    }
+
+    function clearResult() {
+        resultBubble = null;
+        resultText = null;
+    }
+
+    function archivePanel() {
+        if (!selection) return;
+        var summary = appendMessage('user',
+            sourceText.textContent + '\n' +
+            selects.map(function (select, index) {
+                return ['거래품명', '신고품명', '모델규격'][index] + ': ' +
+                    select.options[select.selectedIndex].textContent;
+            }).join('\n'));
+        summary.classList.add('range-summary');
+        conversation.insertBefore(summary, panel);
+    }
+
+    window.normalizationUI = {open: openPanel};
+    document.addEventListener('chat-reset', function () {
+        panel.hidden = true;
+        scrollArea.appendChild(panel);
+        selection = null;
+        payload = null;
+        clearResult();
+        mappingPanel.hidden = true;
+        statusText.textContent = '';
+        sourceText.textContent = '';
+        preview.textContent = '';
+        refreshButton.disabled = true;
+        selectButton.textContent = '선택 범위 가져오기';
+    });
+    document.addEventListener('chat-busy', function (event) {
+        selectButton.disabled = event.detail;
+        analyzeButton.disabled = event.detail;
+        refreshButton.disabled = event.detail || !payload;
+        selects.forEach(function (select) { select.disabled = event.detail; });
+    });
+    attachButton.addEventListener('click', function () {
+        if (sending || workflowBusy) return;
+        openPanel();
+        selectButton.click();
+    });
 
     var selects = [
         document.getElementById("norm-trade"),
@@ -20,6 +74,8 @@
     var payload = null;
 
     function setBusy(value) {
+        workflowBusy = value;
+        window.setBusy(value);
         selectButton.disabled = value;
         analyzeButton.disabled = value;
         selects.forEach(function (select) {
@@ -38,7 +94,20 @@
         statusText.textContent =
             labels[job.status] + " · 작업 " + job.job_id;
 
-        resultText.textContent = job.error || job.analysis || "";
+        if (job.status === 'REVIEW_READY') {
+            if (!resultBubble) {
+                resultBubble = appendMessage('assistant', job.analysis);
+                resultText = resultBubble.querySelector('p');
+            } else {
+                resultText.textContent = job.analysis;
+            }
+            mappingPanel.hidden = true;
+            selectButton.textContent = '다시 선택';
+            statusText.textContent = sourceText.textContent + ' · 범위·열 설정 확인됨';
+            analyzeButton.textContent = '이 설정으로 확인';
+        } else if (job.error) {
+            statusText.textContent = job.error;
+        }
     }
 
     selects.forEach(function (select) {
@@ -46,18 +115,22 @@
             // 열 역할이 바뀌면 다음 실행은 새 작업이다.
             payload = null;
             refreshButton.disabled = true;
-            resultText.textContent = "";
+            clearResult();
             statusText.textContent = "열 역할 변경됨 · 다시 확인하세요.";
         });
     });
 
     selectButton.addEventListener("click", async function () {
+        if (sending || workflowBusy) return;
+        archivePanel();
+        openPanel();
+        conversation.appendChild(panel);
         setBusy(true);
         selection = null;
         payload = null;
         mappingPanel.hidden = true;
         refreshButton.disabled = true;
-        resultText.textContent = "";
+        clearResult();
 
         try {
             if (!ready || typeof Excel === "undefined") {
@@ -163,12 +236,13 @@
             preview.textContent = [
                 selection.headers.join(" | ")
             ].concat(
-                selection.samples.slice(0, 3).map(function (row) {
+                selection.samples.map(function (row) {
                     return row.cells.join(" | ");
                 })
             ).join("\n");
 
             mappingPanel.hidden = false;
+            selectButton.textContent = '다시 선택';
             statusText.textContent =
                 "세 열의 역할을 확인한 뒤 LLM 확인을 눌러주세요.";
 
@@ -181,7 +255,7 @@
     });
 
     analyzeButton.addEventListener("click", async function () {
-        if (!selection) {
+        if (!selection || sending || workflowBusy) {
             return;
         }
 
@@ -239,9 +313,11 @@
     });
 
     refreshButton.addEventListener("click", async function () {
-        if (!payload) {
+        if (!payload || sending || workflowBusy || refreshing) {
             return;
         }
+        refreshing = true;
+        setBusy(true);
 
         try {
             var job = await requestJson(
@@ -250,6 +326,9 @@
             renderJob(job);
         } catch (error) {
             statusText.textContent = error.message;
+        } finally {
+            refreshing = false;
+            setBusy(false);
         }
     });
 })();
