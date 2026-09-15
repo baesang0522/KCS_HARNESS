@@ -1,10 +1,13 @@
 from dataclasses import dataclass
+from collections.abc import Sequence
 
 from langgraph.graph.state import CompiledStateGraph
+from langchain_core.tools import BaseTool
 
 from agents.agent import AgentNode
 from graphs.harness_graph import build_harness_graph
 from models.llama_cpp import create_model
+from models.openai import create_model as create_openai_model
 from models.codex_adapter import CodexModel
 from prompts.loader import load_agent_prompt
 from settings import Settings, load_settings
@@ -31,7 +34,12 @@ def create_runtime() -> CustomsHarness:
         )
 
     else:
-        model = create_model(
+        model_factory = (
+            create_openai_model
+            if settings.environment == "external-sj"
+            else create_model
+        )
+        model = model_factory(
             base_url=settings.llm.base_url,
             model=settings.llm.model,
             api_key=settings.llm.api_key,
@@ -41,38 +49,28 @@ def create_runtime() -> CustomsHarness:
             max_retries=settings.llm.max_retries,
         )
 
-    chat_prompt = load_agent_prompt(PROMPT_DIR / "chat.yml")
-    chat_node = AgentNode(
-        model=model,
-        tools=[],
-        system_prompt=chat_prompt.render(),
-    )
-    chat_graph = build_harness_graph(
-        agent_node=chat_node,
-        tools=[],
+    tools = get_local_tools(
+        workspace_root=settings.workspace.root_path,
     )
 
-    inspection_prompt = load_agent_prompt(PROMPT_DIR / "inspection.yml")
-    inspection_node = AgentNode(
-        model=model,
-        tools=[],
-        system_prompt=inspection_prompt.render(),
-    )
+    def build_graph(
+        prompt_name: str,
+        tools: Sequence[BaseTool] = (),
+    ) -> CompiledStateGraph:
+        return build_harness_graph(
+            agent_node=AgentNode(
+                model=model,
+                tools=tools,
+                system_prompt=load_agent_prompt(
+                    PROMPT_DIR / prompt_name
+                ).render(),
+            ),
+            tools=tools,
+        )
 
-    inspection_graph = build_harness_graph(
-        agent_node=inspection_node,
-        tools=[],
-    )
-
-    router_prompt = load_agent_prompt(PROMPT_DIR / "request_router.yml")
-    request_router_graph = build_harness_graph(
-        agent_node=AgentNode(
-            model=model,
-            tools=[],
-            system_prompt=router_prompt.render(),
-        ),
-        tools=[]
-    )
+    chat_graph = build_graph("chat.yml")
+    inspection_graph = build_graph("inspection.yml")
+    request_router_graph = build_graph("request_router.yml")
 
     return CustomsHarness(
         settings=settings,

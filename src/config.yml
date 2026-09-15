@@ -14,6 +14,19 @@ environments:
     storage:
       provider: memory
 
+  external-sj:
+    llm:
+      provider: openai_compatible
+      base_url: "https://api.openai.com/v1"
+      model: "gpt-4o-mini"
+      api_key: "${OPENAI_API_KEY}"
+      temperature: 0.1
+      timeout_seconds: 120
+      max_tokens: 2048
+      max_retries: 2
+    storage:
+      provider: memory
+
   internal:
     llm:
       provider: openai_compatible
@@ -32,6 +45,5 @@ environments:
 mcp:
   server_url: ""
   timeout_seconds: 30
-
 
 
