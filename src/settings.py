@@ -50,7 +50,7 @@ class WorkspaceSettings(BaseModel):
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    environment: Literal["external", "internal"]
+    environment: Literal["external", "external-sj", "internal"]
     llm: LLMSettings
     storage: StorageSettings
 
@@ -62,9 +62,9 @@ class Settings(BaseModel):
 def load_settings() -> Settings:
     environment = os.environ.get("KCS_ENV", "").strip().lower()
 
-    if environment not in {"external", "internal"}:
+    if environment not in {"external", "external-sj", "internal"}:
         raise ValueError(
-            "KCS_ENV를 external 또는 internal로 지정하세요."
+            "KCS_ENV를 external, external-sj 또는 internal로 지정하세요."
         )
 
     with CONFIG_PATH.open(mode="r", encoding="utf-8") as config_file:
@@ -105,6 +105,16 @@ def load_settings() -> Settings:
     }
     merged.update(selected)
     merged["environment"] = environment
+
+    # Allow secrets and deployment-specific values to be supplied as ${ENV_VAR}.
+    llm = merged.get("llm")
+    if isinstance(llm, dict):
+        llm = dict(llm)
+        api_key = llm.get("api_key")
+        if isinstance(api_key, str) and api_key.startswith("${") and api_key.endswith("}"):
+            env_name = api_key[2:-1]
+            llm["api_key"] = os.environ.get(env_name, "")
+        merged["llm"] = llm
 
     settings = Settings.model_validate(merged)
 

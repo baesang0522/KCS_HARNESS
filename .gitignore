@@ -237,3 +237,5 @@ __pycache__
 .pytest_cache
 ./src/config.yml
 /src/config.yml
+# Local developer launch scripts may contain machine-specific paths.
+/run_external_sj.sh
