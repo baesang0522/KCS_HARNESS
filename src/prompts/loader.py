@@ -4,9 +4,6 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 
-PROMPT_PATH = Path(__file__).with_name("agent.yml")
-
-
 class AgentPrompt(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -23,7 +20,7 @@ class AgentPrompt(BaseModel):
         return "\n\n".join(part for part in prompt_parts if part)
 
 
-def load_agent_prompt(prompt_path: Path = PROMPT_PATH) -> AgentPrompt:
+def load_agent_prompt(prompt_path: Path) -> AgentPrompt:
     with prompt_path.open(mode="r", encoding="utf-8") as prompt_file:
         prompt_data = yaml.safe_load(prompt_file)
 

@@ -95,6 +95,7 @@ async def create_job(payload: CreateJobRequest, request: Request):
     if existing is not None:
         if existing.source != payload:
             raise HTTPException(status_code=409, detail="같은 작업 ID에 다른 데이터가 전달되었습니다. ")
+        return public_job(existing)
 
     if len(jobs) >= 100:
         raise HTTPException(status_code=409, detail="개발용 작업 수 제한에 도달했습니다.")

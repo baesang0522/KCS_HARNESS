@@ -11,6 +11,7 @@ class StoredTurn:
     question: str
     answer: str
     reasoning: list[str]
+    ui_action: dict | None = None
 
 
 def to_messages(turns: list[StoredTurn]) -> list[dict]:
