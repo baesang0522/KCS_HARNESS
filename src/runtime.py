@@ -39,6 +39,7 @@ def create_runtime() -> CustomsHarness:
             if settings.environment == "external-sj"
             else create_model
         )
+
         model = model_factory(
             base_url=settings.llm.base_url,
             model=settings.llm.model,
@@ -49,28 +50,38 @@ def create_runtime() -> CustomsHarness:
             max_retries=settings.llm.max_retries,
         )
 
-    tools = get_local_tools(
-        workspace_root=settings.workspace.root_path,
+    chat_prompt = load_agent_prompt(PROMPT_DIR / "chat.yml")
+    chat_node = AgentNode(
+        model=model,
+        tools=[],
+        system_prompt=chat_prompt.render(),
+    )
+    chat_graph = build_harness_graph(
+        agent_node=chat_node,
+        tools=[],
     )
 
-    def build_graph(
-        prompt_name: str,
-        tools: Sequence[BaseTool] = (),
-    ) -> CompiledStateGraph:
-        return build_harness_graph(
-            agent_node=AgentNode(
-                model=model,
-                tools=tools,
-                system_prompt=load_agent_prompt(
-                    PROMPT_DIR / prompt_name
-                ).render(),
-            ),
-            tools=tools,
-        )
+    inspection_prompt = load_agent_prompt(PROMPT_DIR / "inspection.yml")
+    inspection_node = AgentNode(
+        model=model,
+        tools=[],
+        system_prompt=inspection_prompt.render(),
+    )
 
-    chat_graph = build_graph("chat.yml")
-    inspection_graph = build_graph("inspection.yml")
-    request_router_graph = build_graph("request_router.yml")
+    inspection_graph = build_harness_graph(
+        agent_node=inspection_node,
+        tools=[],
+    )
+
+    router_prompt = load_agent_prompt(PROMPT_DIR / "request_router.yml")
+    request_router_graph = build_harness_graph(
+        agent_node=AgentNode(
+            model=model,
+            tools=[],
+            system_prompt=router_prompt.render(),
+        ),
+        tools=[]
+    )
 
     return CustomsHarness(
         settings=settings,
