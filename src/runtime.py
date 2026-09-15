@@ -5,6 +5,7 @@ from langgraph.graph.state import CompiledStateGraph
 from agents.agent import AgentNode
 from graphs.harness_graph import build_harness_graph
 from models.llama_cpp import create_model
+from models.openai import create_model as create_openai_model
 from models.codex_adapter import CodexModel
 from prompts.loader import load_agent_prompt
 from settings import Settings, load_settings
@@ -32,7 +33,12 @@ def create_runtime() -> CustomsHarness:
         )
 
     else:
-        model = create_model(
+        model_factory = (
+            create_openai_model
+            if settings.environment == "external-sj"
+            else create_model
+        )
+        model = model_factory(
             base_url=settings.llm.base_url,
             model=settings.llm.model,
             api_key=settings.llm.api_key,
