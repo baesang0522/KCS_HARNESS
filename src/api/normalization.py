@@ -7,6 +7,8 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request
 from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel, Field, model_validator
+from repositories.conversation_repository import ConversationNotFound
+from workflows.service import attach_model_job
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,7 @@ class SampleRow(BaseModel):
 
 
 class CreateJobRequest(BaseModel):
+    conversation_id: UUID
     job_id: UUID
     worksheet_id: str = Field(min_length=1, max_length=256)
     sheet_name: str = Field(min_length=1, max_length=256)
@@ -75,6 +78,7 @@ def find_job(request: Request, job_id: UUID) -> Job:
 
 def public_job(job: Job) -> dict:
     return {
+        "conversation_id": str(job.source.conversation_id),
         "job_id": str(job.source.job_id),
         "status": job.status,
         "sheet_name": job.source.sheet_name,
@@ -89,20 +93,55 @@ def public_job(job: Job) -> dict:
 @router.post("")
 async def create_job(payload: CreateJobRequest, request: Request):
     jobs = request.app.state.normalization_jobs
+    repository = request.app.state.conversations
+
+    cid = str(payload.conversation_id)
     key = str(payload.job_id)
 
-    existing = jobs.get(key)
-    if existing is not None:
-        if existing.source != payload:
-            raise HTTPException(status_code=409, detail="같은 작업 ID에 다른 데이터가 전달되었습니다. ")
-        return public_job(existing)
+    try:
+        async with repository.edit(cid) as conversation:
+            existing = jobs.get(key)
 
-    if len(jobs) >= 100:
-        raise HTTPException(status_code=409, detail="개발용 작업 수 제한에 도달했습니다.")
+            if existing is not None:
+                if existing.source != payload:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="같은 작업 ID에 다른 데이터가 전달됐습니다.",
+                    )
 
-    job = Job(source=payload)
-    jobs[key] = job
-    return public_job(job)
+                # 과거 요청 재시도가 현재 작업을 되돌리지 않게 한다.
+                return public_job(existing)
+
+            active_id = conversation.workflow.active_job_id
+            active_job = jobs.get(active_id) if active_id else None
+
+            if active_job is not None and active_job.status == "ANALYZING":
+                raise HTTPException(
+                    status_code=409,
+                    detail="현재 작업을 분석 중입니다. 완료 후 다시 선택하세요.",
+                )
+
+            if len(jobs) >= 100:
+                raise HTTPException(
+                    status_code=409,
+                    detail="개발용 작업 수 제한에 도달했습니다.",
+                )
+
+            job = Job(source=payload)
+            jobs[key] = job
+
+            attach_model_job(
+                conversation.workflow,
+                job_id=key,
+            )
+
+            return public_job(job)
+
+    except ConversationNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail="대화가 없습니다. 새 대화를 시작하세요.",
+        ) from None
 
 
 @router.get("/{job_id}")

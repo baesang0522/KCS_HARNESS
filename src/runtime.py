@@ -11,7 +11,6 @@ from models.openai import create_model as create_openai_model
 from models.codex_adapter import CodexModel
 from prompts.loader import load_agent_prompt
 from settings import Settings, load_settings
-from tools.registry import get_local_tools
 from pathlib import Path
 
 

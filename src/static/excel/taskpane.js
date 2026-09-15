@@ -101,10 +101,16 @@ async function requestJson(path, options) {
     });
 
     if (!response.ok) {
-        var detail = typeof data.detail === 'string'
-            ? data.detail
-            : '요청 실패: HTTP ' + response.status;
+        var detail = '요청 실패: HTTP ' + response.status;
 
+        if (typeof data.detail === 'string') {
+            detail = data.detail;
+        } else if (Array.isArray(data.detail)) {
+            detail += '\n' + data.detail.map(function (item) {
+                var field = (item.loc || []).join('.');
+                return field + ': ' + item.msg;
+            }).join('\n');
+        }
         var error = new Error(detail);
         error.status = response.status;
         throw error;

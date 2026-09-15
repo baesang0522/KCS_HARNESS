@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from uuid import uuid4
 
+from workflows.state import WorkFlowState
 from repositories.conversation_repository import (
     ConversationNotFound,
     StoredTurn,
@@ -14,6 +15,7 @@ from repositories.conversation_repository import (
 class MemoryConversation:
     turns: list[StoredTurn] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    workflow: WorkFlowState = field(default_factory=WorkFlowState)
 
     async def save_turn(self, turn: StoredTurn) -> None:
         self.turns.append(turn)
