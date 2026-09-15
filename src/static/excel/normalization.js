@@ -275,7 +275,12 @@
 
             // 응답 유실 후 재시도해도 같은 작업 ID를 사용한다.
             if (!payload) {
+                if (!conversationId) {
+                    throw new Error("먼저 새 대화를 시작해 주세요.");
+                }
+
                 payload = Object.assign({}, selection, {
+                    conversation_id: conversationId,
                     job_id: newRequestId(),
                     mapping: {
                         trade_name: indexes[0],

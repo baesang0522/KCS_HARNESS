@@ -8,7 +8,6 @@ from models.llama_cpp import create_model
 from models.codex_adapter import CodexModel
 from prompts.loader import load_agent_prompt
 from settings import Settings, load_settings
-from tools.registry import get_local_tools
 from pathlib import Path
 
 
@@ -41,10 +40,6 @@ def create_runtime() -> CustomsHarness:
             max_tokens=settings.llm.max_tokens,
             max_retries=settings.llm.max_retries,
         )
-
-    tools = get_local_tools(
-        workspace_root=settings.workspace.root_path,
-    )
 
     chat_prompt = load_agent_prompt(PROMPT_DIR / "chat.yml")
     chat_node = AgentNode(

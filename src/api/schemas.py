@@ -20,7 +20,7 @@ class ChatRequest(BaseModel):
 
 
 class UIAction(BaseModel):
-    text: Literal["confirm_selection"]
+    type: Literal["confirm_selection"]
     task_type: Literal[
         "model_normalization",
         "counterparty_cleanup",

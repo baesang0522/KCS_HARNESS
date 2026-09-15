@@ -12,6 +12,13 @@ from models.llama_cpp import get_reasoning_content
 from repositories.conversation_repository import (
     ConversationNotFound,
     StoredTurn,
+    to_messages,
+)
+from workflows.service import (
+    apply_request_decision,
+    workflow_snapshot,
+    build_task_context,
+    build_followup_messages,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,19 +55,15 @@ async def create_conversation(request: Request):
 async def read_conversation(conversation_id: UUID, request: Request):
     cid = str(conversation_id)
 
-    try:
-        messages = await request.app.state.conversations.list_messages(cid)
-
-    except ConversationNotFound:
-        raise HTTPException(
-            status_code=404,
-            detail="대화가 없습니다. 새 대화를 시작하세요.",
-        ) from None
-
-    return {
-        "conversation_id": cid,
-        "messages": messages,
-    }
+    async with edit_conversation(request, cid) as conversation:
+        return {
+            "conversation_id": cid,
+            "messages": to_messages(conversation.turns),
+            "workflow": workflow_snapshot(
+                conversation.workflow,
+                request.app.state.normalization_jobs,
+            ),
+        }
 
 
 async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
@@ -77,6 +80,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                     request_id=rid,
                     answer=turn.answer,
                     reasoning=turn.reasoning,
+                    ui_action=turn.ui_action,
                 )
 
         if len(conversation.turns) >= 100:
@@ -90,14 +94,19 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             messages.extend([HumanMessage(content=turn.question),
                             AIMessage(content=turn.answer)])
 
-        history_length = len(messages)
         messages.append(HumanMessage(content=payload.message))
 
         try:
+            task_context = build_task_context(
+                conversation.workflow,
+                request.app.state.normalization_jobs,
+                conversation_id=cid,
+            )
             decision = await route_request(
                 runtime=runtime,
                 messages=messages,
                 request_id=rid,
+                task_context=task_context,
             )
 
             if decision.intent in {"start_task", "clarify"}:
@@ -120,12 +129,25 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                         )
                     )
                 )
+                apply_request_decision(
+                    conversation.workflow,
+                    intent=decision.intent,
+                    task_type=decision.task_type,
+                    message=payload.message,
+                )
                 return ChatResponse(conversation_id=cid, request_id=rid, answer=decision.answer,
                                     reasoning=[], ui_action=action,)
 
+            answer_messages = messages
+            if decision.intent == "task_followup":
+                answer_messages = build_followup_messages(
+                    messages,
+                    task_context,
+                )
+
             result = await runtime.chat_graph.ainvoke(
                 {
-                    "messages": messages,
+                    "messages": answer_messages,
                     "request_id": rid,
                     "tool_history": [],
                 },
@@ -137,7 +159,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             )
 
             # 이전 답변이 아니라 이번 실행에서 생성된 답변만 확인한다.
-            generated = result["messages"][history_length:]
+            generated = result["messages"][len(answer_messages):]
 
             ai_messages = [
                 item for item in generated
