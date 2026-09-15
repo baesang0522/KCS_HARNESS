@@ -6,7 +6,8 @@ from contextlib import asynccontextmanager
 from langchain_core.messages import AIMessage, HumanMessage
 from starlette import status
 
-from api.schemas import ChatRequest, ChatResponse
+from api.schemas import ChatRequest, ChatResponse, UIAction
+from agents.request_router import route_request
 from models.llama_cpp import get_reasoning_content
 from repositories.conversation_repository import (
     ConversationNotFound,
@@ -93,7 +94,36 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
         messages.append(HumanMessage(content=payload.message))
 
         try:
-            result = await runtime.graph.ainvoke(
+            decision = await route_request(
+                runtime=runtime,
+                messages=messages,
+                request_id=rid,
+            )
+
+            if decision.intent in {"start_task", "clarify"}:
+                action = None
+
+                if decision.intent == "start_task":
+                    action = UIAction(
+                        type="confirm_selection",
+                        task_type=decision.task_type,
+                    )
+
+                await conversation.save_turn(
+                    StoredTurn(
+                        request_id=rid,
+                        question=payload.message,
+                        answer=decision.answer,
+                        reasoning=[],
+                        ui_action=(
+                            action.model_dump() if action is not None else None
+                        )
+                    )
+                )
+                return ChatResponse(conversation_id=cid, request_id=rid, answer=decision.answer,
+                                    reasoning=[], ui_action=action,)
+
+            result = await runtime.chat_graph.ainvoke(
                 {
                     "messages": messages,
                     "request_id": rid,
@@ -154,6 +184,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                 question=payload.message,
                 answer=answer,
                 reasoning=reasoning,
+                ui_action=None,
             )
         )
 
@@ -162,4 +193,5 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             request_id=rid,
             answer=answer,
             reasoning=reasoning,
+            ui_action=None,
         )

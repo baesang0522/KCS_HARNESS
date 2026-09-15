@@ -1,5 +1,5 @@
 from uuid import UUID
-
+from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -19,8 +19,18 @@ class ChatRequest(BaseModel):
         return value
 
 
+class UIAction(BaseModel):
+    text: Literal["confirm_selection"]
+    task_type: Literal[
+        "model_normalization",
+        "counterparty_cleanup",
+        "formula",
+    ]
+
+
 class ChatResponse(BaseModel):
     conversation_id: str
     request_id: str
     answer: str
     reasoning: list[str]
+    ui_action: UIAction | None = None

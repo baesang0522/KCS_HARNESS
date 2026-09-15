@@ -191,6 +191,28 @@ async function initializeConversation() {
     }
 }
 
+async function handleUIAction(action) {
+    if (!action) return;
+
+    if (action.type !== "confirm_selection") {
+        throw new Error("지원하지 않는 화면 요청입니다.");
+    }
+
+    if (action.task_type === "model_normalization") {
+        window.normalizationUI.open();
+        return;
+    }
+
+    // 다음 단계에서 작업별 공통 확인 화면으로 교체한다.
+    var name = action.task_type === "counterparty_cleanup"
+        ? "거래처 정리"
+        : "수식 제안";
+
+    notice.textContent =
+        name + " 요청으로 확인했습니다. " +
+        "이 작업의 범위 확인 화면은 다음 단계에서 연결합니다.";
+}
+
 async function sendMessage() {
     if (sending || workflowBusy) return false;
 
@@ -242,6 +264,16 @@ async function sendMessage() {
         pendingBubble = null;
         appendMessage('assistant', reply.answer);
         notice.textContent = '';
+
+        try {
+            await handleUIAction(reply.ui_action);
+        } catch (uiError) {
+            // 서버에서 성공한 요청을 다시 전송하게 만들지 않는다.
+            notice.textContent =
+                "답변은 받았지만 작업 화면을 열지 못했습니다. " +
+                uiError.message;
+        }
+
         return true;
 
     } catch (error) {
@@ -279,10 +311,7 @@ document.querySelectorAll('[data-prompt]').forEach(function (button) {
     button.addEventListener('click', async function () {
         if (sending || workflowBusy) return;
         message.value = button.getAttribute('data-prompt') || '';
-        var success = await sendMessage();
-        if (success && button.dataset.workflow === 'normalization') {
-            window.normalizationUI.open();
-        }
+        await sendMessage();
     });
 });
 document.getElementById('composer').addEventListener('submit', function (event) {
