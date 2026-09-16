@@ -204,9 +204,32 @@ async def preview_job(
     if job.status != "REVIEW_READY":
         raise ConflictError("표본 분석을 완료한 뒤 미리보기를 요청하세요.")
 
-    rows = get_sample_rows(job)
+    if job.preview is not None and job.preview.rule_set == payload:
+        return job.preview
 
-    return build_preview(
-        rows=rows,
+    job.preview = build_preview(
+        rows=get_sample_rows(job),
         rule_set=payload,
     )
+    job.approved_preview_id = None
+    return job.preview
+
+
+def approve_preview(
+    job_id: UUID,
+    preview_id: UUID,
+    jobs: dict,
+) -> NormalizationPreview:
+    job = find_job(jobs, job_id)
+
+    if (
+        job.status != "REVIEW_READY"
+        or job.preview is None
+        or job.preview.preview_id != preview_id
+    ):
+        raise ConflictError(
+            "확인한 미리보기가 현재 결과와 다릅니다. 다시 확인하세요"
+        )
+
+    job.approved_preview_id = preview_id
+    return job.preview

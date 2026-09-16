@@ -1,5 +1,5 @@
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -46,6 +46,7 @@ class PreviewRow(BaseModel):
 class NormalizationPreview(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    preview_id: UUID = Field(default_factory=uuid4)
     rule_set: RuleSet
     sample_count: int
     changed_count: int
@@ -102,6 +103,8 @@ class CreateJobRequest(BaseModel):
 
 class Job(BaseModel):
     source: CreateJobRequest
+    preview: NormalizationPreview | None = None
+    approved_preview_id: UUID | None = None
     status: Literal["CREATED", "ANALYZING", "REVIEW_READY", "FAILED"] = "CREATED"
     analysis: str = ""
     error: str = ""

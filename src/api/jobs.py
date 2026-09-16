@@ -64,3 +64,14 @@ async def preview_job(job_id: UUID, payload: RuleSet, request: Request):
     return await model_service.preview_job(
         job_id, payload, request.app.state.jobs,
     )
+
+
+@router.post("/{job_id}/previews/{preview_id}/approve", response_model=NormalizationPreview)
+async def approve_preview(
+    job_id: UUID,
+    preview_id: UUID,
+    request: Request,
+):
+    return service.approve_preview(
+        job_id, preview_id, request.app.state.normalization_jobs,
+    )
