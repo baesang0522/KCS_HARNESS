@@ -28,7 +28,7 @@ async def create_job(
     )
     return await service.create_job(
         payload, request.app.state.conversations,
-        request.app.state.normalization_jobs,
+        request.app.state.jobs,
     )
 
 
@@ -36,7 +36,7 @@ async def create_job(
 async def read_job(
     job_id: UUID, request: Request, conversation_id: UUID | None = None,
 ):
-    jobs = request.app.state.normalization_jobs
+    jobs = request.app.state.jobs
     job = jobs.get(str(job_id))
     if isinstance(job, CounterpartyJob):
         return counterparty_service.public_job(counterparty_service.find_job(
@@ -51,7 +51,7 @@ async def read_job(
 async def analyze_job(
     job_id: UUID, request: Request, conversation_id: UUID | None = None,
 ):
-    jobs = request.app.state.normalization_jobs
+    jobs = request.app.state.jobs
     if isinstance(jobs.get(str(job_id)), CounterpartyJob):
         return await counterparty_service.review_candidates(
             job_id, conversation_id, jobs, request.app.state.runtime,
@@ -62,5 +62,5 @@ async def analyze_job(
 @router.post("/{job_id}/preview", response_model=NormalizationPreview)
 async def preview_job(job_id: UUID, payload: RuleSet, request: Request):
     return await model_service.preview_job(
-        job_id, payload, request.app.state.normalization_jobs,
+        job_id, payload, request.app.state.jobs,
     )

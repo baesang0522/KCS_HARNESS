@@ -37,7 +37,7 @@ class CounterpartyContract(unittest.IsolatedAsyncioTestCase):
             counterparty_review_graph=self.review,
         )
         app.state.conversations = MemoryConversationRepository()
-        app.state.normalization_jobs = {}
+        app.state.jobs = {}
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         )

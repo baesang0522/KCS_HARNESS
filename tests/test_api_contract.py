@@ -39,7 +39,7 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
         )
         app.state.runtime = self.runtime
         app.state.conversations = MemoryConversationRepository()
-        app.state.normalization_jobs = {}
+        app.state.jobs = {}
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
         self.cid = (await self.client.post("/conversations")).json()["conversation_id"]
         self.job = {
