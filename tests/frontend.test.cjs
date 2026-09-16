@@ -76,13 +76,13 @@ test('분석 재시도는 같은 Job·입력 사용, 열 변경·새 대화는 �
     assert.equal(s.isBusy(), false);
     assert.ok(s.displays.some(x => typeof x === 'string' && x.includes('응답 유실')));
     await s.handlers.analyze();
-    const creates = s.calls.filter(x => x.url === '/normalization/jobs');
+    const creates = s.calls.filter(x => x.url === '/jobs');
     assert.equal(creates.length, 2);
     assert.equal(creates[0].options.body, creates[1].options.body);
     assert.equal(JSON.parse(creates[0].options.body).conversation_id, 'conversation-1');
     s.handlers.mappingChange();
     await s.handlers.analyze();
-    assert.equal(JSON.parse(s.calls.filter(x => x.url === '/normalization/jobs').at(-1).options.body).job_id, 'job-2');
+    assert.equal(JSON.parse(s.calls.filter(x => x.url === '/jobs').at(-1).options.body).job_id, 'job-2');
     s.controller.reset();
     const count = s.calls.length;
     await s.handlers.analyze();
@@ -114,4 +114,51 @@ test('UI·컨트롤러는 요청 구현과 전역 채팅 상태를 소유하지 
         assert.ok(html.includes('src="' + name + '"'));
         if (index) assert.ok(html.indexOf('src="' + ordered[index - 1] + '"') < html.indexOf('src="' + name + '"'));
     });
+});
+
+test('거래처 컨트롤러는 후보 생성 뒤 같은 작업으로 모델 검토한다', async () => {
+    let handlers, busy = false, calls = [];
+    const selection = {
+        headers: ['OVCS_SGN', 'OVCS_NAT_CD', 'OVCS_CONM'], row_count: 3,
+        rows: [{ cells: ['1', 'VN', 'A'] }, { cells: ['2', 'VN', 'A'] }]
+    };
+    const ui = {
+        bind(value) { handlers = value; }, open() {}, beginSelection() {},
+        showSelection() {}, setStatus() {}, setBusy() {}, reset() {},
+        getMapping() { return [0, 1, 2]; }, renderJob() {}
+    };
+    const api = {
+        newRequestId() { return 'job-1'; },
+        async requestJson(url, options) {
+            calls.push({ url, options });
+            return {
+                status: url.includes('/analyze') ? 'REVIEW_READY' : 'CANDIDATES_READY',
+                candidate_groups: [{ group_id: 'VN-1' }], final_candidates: [],
+                excluded_candidate_count: 1
+            };
+        }
+    };
+    load('counterparty.js').createCounterpartyController({
+        ui, api, excel: { async readCounterpartyRows() { return selection; } },
+        isReady: () => true, isBusy: () => busy,
+        setBusy(value) { busy = value; }, getConversationId: () => 'conversation-1'
+    });
+    await handlers.select();
+    await handlers.create();
+    await handlers.review();
+    assert.equal(calls[0].url, '/jobs');
+    const payload = JSON.parse(calls[0].options.body);
+    assert.equal(payload.job_id, 'job-1');
+    assert.equal(payload.rows.length, 2);
+    assert.match(calls[1].url, /\/jobs\/job-1\/analyze/);
+});
+
+test('거래처 화면·컨트롤러도 Excel과 HTTP 구현을 직접 소유하지 않는다', () => {
+    const ui = readFileSync(path.join(root, 'counterparty_ui.js'), 'utf8');
+    const controller = readFileSync(path.join(root, 'counterparty.js'), 'utf8');
+    assert.doesNotMatch(ui, /fetch\(|Excel\.run|requestJson\(/);
+    assert.doesNotMatch(controller, /document\.|Excel\.run|\bfetch\(/);
+    const html = readFileSync(path.join(root, 'taskpane.html'), 'utf8');
+    assert.ok(html.indexOf('src="counterparty_ui.js"') < html.indexOf('src="counterparty.js"'));
+    assert.ok(html.indexOf('src="counterparty.js"') < html.indexOf('src="taskpane.js"'));
 });

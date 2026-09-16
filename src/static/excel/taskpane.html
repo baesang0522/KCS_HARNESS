@@ -10,6 +10,8 @@
   <script defer src="excel_bridge.js"></script>
   <script defer src="normalization_ui.js"></script>
   <script defer src="normalization.js"></script>
+  <script defer src="counterparty_ui.js"></script>
+  <script defer src="counterparty.js"></script>
   <script defer src="taskpane.js"></script>
 </head>
 <body>
@@ -74,6 +76,23 @@
 
         <p id="norm-status" role="status"></p>
 
+      </section>
+      <section class="normalization-panel" id="counterparty-panel" hidden>
+        <h2>해외거래처 입력 확인</h2>
+        <p>머리글을 포함한 부호·국가·상호 세 열을 선택하세요. 같은 국가코드끼리만 그룹핑합니다.</p>
+        <button type="button" id="party-select">선택 범위 가져오기</button>
+        <div id="party-mapping" hidden>
+          <p id="party-source"></p>
+          <label>해외거래처부호 <select id="party-code"></select></label>
+          <label>국가코드 <select id="party-country"></select></label>
+          <label>상호명 <select id="party-name"></select></label>
+          <details><summary>표본 펼쳐보기</summary><pre id="party-preview"></pre></details>
+          <button type="button" id="party-create">문자열 후보 만들기</button>
+        </div>
+        <pre id="party-candidates" hidden></pre>
+        <button type="button" id="party-review" disabled>모델로 최종 후보 검토</button>
+        <button type="button" id="party-refresh" disabled>작업 상태 조회</button>
+        <p id="party-status" role="status"></p>
       </section>
     </main>
     <footer>

@@ -64,7 +64,7 @@ def job_context(job: Job) -> dict:
 
 def find_job(jobs: dict, job_id: UUID) -> Job:
     job = jobs.get(str(job_id))
-    if job is None:
+    if not isinstance(job, Job):
         raise NotFoundError("작업이 없습니다. 서버 재시작 후에는 다시 시작하세요. ")
     return job
 
@@ -110,7 +110,8 @@ async def create_job(payload: CreateJobRequest, repository, jobs: dict) -> dict:
         active_id = conversation.workflow.active_job_id
         active_job = jobs.get(active_id) if active_id else None
 
-        if active_job is not None and active_job.status == "ANALYZING":
+        if (active_job is not None
+                and active_job.status in {"ANALYZING", "REVIEWING"}):
             raise ConflictError("현재 작업을 분석 중입니다. 완료 후 다시 선택하세요.")
 
         if len(jobs) >= 100:

@@ -31,7 +31,7 @@ async def read_conversation(conversation_id: UUID, request: Request):
             "conversation_id": cid,
             "messages": to_messages(conversation.turns),
             "workflow": workflow_snapshot(
-                conversation.workflow, request.app.state.normalization_jobs,
+                conversation.workflow, request.app.state.jobs,
             ),
         }
 
@@ -41,7 +41,7 @@ async def chat(payload: ChatRequest, request: Request):
     return await process_chat(
         runtime=request.app.state.runtime,
         repository=request.app.state.conversations,
-        jobs=request.app.state.normalization_jobs,
+        jobs=request.app.state.jobs,
         conversation_id=str(payload.conversation_id),
         request_id=str(payload.request_id),
         message=payload.message,

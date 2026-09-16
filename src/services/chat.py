@@ -9,6 +9,7 @@ from repositories.conversation_repository import StoredTurn
 from services.chat_state import TaskType, WorkFlowState
 from services.errors import ConflictError, ModelProcessingError
 from services.jobs.model_normalization.service import job_context
+from services.jobs.counterparty_cleanup.service import job_context as counterparty_context
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,11 @@ def build_task_context(
     if str(job.source.conversation_id) != conversation_id:
         raise ValueError("현재 대화와 작업의 연결이 일치하지 않습니다.")
 
-    context["active_job"] = job_context(job)
+    context["active_job"] = (
+        counterparty_context(job)
+        if state.task_type == "counterparty_cleanup"
+        else job_context(job)
+    )
     return context
 
 
