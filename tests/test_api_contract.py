@@ -51,14 +51,14 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
             "samples": [{"cells": ["  AB-100   220V  ", "펌프", "원심펌프"]},
                         {"cells": ["00123", "센서", "센서"]}],
         }
-        self.path = "/normalization/jobs/" + self.job["job_id"]
+        self.path = "/jobs/" + self.job["job_id"]
         self.rules = {"rules": [{"operation": "trim"}, {"operation": "collapse_whitespace"}]}
 
     async def asyncTearDown(self):
         await self.client.aclose()
 
     async def create_job(self):
-        response = await self.client.post("/normalization/jobs", json=self.job)
+        response = await self.client.post("/jobs", json=self.job)
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
@@ -91,11 +91,11 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
         first = await self.create_job()
         self.assertEqual(await self.create_job(), first)
         other = dict(self.job, address="Sheet1!A2:C4")
-        self.assertEqual((await self.client.post("/normalization/jobs", json=other)).status_code, 409)
+        self.assertEqual((await self.client.post("/jobs", json=other)).status_code, 409)
         bad = dict(self.job, mapping={"trade_name": 0, "declared_name": 0, "model_spec": 2})
-        self.assertEqual((await self.client.post("/normalization/jobs", json=bad)).status_code, 422)
+        self.assertEqual((await self.client.post("/jobs", json=bad)).status_code, 422)
         self.assertEqual((await self.client.post(self.path + "/preview", json={"rules": [{"operation": "remove_voltage"}]})).status_code, 422)
-        self.assertEqual((await self.client.get("/normalization/jobs/" + str(uuid4()))).status_code, 404)
+        self.assertEqual((await self.client.get("/jobs/" + str(uuid4()))).status_code, 404)
         missing = await self.client.get("/conversations/" + str(uuid4()))
         self.assertEqual(missing.status_code, 404)
         self.assertEqual(missing.json()["detail"], "대화가 없습니다. 새 대화를 시작하세요.")
@@ -139,8 +139,8 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
 
     async def test_route_contract(self):
         schema = (await self.client.get("/openapi.json")).json()
-        self.assertEqual(set(schema["paths"]), {"/health", "/chat", "/conversations", "/conversations/{conversation_id}", "/normalization/jobs", "/normalization/jobs/{job_id}", "/normalization/jobs/{job_id}/analyze", "/normalization/jobs/{job_id}/preview"})
-        self.assertEqual(schema["paths"]["/normalization/jobs/{job_id}/preview"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"], "#/components/schemas/NormalizationPreview")
+        self.assertEqual(set(schema["paths"]), {"/health", "/chat", "/conversations", "/conversations/{conversation_id}", "/jobs", "/jobs/{job_id}", "/jobs/{job_id}/analyze", "/jobs/{job_id}/preview"})
+        self.assertEqual(schema["paths"]["/jobs/{job_id}/preview"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"], "#/components/schemas/NormalizationPreview")
 
 
 if __name__ == "__main__":

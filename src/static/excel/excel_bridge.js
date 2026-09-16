@@ -74,5 +74,54 @@
         });
     }
 
-    window.excelBridge = { readNormalizationSample: readNormalizationSample };
+    async function readCounterpartyRows() {
+        if (typeof Excel === "undefined" || typeof Office === "undefined") {
+            throw new Error("엑셀 안에서 추가 기능을 열어주세요.");
+        }
+        if (!Office.context.requirements.isSetSupported("ExcelApi", "1.1")) {
+            throw new Error("ExcelApi 1.1 지원이 필요합니다.");
+        }
+        return await Excel.run(async function (context) {
+            var range = context.workbook.getSelectedRange();
+            var sheet = range.worksheet;
+            range.load("address,rowCount,columnCount,rowIndex,columnIndex");
+            sheet.load("id,name");
+            await context.sync();
+            if (range.columnCount !== 3) {
+                throw new Error("머리글을 포함한 서로 붙어 있는 세 열을 선택하세요.");
+            }
+            if (range.rowCount < 2) {
+                throw new Error("머리글과 데이터 한 행 이상을 선택하세요.");
+            }
+            var rows = [];
+            // 청크 크기는 총행 수 제한이 아니다.
+            for (var offset = 0; offset < range.rowCount; offset += 1000) {
+                var size = Math.min(1000, range.rowCount - offset);
+                var data = range.getCell(offset, 0).getResizedRange(size - 1, 2);
+                data.load("text");
+                await context.sync();
+                if (data.text.some(function (row) {
+                    return row.some(function (cell) { return cell.length > 1000; });
+                })) {
+                    throw new Error("선택한 데이터에 1,000자를 넘는 셀이 있습니다.");
+                }
+                rows.push.apply(rows, data.text);
+            }
+            return {
+                worksheet_id: sheet.id,
+                sheet_name: sheet.name,
+                address: range.address,
+                row_start: range.rowIndex,
+                column_start: range.columnIndex,
+                row_count: range.rowCount,
+                headers: rows[0],
+                rows: rows.slice(1).map(function (row) { return { cells: row }; })
+            };
+        });
+    }
+
+    window.excelBridge = {
+        readNormalizationSample: readNormalizationSample,
+        readCounterpartyRows: readCounterpartyRows
+    };
 })();
