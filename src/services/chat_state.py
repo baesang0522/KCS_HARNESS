@@ -20,6 +20,3 @@ class WorkFlowState:
         "WAITING_SELECTION",
         "JOB_ATTACHED",
     ] = "IDLE"
-
-
-

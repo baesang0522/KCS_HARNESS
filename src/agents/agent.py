@@ -4,7 +4,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
 from langchain_core.tools import BaseTool
 
-from agents.agent_state import AgentState
+from graphs.state import AgentState
 from models.codex_adapter import CodexModel
 
 

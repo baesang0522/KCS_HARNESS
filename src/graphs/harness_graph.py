@@ -5,7 +5,7 @@ from langgraph.constants import START, END
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from agents.agent_state import AgentState, ToolHistoryEntry
+from graphs.state import AgentState
 from agents.agent import AgentNode
 
 
