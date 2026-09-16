@@ -1,0 +1,78 @@
+"use strict";
+
+(function () {
+    // 모델규격 정제용 3열 표본. UI와 서버 요청은 호출자가 담당한다.
+    async function readNormalizationSample() {
+        if (typeof Excel === "undefined" || typeof Office === "undefined") {
+            throw new Error("엑셀 안에서 추가 기능을 열어주세요.");
+        }
+
+        if (!Office.context.requirements.isSetSupported(
+            "ExcelApi", "1.1"
+        )) {
+            throw new Error("ExcelApi 1.1 지원이 필요합니다.");
+        }
+
+        return await Excel.run(async function (context) {
+            var range = context.workbook.getSelectedRange();
+            var sheet = range.worksheet;
+
+            // 전체 셀 내용은 로드하지 않는다.
+            range.load(
+                "address,rowCount,columnCount,rowIndex,columnIndex"
+            );
+            sheet.load("id,name");
+
+            await context.sync();
+
+            if (range.columnCount !== 3) {
+                throw new Error(
+                    "서로 붙어 있는 세 열을 선택하세요."
+                );
+            }
+
+            if (range.rowCount < 2 || range.rowCount > 400001) {
+                throw new Error(
+                    "머리글과 데이터 1~400,000행을 선택하세요. " +
+                    "열 전체 선택은 지원하지 않습니다."
+                );
+            }
+
+            // 머리글 1행 + 데이터 최대 20행만 읽는다.
+            var count = Math.min(range.rowCount, 21);
+            var sampleRange = range.getCell(0, 0)
+                .getResizedRange(count - 1, 2);
+
+            sampleRange.load("text");
+            await context.sync();
+
+            var rows = sampleRange.text;
+
+            if (rows.some(function (row) {
+                return row.some(function (cell) {
+                    return cell.length > 1000;
+                });
+            })) {
+                throw new Error(
+                    "표본에 1,000자를 넘는 셀이 있습니다. " +
+                    "선택한 열이 맞는지 확인하세요."
+                );
+            }
+
+            return {
+                worksheet_id: sheet.id,
+                sheet_name: sheet.name,
+                address: range.address,
+                row_start: range.rowIndex,
+                column_start: range.columnIndex,
+                row_count: range.rowCount,
+                headers: rows[0],
+                samples: rows.slice(1).map(function (row) {
+                    return { cells: row };
+                })
+            };
+        });
+    }
+
+    window.excelBridge = { readNormalizationSample: readNormalizationSample };
+})();
