@@ -2,10 +2,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Request
 
+from services.errors import ConflictError
 from services.jobs.counterparty_cleanup import service as counterparty_service
 from services.jobs.counterparty_cleanup.schemas import (
+    CounterpartyPreview,
     CreateJobRequest as CounterpartyCreateJobRequest,
     Job as CounterpartyJob,
+    PreviewRequest as CounterpartyPreviewRequest,
 )
 from services.jobs.model_normalization import service as model_service
 from services.jobs.model_normalization.schemas import (
@@ -59,19 +62,39 @@ async def analyze_job(
     return await model_service.analyze_job(job_id, jobs, request.app.state.runtime)
 
 
-@router.post("/{job_id}/preview", response_model=NormalizationPreview)
-async def preview_job(job_id: UUID, payload: RuleSet, request: Request):
+@router.post(
+    "/{job_id}/preview",
+    response_model=NormalizationPreview | CounterpartyPreview,
+)
+async def preview_job(
+    job_id: UUID,
+    payload: RuleSet | CounterpartyPreviewRequest,
+    request: Request,
+):
+    jobs = request.app.state.jobs
+    if isinstance(jobs.get(str(job_id)), CounterpartyJob):
+        if not isinstance(payload, CounterpartyPreviewRequest):
+            raise ConflictError("해외거래처 승인 내용을 다시 확인하세요.")
+        return await counterparty_service.preview_job(job_id, payload, jobs)
+    if not isinstance(payload, RuleSet):
+        raise ConflictError("모델규격 정제 규칙을 다시 확인하세요.")
     return await model_service.preview_job(
-        job_id, payload, request.app.state.jobs,
+        job_id, payload, jobs,
     )
 
 
-@router.post("/{job_id}/previews/{preview_id}/approve", response_model=NormalizationPreview)
+@router.post(
+    "/{job_id}/previews/{preview_id}/approve",
+    response_model=NormalizationPreview | CounterpartyPreview,
+)
 async def approve_preview(
     job_id: UUID,
     preview_id: UUID,
     request: Request,
 ):
+    jobs = request.app.state.jobs
+    if isinstance(jobs.get(str(job_id)), CounterpartyJob):
+        return counterparty_service.approve_preview(job_id, preview_id, jobs)
     return model_service.approve_preview(
-        job_id, preview_id, request.app.state.jobs,
+        job_id, preview_id, jobs,
     )

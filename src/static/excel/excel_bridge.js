@@ -208,10 +208,68 @@
         });
     }
 
+    async function writeCounterpartyPreview(preview) {
+        if (typeof Excel === "undefined" || typeof Office === "undefined") {
+            throw new Error("엑셀 안에서 추가 기능을 열어주세요.");
+        }
+        if (!Office.context.requirements.isSetSupported("ExcelApi", "1.1")) {
+            throw new Error("ExcelApi 1.1 지원이 필요합니다.");
+        }
+        if (!preview.rows.length) {
+            throw new Error("승인한 후보가 없습니다.");
+        }
+
+        var sheetName = "거래처_" +
+            preview.preview_id.replace(/-/g, "").slice(0, 24);
+        return await Excel.run(async function (context) {
+            var sheets = context.workbook.worksheets;
+            sheets.load("items/name");
+            await context.sync();
+            if (sheets.items.some(function (sheet) { return sheet.name === sheetName; })) {
+                throw new Error(sheetName + " 시트가 이미 있습니다. 이전 출력 결과를 확인하세요.");
+            }
+
+            var values = [[
+                "원본 행 번호", "국가코드", "상호명", "기존 해외거래처부호",
+                "대표 해외거래처부호", "변경 여부", "후보 그룹"
+            ]].concat(preview.rows.map(function (row) {
+                return [
+                    row.excel_row, row.country_code, row.company_name,
+                    row.original_party_code, row.representative_party_code,
+                    row.changed ? "변경" : "유지", row.group_id
+                ];
+            }));
+            var sheet = sheets.add(sheetName);
+            var range = sheet.getRange("A1:G" + values.length);
+            range.numberFormat = values.map(function () {
+                return ["@", "@", "@", "@", "@", "@", "@"];
+            });
+            await context.sync();
+            range.values = values.map(function (row) {
+                return row.map(function (value) {
+                    return typeof value === "string" && value !== "" ? "'" + value : value;
+                });
+            });
+            sheet.getRange("A1:G1").format.font.bold = true;
+            preview.rows.forEach(function (row, index) {
+                if (row.changed) {
+                    sheet.getRange("A" + (index + 2) + ":G" + (index + 2))
+                        .format.fill.color = "#FFF2CC";
+                }
+            });
+            range.format.columnWidth = 130;
+            range.format.wrapText = true;
+            sheet.activate();
+            await context.sync();
+            return {sheet_name: sheetName, row_count: preview.rows.length};
+        });
+    }
+
 
     window.excelBridge = {
         readNormalizationSample: readNormalizationSample,
         writeNormalizationSample: writeNormalizationSample,
-        readCounterpartyRows: readCounterpartyRows
+        readCounterpartyRows: readCounterpartyRows,
+        writeCounterpartyPreview: writeCounterpartyPreview
     };
 })();

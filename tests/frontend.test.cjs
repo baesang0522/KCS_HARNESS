@@ -116,7 +116,7 @@ test('UI·컨트롤러는 요청 구현과 전역 채팅 상태를 소유하지 
     });
 });
 
-test('거래처 컨트롤러는 후보 생성 뒤 같은 작업으로 모델 검토한다', async () => {
+test('거래처 컨트롤러는 후보 검토·승인 미리보기 뒤 같은 작업을 새 시트에 쓴다', async () => {
     let handlers, busy = false, calls = [];
     const selection = {
         headers: ['OVCS_SGN', 'OVCS_NAT_CD', 'OVCS_CONM'], row_count: 3,
@@ -125,32 +125,48 @@ test('거래처 컨트롤러는 후보 생성 뒤 같은 작업으로 모델 검
     const ui = {
         bind(value) { handlers = value; }, open() {}, beginSelection() {},
         showSelection() {}, setStatus() {}, setBusy() {}, reset() {},
-        getMapping() { return [0, 1, 2]; }, renderJob() {}
+        clearApprovalPreview() {}, showApprovalPreview() {}, setExported() {},
+        getMapping() { return [0, 1, 2]; }, renderJob() {},
+        getDecisions() { return [{group_id: 'VN-1', decision: 'APPROVE', representative_party_code: '1'}]; }
     };
     const api = {
         newRequestId() { return 'job-1'; },
         async requestJson(url, options) {
             calls.push({ url, options });
-            return {
-                status: url.includes('/analyze') ? 'REVIEW_READY' : 'CANDIDATES_READY',
-                candidate_groups: [{ group_id: 'VN-1' }], final_candidates: [],
-                excluded_candidate_count: 1
+            if (url.endsWith('/preview')) return {
+                preview_id: 'preview-1', row_count: 2, rows: [{excel_row: 2}]
             };
+            if (url.includes('/previews/')) return {
+                preview_id: 'preview-1', row_count: 2, rows: [{excel_row: 2}]
+            };
+            const reviewed = url.includes('/analyze');
+            return {status: reviewed ? 'REVIEW_READY' : 'CANDIDATES_READY',
+                candidate_groups: [{group_id: 'VN-1'}],
+                final_candidates: reviewed ? [{group_id: 'VN-1'}] : [], excluded_candidate_count: 0};
         }
     };
+    let written = null;
     load('counterparty.js').createCounterpartyController({
-        ui, api, excel: { async readCounterpartyRows() { return selection; } },
+        ui, api, excel: {
+            async readCounterpartyRows() { return selection; },
+            async writeCounterpartyPreview(value) { written = value; return {sheet_name: '거래처_1', row_count: 2}; }
+        },
         isReady: () => true, isBusy: () => busy,
         setBusy(value) { busy = value; }, getConversationId: () => 'conversation-1'
     });
     await handlers.select();
     await handlers.create();
     await handlers.review();
+    await handlers.preview();
+    await handlers.export();
     assert.equal(calls[0].url, '/jobs');
     const payload = JSON.parse(calls[0].options.body);
     assert.equal(payload.job_id, 'job-1');
     assert.equal(payload.rows.length, 2);
     assert.match(calls[1].url, /\/jobs\/job-1\/analyze/);
+    assert.equal(calls[2].url, '/jobs/job-1/preview');
+    assert.match(calls[3].url, /\/previews\/preview-1\/approve/);
+    assert.equal(written.preview_id, 'preview-1');
 });
 
 test('거래처 화면·컨트롤러도 Excel과 HTTP 구현을 직접 소유하지 않는다', () => {

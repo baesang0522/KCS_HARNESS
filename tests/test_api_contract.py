@@ -145,7 +145,11 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
     async def test_route_contract(self):
         schema = (await self.client.get("/openapi.json")).json()
         self.assertEqual(set(schema["paths"]), {"/health", "/chat", "/conversations", "/conversations/{conversation_id}", "/jobs", "/jobs/{job_id}", "/jobs/{job_id}/analyze", "/jobs/{job_id}/preview", "/jobs/{job_id}/previews/{preview_id}/approve"})
-        self.assertEqual(schema["paths"]["/jobs/{job_id}/preview"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"], "#/components/schemas/NormalizationPreview")
+        response_schema = schema["paths"]["/jobs/{job_id}/preview"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+        self.assertEqual(
+            {item["$ref"] for item in response_schema["anyOf"]},
+            {"#/components/schemas/NormalizationPreview", "#/components/schemas/CounterpartyPreview"},
+        )
 
 
 if __name__ == "__main__":

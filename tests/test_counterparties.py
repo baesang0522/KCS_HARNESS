@@ -85,6 +85,28 @@ class CounterpartyContract(unittest.IsolatedAsyncioTestCase):
         await self.client.post(path + "/analyze", params={"conversation_id": self.cid})
         self.assertEqual(len(self.review.calls), 1)
 
+        group = result["final_candidates"][0]
+        preview = await self.client.post(path + "/preview", json={"decisions": [{
+            "group_id": group["group_id"], "decision": "APPROVE",
+            "representative_party_code": "VN-1",
+        }]})
+        self.assertEqual(preview.status_code, 200, preview.text)
+        preview = preview.json()
+        self.assertEqual(preview["approved_group_count"], 1)
+        self.assertEqual(preview["row_count"], 2)
+        self.assertEqual(preview["changed_count"], 1)
+        self.assertEqual(preview["rows"][1]["representative_party_code"], "VN-1")
+        approved = await self.client.post(
+            path + "/previews/" + preview["preview_id"] + "/approve"
+        )
+        self.assertEqual(approved.status_code, 200, approved.text)
+
+        invalid = await self.client.post(path + "/preview", json={"decisions": [{
+            "group_id": group["group_id"], "decision": "APPROVE",
+            "representative_party_code": "UNKNOWN",
+        }]})
+        self.assertEqual(invalid.status_code, 409)
+
     async def test_no_total_row_cap_and_changed_model_ids_fail(self):
         rows = [["SAME COMPANY", "ONE", "VN"] for _ in range(1001)]
         payload = self.payload(rows)

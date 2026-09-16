@@ -1,5 +1,5 @@
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -71,6 +71,50 @@ class ReviewResult(ModelReview):
     similarity: float | None = None
 
 
+class CandidateDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    group_id: str = Field(min_length=1, max_length=100)
+    decision: Literal["APPROVE", "EXCLUDE"]
+    representative_party_code: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def representative_required(self):
+        if self.decision == "APPROVE" and not (
+            self.representative_party_code or ""
+        ).strip():
+            raise ValueError("승인 후보의 대표 해외거래처부호를 선택하세요.")
+        if self.decision == "EXCLUDE" and self.representative_party_code is not None:
+            raise ValueError("제외 후보에는 대표 해외거래처부호를 지정할 수 없습니다.")
+        return self
+
+
+class PreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    decisions: tuple[CandidateDecision, ...]
+
+
+class PreviewRow(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    group_id: str
+    excel_row: int = Field(ge=1)
+    country_code: str
+    company_name: str
+    original_party_code: str
+    representative_party_code: str
+    changed: bool
+
+
+class CounterpartyPreview(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    preview_id: UUID = Field(default_factory=uuid4)
+    decisions: tuple[CandidateDecision, ...]
+    approved_group_count: int
+    excluded_group_count: int
+    row_count: int
+    changed_count: int
+    rows: tuple[PreviewRow, ...]
+
+
 class Job(BaseModel):
     task_type: Literal["counterparty_cleanup"] = "counterparty_cleanup"
     status: Literal[
@@ -79,4 +123,6 @@ class Job(BaseModel):
     source: CreateJobRequest
     same_country_only: Literal[True] = True
     review_results: list[ReviewResult] = Field(default_factory=list)
+    preview: CounterpartyPreview | None = None
+    approved_preview_id: UUID | None = None
     error: str = ""

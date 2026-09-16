@@ -12,7 +12,8 @@ from services.jobs.counterparty_cleanup.rule_engine import (
     SIMILARITY_THRESHOLD, candidate_groups, model_review_input,
 )
 from services.jobs.counterparty_cleanup.schemas import (
-    CreateJobRequest, Job, ModelReviewResponse, ReviewResult,
+    CounterpartyPreview, CreateJobRequest, Job, ModelReviewResponse,
+    PreviewRequest, PreviewRow, ReviewResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,10 @@ def public_job(job: Job) -> dict:
         "review_results": reviews,
         "final_candidates": final,
         "excluded_candidate_count": len(reviews) - len(final),
+        "preview_id": str(job.preview.preview_id) if job.preview else None,
+        "approved_preview_id": (
+            str(job.approved_preview_id) if job.approved_preview_id else None
+        ),
         "error": job.error,
     }
 
@@ -172,3 +177,76 @@ async def review_candidates(
         job.status = "REVIEW_FAILED"
         job.error = "모델 검토에 실패했습니다. 다시 시도하거나 서버 로그를 확인하세요."
     return public_job(job)
+
+
+async def preview_job(
+    job_id: UUID, payload: PreviewRequest, jobs: dict,
+) -> CounterpartyPreview:
+    job = find_job(jobs, job_id)
+    if job.status != "REVIEW_READY":
+        raise ConflictError("모델 검토를 완료한 뒤 승인 내용을 미리보세요.")
+
+    candidates = {
+        result.group_id: result for result in job.review_results
+        if result.decision != "LIKELY_DIFFERENT"
+    }
+    decisions = {item.group_id: item for item in payload.decisions}
+    if len(decisions) != len(payload.decisions) or set(decisions) != set(candidates):
+        raise ConflictError("현재 최종 후보 전체를 승인 또는 제외로 확인하세요.")
+
+    rows: dict[int, PreviewRow] = {}
+    for group_id, decision in decisions.items():
+        if decision.decision == "EXCLUDE":
+            continue
+        candidate = candidates[group_id]
+        representative = decision.representative_party_code.strip()
+        if representative not in candidate.existing_party_codes:
+            raise ConflictError("대표 해외거래처부호는 후보의 기존 부호 중에서 선택하세요.")
+        for row in candidate.rows:
+            existing = rows.get(row["excel_row"])
+            if existing and existing.representative_party_code != representative:
+                raise ConflictError(
+                    f"{row['excel_row']}행이 서로 다른 대표 부호로 중복 승인됐습니다."
+                )
+            if existing:
+                continue
+            rows[row["excel_row"]] = PreviewRow(
+                group_id=group_id,
+                excel_row=row["excel_row"],
+                country_code=candidate.country_code,
+                company_name=row["company_name"],
+                original_party_code=row["party_code"],
+                representative_party_code=representative,
+                changed=row["party_code"].strip() != representative,
+            )
+
+    ordered = tuple(rows[key] for key in sorted(rows))
+    preview = CounterpartyPreview(
+        decisions=payload.decisions,
+        approved_group_count=sum(
+            item.decision == "APPROVE" for item in payload.decisions
+        ),
+        excluded_group_count=sum(
+            item.decision == "EXCLUDE" for item in payload.decisions
+        ),
+        row_count=len(ordered),
+        changed_count=sum(row.changed for row in ordered),
+        rows=ordered,
+    )
+    job.preview = preview
+    job.approved_preview_id = None
+    return preview
+
+
+def approve_preview(
+    job_id: UUID, preview_id: UUID, jobs: dict,
+) -> CounterpartyPreview:
+    job = find_job(jobs, job_id)
+    if (
+        job.status != "REVIEW_READY"
+        or job.preview is None
+        or job.preview.preview_id != preview_id
+    ):
+        raise ConflictError("확인한 미리보기가 현재 결과와 다릅니다. 다시 확인하세요.")
+    job.approved_preview_id = preview_id
+    return job.preview
