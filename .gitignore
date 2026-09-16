@@ -239,3 +239,4 @@ __pycache__
 /src/config.yml
 # Local developer launch scripts may contain machine-specific paths.
 /run_external_sj.sh
+/data/

@@ -4,6 +4,7 @@
     // 채팅 입력·대화 세션과 작업 화면을 연결한다.
     var api = window.apiClient;
     var normalization = null;
+    var counterparty = null;
     var connection = document.getElementById('connection');
     var message = document.getElementById('message');
     var notice = document.getElementById('notice');
@@ -76,6 +77,7 @@
             button.disabled = value;
         });
         if (normalization) normalization.setBusy(value);
+        if (counterparty) counterparty.setBusy(value);
     }
 
     async function createConversation() {
@@ -90,6 +92,7 @@
 
     function renderMessages(messages) {
         normalization.reset();
+        counterparty.reset();
         pendingBubble = null;
         conversation.textContent = '';
         welcome.hidden = messages.length > 0;
@@ -165,6 +168,11 @@
 
         if (action.task_type === "model_normalization") {
             normalization.open();
+            return;
+        }
+
+        if (action.task_type === "counterparty_cleanup") {
+            counterparty.openAndSelect();
             return;
         }
 
@@ -294,6 +302,20 @@
 
     normalization = window.createNormalizationController({
         ui: window.createNormalizationUI({
+            conversation: conversation,
+            scrollArea: scrollArea,
+            enterConversation: enterConversation,
+            appendMessage: appendMessage
+        }),
+        api: api,
+        excel: window.excelBridge,
+        isReady: function () { return ready; },
+        isBusy: function () { return sending; },
+        setBusy: setBusy,
+        getConversationId: function () { return conversationId; }
+    });
+    counterparty = window.createCounterpartyController({
+        ui: window.createCounterpartyUI({
             conversation: conversation,
             scrollArea: scrollArea,
             enterConversation: enterConversation,

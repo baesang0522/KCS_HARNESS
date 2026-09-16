@@ -27,7 +27,7 @@ function setup(options = {}) {
                 getResizedRange(rows, columns) {
                     calls.push(['resize', rows, columns]);
                     return {
-                        text: cells.slice(0, rows + 1),
+                        text: cells.slice(row, row + rows + 1),
                         load(fields) { assert.equal(fields, 'text'); },
                     };
                 },
@@ -54,7 +54,11 @@ function setup(options = {}) {
         };
     }
     vm.runInNewContext(source, sandbox);
-    return { read: sandbox.window.excelBridge.readNormalizationSample, calls };
+    return {
+        read: sandbox.window.excelBridge.readNormalizationSample,
+        readCounterpartyRows: sandbox.window.excelBridge.readCounterpartyRows,
+        calls
+    };
 }
 
 test('범위 위치·머리글·셀 문자열을 보존한다', async () => {
@@ -79,6 +83,17 @@ test('40만 행도 머리글과 앞부분 20행만 읽는다', async () => {
     assert.equal(result.samples.length, 20);
     assert.equal(result.samples[0].cells[2], '00123');
     assert.deepEqual(calls.filter(call => call[0] === 'resize'), [['resize', 20, 2]]);
+});
+
+test('거래처 데이터는 총행 제한 없이 1,000행씩 전부 읽는다', async () => {
+    const cells = Array.from({ length: 2002 }, (_, index) =>
+        index ? ['VN-' + index, 'VN', 'COMPANY ' + index] : ['OVCS_SGN', 'OVCS_NAT_CD', 'OVCS_CONM']);
+    const { readCounterpartyRows, calls } = setup({ rowCount: cells.length, cells });
+    const result = await readCounterpartyRows();
+    assert.equal(result.rows.length, 2001);
+    assert.equal(result.rows[2000].cells[2], 'COMPANY 2001');
+    assert.deepEqual(calls.filter(call => call[0] === 'resize'),
+        [['resize', 999, 2], ['resize', 999, 2], ['resize', 1, 2]]);
 });
 
 test('호스트·API·선택 크기·셀 길이 오류를 거절한다', async () => {

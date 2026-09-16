@@ -133,4 +133,8 @@ button:disabled{cursor:default;opacity:.5}
 #norm-samples{margin:12px 0;font-size:12px;color:#70677f}
 #norm-preview{background:#faf9fc;border-radius:7px;padding:10px;max-height:180px}
 #norm-status:empty{display:none}.range-summary p{font-size:11px}
+#party-preview{background:#faf9fc;border-radius:7px;padding:10px;max-height:180px}
+#party-candidates{white-space:pre-wrap;background:#fff8e1;border-radius:7px;padding:10px;max-height:300px;overflow:auto}
+#party-review{background:#75609d;color:white;border-color:#75609d}
+#party-status{white-space:pre-line}
 @media(max-width:340px){.composer-bottom>span{display:none}.composer-bottom .send{margin-left:auto}}

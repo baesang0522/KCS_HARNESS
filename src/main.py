@@ -36,7 +36,7 @@ async def lifespan(app: FastAPI):
 
     app.state.runtime = runtime
     app.state.conversations = repository
-    app.state.normalization_jobs = {}
+    app.state.jobs = {}
 
     yield
 

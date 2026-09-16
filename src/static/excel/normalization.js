@@ -53,7 +53,7 @@
                     });
                 }
                 ui.setStatus("작업 생성 중…");
-                var job = await api.requestJson("/normalization/jobs", {
+                var job = await api.requestJson("/jobs", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(payload)
@@ -61,7 +61,7 @@
                 ui.renderJob(job);
                 ui.setStatus("LLM이 표본을 확인하고 있습니다…");
                 job = await api.requestJson(
-                    "/normalization/jobs/" + payload.job_id + "/analyze",
+                    "/jobs/" + payload.job_id + "/analyze",
                     { method: "POST" }
                 );
                 ui.renderJob(job);
@@ -76,7 +76,7 @@
             if (!payload || options.isBusy()) return;
             options.setBusy(true);
             try {
-                var job = await api.requestJson("/normalization/jobs/" + payload.job_id);
+                var job = await api.requestJson("/jobs/" + payload.job_id);
                 ui.renderJob(job);
             } catch (error) {
                 ui.setStatus(error.message);
