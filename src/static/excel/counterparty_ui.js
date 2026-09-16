@@ -55,12 +55,12 @@
             mapping.hidden = false;
             status.textContent = "부호·국가·상호 열을 확인하세요.";
         }
-        function format(group, reviewed) {
+        function format(group, reviewed, index) {
             var decision = {
                 SAME_HIGH_CONFIDENCE: "동일 가능성 높음",
                 NEEDS_REVIEW: "추가 확인 필요"
             }[group.decision];
-            return "[" + group.group_id + "] 국가 " + group.country_code +
+            return "후보 " + (index + 1) + " · [" + group.group_id + "]\n국가 " + group.country_code +
                 " · 기존 부호 " + group.existing_party_codes.join(", ") + "\n" +
                 group.rows.map(function (row) {
                     return row.excel_row + "행 · " + row.party_code + " · " + row.company_name;
@@ -70,16 +70,23 @@
         function renderJob(job) {
             var reviewed = job.status === "REVIEW_READY";
             var groups = reviewed ? job.final_candidates : job.candidate_groups;
+            var title = reviewed ? "최종 검토 후보" : "문자열 검토 후보";
             candidates.textContent = groups.length
-                ? groups.map(function (group) { return format(group, reviewed); }).join("\n\n")
+                ? title + " " + groups.length + "건\n\n" + groups.map(function (group, index) {
+                    return format(group, reviewed, index);
+                }).join("\n\n────────────────────\n\n")
                 : (reviewed ? "사람이 확인할 최종 후보가 없습니다." : "현재 조건에 맞는 후보가 없습니다.");
             candidates.hidden = false;
             reviewButton.disabled = reviewed || !job.candidate_groups.length;
             refreshButton.disabled = false;
             status.textContent = job.error || (reviewed
                 ? "모델 검토 완료 · 최종 후보 " + job.final_candidates.length +
-                    "건 · 제외 " + job.excluded_candidate_count + "건\n승인과 부호 반영은 아직 하지 않았습니다."
+                    "건 · 제외 " + job.excluded_candidate_count +
+                    "건\n후보 목록에서 상호와 판단 근거를 확인하세요.\n승인과 부호 반영은 아직 하지 않았습니다."
                 : "후보 " + job.candidate_groups.length + "건 · 같은 국가끼리만 비교했습니다.");
+            if (reviewed && groups.length) {
+                candidates.scrollIntoView({block: "start"});
+            }
         }
         return {
             open: open, reset: reset, beginSelection: beginSelection,
