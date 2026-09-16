@@ -72,6 +72,6 @@ async def approve_preview(
     preview_id: UUID,
     request: Request,
 ):
-    return service.approve_preview(
-        job_id, preview_id, request.app.state.normalization_jobs,
+    return model_service.approve_preview(
+        job_id, preview_id, request.app.state.jobs,
     )

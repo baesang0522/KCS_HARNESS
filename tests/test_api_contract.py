@@ -79,6 +79,11 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(preview["rows"][1]["normalized_model_spec"], "00123")
         self.assertEqual(preview["rows"][0]["original_model_spec"], "  AB-100   220V  ")
         self.assertEqual(preview["rows"][0]["applied_operations"], ["trim", "collapse_whitespace"])
+        approved = await self.client.post(
+            self.path + "/previews/" + preview["preview_id"] + "/approve"
+        )
+        self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertEqual(approved.json()["preview_id"], preview["preview_id"])
         conv = (await self.client.get("/conversations/" + self.cid)).json()
         self.assertEqual(conv["workflow"]["active_job_id"], self.job["job_id"])
         self.runtime.request_router_graph.content = json.dumps({"intent": "task_followup", "task_type": None, "answer": "후속"})
@@ -139,7 +144,7 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
 
     async def test_route_contract(self):
         schema = (await self.client.get("/openapi.json")).json()
-        self.assertEqual(set(schema["paths"]), {"/health", "/chat", "/conversations", "/conversations/{conversation_id}", "/jobs", "/jobs/{job_id}", "/jobs/{job_id}/analyze", "/jobs/{job_id}/preview"})
+        self.assertEqual(set(schema["paths"]), {"/health", "/chat", "/conversations", "/conversations/{conversation_id}", "/jobs", "/jobs/{job_id}", "/jobs/{job_id}/analyze", "/jobs/{job_id}/preview", "/jobs/{job_id}/previews/{preview_id}/approve"})
         self.assertEqual(schema["paths"]["/jobs/{job_id}/preview"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"], "#/components/schemas/NormalizationPreview")
 
 
