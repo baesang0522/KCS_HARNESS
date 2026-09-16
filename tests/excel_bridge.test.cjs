@@ -61,6 +61,32 @@ function setup(options = {}) {
     };
 }
 
+function setupWriter() {
+    let values, addedName;
+    const outputRange = {format: {font: {}, fill: {}}, set numberFormat(value) {},
+        set values(value) { values = value; }};
+    outputRange.format = {font: {}, fill: {}};
+    const sheet = {
+        getRange() { return outputRange; }, activate() {},
+    };
+    const sheets = {
+        items: [], load() {},
+        add(name) { addedName = name; return sheet; },
+    };
+    const sandbox = {
+        window: {},
+        Office: {context: {requirements: {isSetSupported: () => true}}},
+        Excel: {run: async callback => callback({
+            workbook: {worksheets: sheets}, async sync() {}
+        })},
+    };
+    vm.runInNewContext(source, sandbox);
+    return {
+        write: sandbox.window.excelBridge.writeCounterpartyPreview,
+        result: () => ({values, addedName}),
+    };
+}
+
 test('범위 위치·머리글·셀 문자열을 보존한다', async () => {
     const { read, calls } = setup();
     const result = JSON.parse(JSON.stringify(await read()));
@@ -94,6 +120,23 @@ test('거래처 데이터는 총행 제한 없이 1,000행씩 전부 읽는다',
     assert.equal(result.rows[2000].cells[2], 'COMPANY 2001');
     assert.deepEqual(calls.filter(call => call[0] === 'resize'),
         [['resize', 999, 2], ['resize', 999, 2], ['resize', 1, 2]]);
+});
+
+test('승인한 거래처 부호를 원본 위치와 함께 새 시트에 쓴다', async () => {
+    const writer = setupWriter();
+    const result = await writer.write({
+        preview_id: '12345678-1234-1234-1234-123456789012',
+        rows: [{
+            excel_row: 7, country_code: 'VN', company_name: 'MINH HOANG CO LTD',
+            original_party_code: 'VN-2', representative_party_code: 'VN-1',
+            changed: true, group_id: 'VN-0001',
+        }],
+    });
+    assert.equal(result.row_count, 1);
+    assert.match(writer.result().addedName, /^거래처_/);
+    assert.deepEqual(JSON.parse(JSON.stringify(writer.result().values[1])), [
+        7, "'VN", "'MINH HOANG CO LTD", "'VN-2", "'VN-1", "'변경", "'VN-0001"
+    ]);
 });
 
 test('호스트·API·선택 크기·셀 길이 오류를 거절한다', async () => {

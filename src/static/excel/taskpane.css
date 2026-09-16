@@ -134,7 +134,12 @@ button:disabled{cursor:default;opacity:.5}
 #norm-preview{background:#faf9fc;border-radius:7px;padding:10px;max-height:180px}
 #norm-status:empty{display:none}.range-summary p{font-size:11px}
 #party-preview{background:#faf9fc;border-radius:7px;padding:10px;max-height:180px}
-#party-candidates{white-space:pre-wrap;background:#fff8e1;border-radius:7px;padding:10px;max-height:300px;overflow:auto}
+#party-candidates{background:#fff8e1;border-radius:7px;padding:10px;max-height:420px;overflow:auto}
+.party-candidate{background:#fff;border:1px solid #eadfb8;border-radius:7px;padding:9px;margin-bottom:8px}
+.party-candidate pre{white-space:pre-wrap;margin:0 0 8px;font:inherit;font-size:11px}
+.party-candidate label{display:block;margin-top:6px;font-size:11px}
+#party-approval-result{white-space:pre-wrap;background:#f6f1ff;border-radius:7px;padding:10px;max-height:260px;overflow:auto}
 #party-review{background:#75609d;color:white;border-color:#75609d}
+#party-export{background:#75609d;color:white;border-color:#75609d}
 #party-status{white-space:pre-line}
 @media(max-width:340px){.composer-bottom>span{display:none}.composer-bottom .send{margin-left:auto}}
