@@ -73,6 +73,95 @@
             };
         });
     }
+    async function writeNormalizationSample(preview) {
+        if (typeof Excel === "undefined" || typeof Office === "undefined") {
+            throw new Error("엑셀 안에서 추가 기능을 열어주세요.");
+        }
 
-    window.excelBridge = { readNormalizationSample: readNormalizationSample };
+        if (!Office.context.requirements.isSetSupported("ExcelApi", "1.1")) {
+            throw new Error("ExcelApi 1.1 지원이 필요합니다.");
+        }
+
+        if (!preview.rows.length || preview.rows.length > 20) {
+            throw new Error("표본 1~20행만 출력할 수 있습니다.");
+        }
+
+        // 같은 결과를 재시도할 때도 같은 이름을 사용한다.
+        var sheetName = "정제_" +
+            preview.preview_id.replace(/-/g, "").slice(0, 24);
+
+        return await Excel.run(async function (context) {
+            var sheets = context.workbook.worksheets;
+            sheets.load("items/name");
+            await context.sync();
+
+            if (sheets.items.some(function (sheet) {
+                return sheet.name === sheetName;
+            })) {
+                throw new Error(
+                    sheetName + " 시트가 이미 있습니다. " +
+                    "이전 출력 결과를 확인하세요."
+                );
+            }
+
+            var values = [[
+                "원본 행 번호",
+                "거래품명",
+                "신고품명",
+                "원본 모델규격",
+                "정제 모델규격"
+            ]].concat(preview.rows.map(function (row) {
+                return [
+                    row.excel_row,
+                    row.trade_name,
+                    row.declared_name,
+                    row.original_model_spec,
+                    row.normalized_model_spec
+                ];
+            }));
+
+            var sheet = sheets.add(sheetName);
+            var range = sheet.getRange("A1:E" + values.length);
+
+            // 모델규격의 앞자리 0 등을 보존하도록 먼저 텍스트 서식을 설정한다.
+            range.numberFormat = values.map(function () {
+                return ["@", "@", "@", "@", "@"];
+            });
+            await context.sync();
+
+            range.values = values.map(function (row) {
+                return row.map(function (value) {
+                    // 문자열은 Excel의 텍스트 접두어로 입력한다.
+                    // =, +, -로 시작하는 모델규격도 수식으로 실행하지 않는다.
+                    return typeof value === "string" && value !== ""
+                        ? "'" + value
+                        : value;
+                });
+            });
+
+            sheet.getRange("A1:E1").format.font.bold = true;
+
+            preview.rows.forEach(function (row, index) {
+                if (row.changed) {
+                    var excelRow = index + 2;
+                    sheet.getRange("A" + excelRow + ":E" + excelRow)
+                        .format.fill.color = "#FFF2CC";
+                }
+            });
+
+            range.format.columnWidth = 130;
+            range.format.wrapText = true;
+            sheet.activate();
+            await context.sync();
+
+            return {
+                sheet_name: sheetName,
+                row_count: preview.rows.length
+            };
+        });
+    }
+    window.excelBridge = {
+        readNormalizationSample: readNormalizationSample,
+        writeNormalizationSample: writeNormalizationSample
+    };
 })();

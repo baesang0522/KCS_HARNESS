@@ -8,6 +8,68 @@
         var excel = options.excel;
         var selection = null;
         var payload = null;
+        var currentPreview = null;
+        var exported = false;
+
+        async function renderJobWithPreview(job) {
+            ui.renderJob(job);
+
+            if (job.status !== "REVIEW_READY" || currentPreview) return;
+
+            currentPreview = await api.requestJson(
+                "/jobs/" + payload.job_id + "/preview",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        rules: [
+                            { operation: "trim" },
+                            { operation: "collapse_whitespace" }
+                        ]
+                    })
+                }
+            );
+
+            ui.showExportPreview(currentPreview);
+        }
+
+        async function exportPreview() {
+            if (
+                options.isBusy() || !payload ||
+                !currentPreview || exported
+            ) return;
+
+            options.setBusy(true);
+
+            try {
+                if (!options.isReady()) {
+                    throw new Error("엑셀 안에서 추가 기능을 열어주세요.");
+                }
+
+                var approved = await api.requestJson(
+                    "/jobs/" + payload.job_id +
+                    "/previews/" + currentPreview.preview_id + "/approve",
+                    { method: "POST" }
+                );
+
+                if (approved.preview_id !== currentPreview.preview_id) {
+                    throw new Error("확인한 결과와 승인된 결과가 다릅니다.");
+                }
+
+                var result = await excel.writeNormalizationSample(approved);
+
+                exported = true;
+                ui.setExported(result);
+                ui.setStatus(
+                    result.sheet_name + "에 표본 " +
+                    result.row_count + "행을 출력했습니다."
+                );
+            } catch (error) {
+                ui.setStatus("출력 실패: " + error.message);
+            } finally {
+                options.setBusy(false);
+            }
+        }
 
         async function selectRange() {
             if (options.isBusy()) return;
@@ -15,6 +77,8 @@
             ui.beginSelection();
             selection = null;
             payload = null;
+            currentPreview = null;
+            exported = false;
             options.setBusy(true);
             try {
                 if (!options.isReady()) {
@@ -53,18 +117,18 @@
                     });
                 }
                 ui.setStatus("작업 생성 중…");
-                var job = await api.requestJson("/normalization/jobs", {
+                var job = await api.requestJson("/jobs", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(payload)
                 });
-                ui.renderJob(job);
+                await renderJobWithPreview(job);
                 ui.setStatus("LLM이 표본을 확인하고 있습니다…");
                 job = await api.requestJson(
-                    "/normalization/jobs/" + payload.job_id + "/analyze",
+                    "/jobs/" + payload.job_id + "/analyze",
                     { method: "POST" }
                 );
-                ui.renderJob(job);
+                await renderJobWithPreview(job);
             } catch (error) {
                 ui.setStatus(error.message + " 작업 상태 조회 또는 재시도를 해주세요.");
             } finally {
@@ -76,8 +140,8 @@
             if (!payload || options.isBusy()) return;
             options.setBusy(true);
             try {
-                var job = await api.requestJson("/normalization/jobs/" + payload.job_id);
-                ui.renderJob(job);
+                var job = await api.requestJson("/jobs/" + payload.job_id);
+                await renderJobWithPreview(job);
             } catch (error) {
                 ui.setStatus(error.message);
             } finally {
@@ -89,8 +153,11 @@
             select: selectRange,
             analyze: analyze,
             refresh: refresh,
+            export: exportPreview,
             mappingChange: function () {
                 payload = null;
+                currentPreview = null;
+                exported = false;
                 ui.clearResult();
                 ui.setBusy(options.isBusy(), false);
                 ui.setStatus("열 역할 변경됨 · 다시 확인하세요.");
@@ -102,6 +169,8 @@
             reset: function () {
                 selection = null;
                 payload = null;
+                currentPreview = null;
+                exported = false;
                 ui.reset();
             },
             setBusy: function (busy) { ui.setBusy(busy, payload !== null); }

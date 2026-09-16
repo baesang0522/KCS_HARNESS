@@ -17,6 +17,10 @@
         });
         var roles = ["거래품명", "신고품명", "모델규격"];
         var resultText = null;
+        var exportButton = null;
+        var exported = false;
+        var exportHandler = null;
+        var exportPanel = null;
 
         function open() {
             chat.enterConversation();
@@ -27,7 +31,12 @@
 
         function clearResult() {
             // 과거 분석 메시지는 대화에 남겨둔다.
+            if (exportButton) exportButton.disabled = true;
+
             resultText = null;
+            exportButton = null;
+            exportPanel = null;
+            exported = false;
         }
 
         function reset() {
@@ -106,7 +115,70 @@
                 statusText.textContent = job.error;
             }
         }
+        function showExportPreview(data) {
+            if (exportPanel) exportPanel.remove();
 
+            exportPanel = document.createElement("section");
+
+            var summary = document.createElement("p");
+            summary.textContent =
+                "공백 정리 미리보기: 표본 " + data.sample_count +
+                "행 중 " + data.changed_count + "행 변경";
+            exportPanel.appendChild(summary);
+
+            var changedRows = data.rows.filter(function (row) {
+                return row.changed;
+            });
+
+            if (changedRows.length) {
+                var toggle = document.createElement("button");
+                toggle.type = "button";
+                toggle.textContent = "변경된 " + changedRows.length + "행 보기";
+                toggle.setAttribute("aria-expanded", "false");
+
+                var beforeAfter = document.createElement("pre");
+                beforeAfter.hidden = true;
+                beforeAfter.style.whiteSpace = "pre-wrap";
+                beforeAfter.style.overflowWrap = "anywhere";
+                beforeAfter.textContent = changedRows.map(function (row) {
+                    return "원본 " + row.excel_row + "행\n" +
+                        "전: " + JSON.stringify(row.original_model_spec) + "\n" +
+                        "후: " + JSON.stringify(row.normalized_model_spec);
+                }).join("\n\n");
+
+                toggle.addEventListener("click", function () {
+                    beforeAfter.hidden = !beforeAfter.hidden;
+                    toggle.textContent = beforeAfter.hidden
+                        ? "변경된 " + changedRows.length + "행 보기"
+                        : "변경된 행 접기";
+                    toggle.setAttribute(
+                        "aria-expanded", String(!beforeAfter.hidden)
+                    );
+                });
+
+                exportPanel.appendChild(toggle);
+                exportPanel.appendChild(beforeAfter);
+            }
+
+            var note = document.createElement("p");
+            note.textContent =
+                "앞뒤 공백 제거·연속 공백 통일을 적용했습니다. " +
+                "현재 표본 " + data.sample_count +
+                "행 전체를 새 시트에 출력합니다. 원본은 수정하지 않습니다.";
+            exportPanel.appendChild(note);
+
+            exported = false;
+            exportButton = document.createElement("button");
+            exportButton.type = "button";
+            exportButton.textContent = "이 결과를 새 시트에 쓰기";
+            exportButton.disabled = true;
+            exportButton.addEventListener("click", function () {
+                if (exportHandler) exportHandler();
+            });
+            exportPanel.appendChild(exportButton);
+
+            resultText.parentElement.appendChild(exportPanel);
+        }
         return {
             open: open,
             reset: reset,
@@ -116,6 +188,13 @@
             clearResult: clearResult,
             renderJob: renderJob,
             setStatus: function (text) { statusText.textContent = text; },
+            showExportPreview: showExportPreview,
+            setExported: function (result) {
+                exported = true;
+                exportButton.disabled = true;
+                exportButton.textContent =
+                    result.sheet_name + " · " + result.row_count + "행 출력 완료";
+            },
             getMapping: function () {
                 return selects.map(function (select) { return Number(select.value); });
             },
@@ -124,8 +203,10 @@
                 analyzeButton.disabled = busy;
                 refreshButton.disabled = busy || !hasPayload;
                 selects.forEach(function (select) { select.disabled = busy; });
+                if (exportButton) { exportButton.disabled = busy || exported; }
             },
             bind: function (handlers) {
+                exportHandler = handlers.export;
                 selectButton.addEventListener("click", handlers.select);
                 attachButton.addEventListener("click", handlers.select);
                 analyzeButton.addEventListener("click", handlers.analyze);
