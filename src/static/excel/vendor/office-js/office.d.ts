@@ -13398,8 +13398,8 @@ declare namespace Office {
          * 
          * **{@link https://docs.microsoft.com/office/dev/add-ins/outlook/outlook-add-ins-overview#extension-points | Applicable Outlook mode}**: Compose or Read
          *
-         * The `ewsUrl` value can be used by a remote service to make EWS calls to the user's mailbox. 
-         * For example, you can create a remote service to {@link https://docs.microsoft.com/office/dev/add-ins/outlook/get-attachments-of-an-outlook-item | get attachments from the selected item}.
+         * The `ewsUrl` value can be used by a remote services to make EWS calls to the user's mailbox.
+         * For example, you can create a remote services to {@link https://docs.microsoft.com/office/dev/add-ins/outlook/get-attachments-of-an-outlook-item | get attachments from the selected item}.
          */
         ewsUrl: string;
         /**
@@ -14025,7 +14025,7 @@ declare namespace Office {
          * the token as a bearer authorization token to call the Exchange Web Services (EWS)
          * {@link https://docs.microsoft.com/exchange/client-developer/web-service-reference/getattachment-operation | GetAttachment} operation or
          * {@link https://docs.microsoft.com/exchange/client-developer/web-service-reference/getitem-operation | GetItem} operation to return an
-         * attachment or item. For example, you can create a remote service to
+         * attachment or item. For example, you can create a remote services to
          * {@link https://docs.microsoft.com/office/dev/add-ins/outlook/get-attachments-of-an-outlook-item | get attachments from the selected item}.
          *
          * **Note**: It is recommended that add-ins use the REST APIs instead of Exchange Web Services whenever possible.
@@ -14065,7 +14065,7 @@ declare namespace Office {
          * the token as a bearer authorization token to call the Exchange Web Services (EWS)
          * {@link https://docs.microsoft.com/exchange/client-developer/web-service-reference/getattachment-operation | GetAttachment} operation or
          * {@link https://docs.microsoft.com/exchange/client-developer/web-service-reference/getitem-operation | GetItem} operation to return an
-         * attachment or item. For example, you can create a remote service to
+         * attachment or item. For example, you can create a remote services to
          * {@link https://docs.microsoft.com/office/dev/add-ins/outlook/get-attachments-of-an-outlook-item | get attachments from the selected item}.
          *
          * Calling the `getCallbackTokenAsync` method in read mode requires a minimum permission level of `ReadItem`.
@@ -14127,7 +14127,7 @@ declare namespace Office {
          */
         getUserIdentityTokenAsync(callback: (asyncResult: Office.AsyncResult<string>) => void, userContext?: any): void;
         /**
-         * Makes an asynchronous request to an Exchange Web Services (EWS) service on the Exchange server that hosts the user's mailbox.
+         * Makes an asynchronous request to an Exchange Web Services (EWS) services on the Exchange server that hosts the user's mailbox.
          *
          * In these cases, add-ins should use REST APIs to access the user's mailbox instead.
          *
@@ -18315,7 +18315,7 @@ declare namespace OfficeExtension {
          * Setting this property to true will negatively impact performance and will log all statements in the batch request, including any statements 
          * that may contain potentially-sensitive data.
          * It is recommended that you only set this property to true during debugging and that you never log the value of 
-         * error.debugInfo.fullStatements to an external database or analytics service.
+         * error.debugInfo.fullStatements to an external database or analytics services.
          */
         extendedErrorLogging: boolean;
     };
@@ -23915,8 +23915,8 @@ declare namespace Excel {
          * @remarks
          * [Api set: ExcelApi 1.9]
          *
-         * @param serviceID The service ID which will be used to query the data.
-         * @param languageCulture Language culture to query the service for.
+         * @param serviceID The services ID which will be used to query the data.
+         * @param languageCulture Language culture to query the services for.
          */
         convertToLinkedDataType(serviceID: number, languageCulture: string): void;
         /**
@@ -24822,8 +24822,8 @@ declare namespace Excel {
          * @remarks
          * [Api set: ExcelApi 1.9]
          *
-         * @param serviceID The service ID which will be used to query the data.
-         * @param languageCulture Language culture to query the service for.
+         * @param serviceID The services ID which will be used to query the data.
+         * @param languageCulture Language culture to query the services for.
          */
         convertToLinkedDataType(serviceID: number, languageCulture: string): void;
         /**
