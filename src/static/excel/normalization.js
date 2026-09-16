@@ -12,6 +12,7 @@
     var attachButton = document.getElementById("attach-range");
     var resultBubble = null;
     var resultText = null;
+    var previewButton = null;
     var refreshing = false;
 
     function openPanel() {
@@ -22,6 +23,12 @@
     }
 
     function clearResult() {
+    // 과거 범위의 결과는 남겨두되 다시 실행하지 못하게 한다.
+        if (previewButton) {
+            previewButton.disabled = true;
+        }
+
+        previewButton = null;
         resultBubble = null;
         resultText = null;
     }
@@ -57,7 +64,12 @@
         analyzeButton.disabled = event.detail;
         refreshButton.disabled = event.detail || !payload;
         selects.forEach(function (select) { select.disabled = event.detail; });
+        // 미리보기 버튼이 만들어져 있으면 함께 활성화/비활성화 함
+        if (previewButton) {
+        previewButton.disabled = event.detail;
+        }
     });
+
     attachButton.addEventListener('click', function () {
         if (sending || workflowBusy) return;
         openPanel();
@@ -83,6 +95,176 @@
         });
     }
 
+    function operationLabel(operation) {
+        var labels = {
+            trim: "앞뒤 공백 제거",
+            collapse_whitespace: "연속 공백·탭·줄바꿈을 한 칸으로 통일"
+        };
+
+        return labels[operation] || operation;
+    }
+
+    function renderNormalizationPreview(container, data) {
+        container.textContent = "";
+
+        var title = document.createElement("h3");
+        title.textContent = "표본 정제 미리보기";
+        container.appendChild(title);
+
+        var summary = document.createElement("p");
+        summary.textContent =
+            "표본 " + data.sample_count + "행 중 " +
+            data.changed_count + "행 변경";
+        container.appendChild(summary);
+
+        var rules = document.createElement("p");
+        rules.className = "norm-preview-note";
+        rules.textContent = "미리보기 규칙: " +
+            data.rule_set.rules.map(function (rule) {
+                return operationLabel(rule.operation);
+            }).join(" → ");
+        container.appendChild(rules);
+
+        var note = document.createElement("p");
+        note.className = "norm-preview-note";
+        note.textContent =
+            "선택 범위의 앞부분 표본만 확인한 결과입니다. " +
+            "Excel 셀에는 아직 반영하지 않았습니다.";
+        container.appendChild(note);
+
+        if (data.changed_count === 0) {
+            var unchanged = document.createElement("p");
+            unchanged.textContent =
+                "현재 규칙으로 달라지는 표본이 없습니다.";
+            container.appendChild(unchanged);
+        }
+
+        var changedRows = data.rows.filter(function (row) {
+    return row.changed;
+});
+
+            // 변경이 없으면 위에서 만든 안내 문구까지만 표시한다.
+            if (changedRows.length === 0) {
+                return;
+            }
+
+            var toggleButton = document.createElement("button");
+            toggleButton.type = "button";
+            toggleButton.className = "norm-preview-button";
+            toggleButton.textContent = "변경된 " + changedRows.length + "행 보기";
+            toggleButton.setAttribute("aria-expanded", "false");
+            container.appendChild(toggleButton);
+
+            var details = document.createElement("div");
+            details.hidden = true;
+
+            toggleButton.addEventListener("click", function () {
+                details.hidden = !details.hidden;
+
+                toggleButton.textContent = details.hidden
+                    ? "변경된 " + changedRows.length + "행 보기"
+                    : "변경된 행 접기";
+
+                toggleButton.setAttribute(
+                    "aria-expanded",
+                    String(!details.hidden)
+                );
+            });
+
+            changedRows.forEach(function (row) {
+            var item = document.createElement("div");
+            item.className = "norm-preview-row";
+            if (row.changed) item.classList.add("is-changed");
+
+            var heading = document.createElement("strong");
+            heading.textContent =
+                "Excel " + row.excel_row + "행 · " +
+                (row.changed ? "변경됨" : "변경 없음");
+            item.appendChild(heading);
+
+            var names = document.createElement("p");
+            names.textContent =
+                "거래품명: " + row.trade_name + "\n" +
+                "신고품명: " + row.declared_name;
+            item.appendChild(names);
+
+            var values = document.createElement("pre");
+            // 따옴표와 이스케이프 표기로 공백·탭·줄바꿈 차이를 보여준다.
+            values.textContent =
+                "전: " + JSON.stringify(row.original_model_spec) + "\n" +
+                "후: " + JSON.stringify(row.normalized_model_spec);
+            item.appendChild(values);
+
+            var applied = document.createElement("p");
+            applied.className = "norm-preview-note";
+            applied.textContent = row.applied_operations.length
+                ? "변경을 일으킨 규칙: " +
+                    row.applied_operations.map(operationLabel).join(", ")
+                : "변경을 일으킨 규칙 없음";
+            item.appendChild(applied);
+
+            details.appendChild(item);
+        });
+
+        container.appendChild(details);
+    }
+
+    function addPreviewAction(bubble, jobId) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "norm-preview-button";
+        button.textContent = "공백 정리 미리보기";
+        button.disabled = sending || workflowBusy;
+        bubble.appendChild(button);
+
+        var feedback = document.createElement("p");
+        feedback.className = "norm-preview-note";
+        feedback.setAttribute("role", "status");
+        bubble.appendChild(feedback);
+
+        var container = document.createElement("section");
+        container.className = "norm-result-preview";
+        container.hidden = true;
+        bubble.appendChild(container);
+
+        previewButton = button;
+
+        button.addEventListener("click", async function () {
+            if (sending || workflowBusy || button !== previewButton) return;
+
+            setBusy(true);
+            feedback.textContent = "표본을 정제하고 있습니다…";
+
+            try {
+                var data = await requestJson(
+                    "/normalization/jobs/" +
+                        encodeURIComponent(jobId) + "/preview",
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            rules: [
+                                { operation: "trim" },
+                                { operation: "collapse_whitespace" }
+                            ]
+                        })
+                    }
+                );
+
+                renderNormalizationPreview(container, data);
+                container.hidden = false;
+                feedback.textContent = "";
+                button.hidden = true;
+                scrollArea.scrollTop = scrollArea.scrollHeight;
+            } catch (error) {
+                feedback.textContent =
+                    "미리보기 실패: " + error.message;
+            } finally {
+                setBusy(false);
+            }
+        });
+    }
+
     function renderJob(job) {
         var labels = {
             CREATED: "작업 생성됨",
@@ -98,6 +280,8 @@
             if (!resultBubble) {
                 resultBubble = appendMessage('assistant', job.analysis);
                 resultText = resultBubble.querySelector('p');
+
+                addPreviewAction(resultBubble, job.job_id);
             } else {
                 resultText.textContent = job.analysis;
             }

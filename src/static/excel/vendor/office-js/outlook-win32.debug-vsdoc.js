@@ -1210,7 +1210,7 @@ Office._context_mailbox = function () {
     };
     this.makeEwsRequestAsync = function (data, callback, userContext) {
         ///<summary>Gets a token identifying the user and the mail app for Outlook.</summary>
-        ///<param name="data" type="String">Makes an asynchronous request to an Exchange Web Services (EWS) service on the Microsoft Exchange Server 2013 Preview that hosts the mail app for Outlook.</param>
+        ///<param name="data" type="String">Makes an asynchronous request to an Exchange Web Services (EWS) services on the Microsoft Exchange Server 2013 Preview that hosts the mail app for Outlook.</param>
         ///<param name="callback" type="function">The method to call when the asynchronous load method is complete.</param>
         ///<param name="userContext" type="Object" optional="true">Any state data that is passed to the asynchronous method.</param>
 

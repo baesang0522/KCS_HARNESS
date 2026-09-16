@@ -15822,8 +15822,8 @@ var Excel;
 			/// <summary>
 			/// Converts the range cells into linked data types in the worksheet. [Api set: ExcelApi 1.9]
 			/// </summary>
-			/// <param name="serviceID" type="Number">The service ID which will be used to query the data.</param>
-			/// <param name="languageCulture" type="String">Language culture to query the service for.</param>
+			/// <param name="serviceID" type="Number">The services ID which will be used to query the data.</param>
+			/// <param name="languageCulture" type="String">Language culture to query the services for.</param>
 			/// <returns ></returns>
 		}
 		Range.prototype.copyFrom = function(sourceRange, copyType, skipBlanks, transpose) {
@@ -16361,8 +16361,8 @@ var Excel;
 			/// <summary>
 			/// Converts all cells in the `RangeAreas` into linked data types. [Api set: ExcelApi 1.9]
 			/// </summary>
-			/// <param name="serviceID" type="Number">The service ID which will be used to query the data.</param>
-			/// <param name="languageCulture" type="String">Language culture to query the service for.</param>
+			/// <param name="serviceID" type="Number">The services ID which will be used to query the data.</param>
+			/// <param name="languageCulture" type="String">Language culture to query the services for.</param>
 			/// <returns ></returns>
 		}
 		RangeAreas.prototype.copyFrom = function(sourceRange, copyType, skipBlanks, transpose) {
