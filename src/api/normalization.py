@@ -3,12 +3,18 @@ import json
 import logging
 from typing import Annotated, Literal
 from uuid import UUID
-
 from fastapi import APIRouter, HTTPException, Request
 from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel, Field, model_validator
+
 from repositories.conversation_repository import ConversationNotFound
 from workflows.service import attach_model_job
+from services.model_normalization.rule_engine import build_preview
+from services.model_normalization.schemas import (
+    NormalizationPreview,
+    NormalizationRow,
+    RuleSet
+)
 
 
 logger = logging.getLogger(__name__)
@@ -67,6 +73,21 @@ class Job(BaseModel):
     status: Literal["CREATED", "ANALYZING", "REVIEW_READY", "FAILED"] = "CREATED"
     analysis: str = ""
     error: str = ""
+
+
+def get_sample_rows(job: Job) -> list[NormalizationRow]:
+    source = job.source
+    mapping = source.mapping
+
+    return [
+        NormalizationRow(
+            excel_row=source.row_start + index + 2,
+            trade_name=row.cells[mapping.trade_name],
+            declared_name=row.cells[mapping.declared_name],
+            model_spec=row.cells[mapping.model_spec],
+        )
+        for index, row in enumerate(source.samples)
+    ]
 
 
 def find_job(request: Request, job_id: UUID) -> Job:
@@ -168,16 +189,15 @@ async def analyze_job(job_id: UUID, request: Request):
 
     try:
         source = job.source
-        mapping = source.mapping
 
         samples = [
             {
-                "excel_row": source.row_start + index + 2,
-                "거래품명": row.cells[mapping.trade_name],
-                "신고품명": row.cells[mapping.declared_name],
-                "모델규격": row.cells[mapping.model_spec],
+                "excel_row": row.excel_row,
+                "거래품명": row.trade_name,
+                "신고품명": row.declared_name,
+                "모델규격": row.model_spec,
             }
-            for index, row in enumerate(source.samples)
+            for row in get_sample_rows(job)
         ]
 
         prompt = json.dumps(
@@ -228,3 +248,27 @@ async def analyze_job(job_id: UUID, request: Request):
         job.error = "표본 확인에 실패했습니다. 서버 로그를 확인하세요."
 
     return public_job(job)
+
+@router.post(
+    "/{job_id}/preview",
+    response_model=NormalizationPreview,
+)
+async def preview_job(
+    job_id: UUID,
+    payload: RuleSet,
+    request: Request,
+) -> NormalizationPreview:
+    job = find_job(request, job_id)
+
+    if job.status != "REVIEW_READY":
+        raise HTTPException(
+            status_code=409,
+            detail="표본 분석을 완료한 뒤 미리보기를 요청하세요.",
+        )
+
+    rows = get_sample_rows(job)
+
+    return build_preview(
+        rows=rows,
+        rule_set=payload,
+    )

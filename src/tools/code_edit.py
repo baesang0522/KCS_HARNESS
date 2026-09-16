@@ -786,7 +786,7 @@ def apply_patch(
 
         path:
             수정할 기존 파일의 workspace_root 기준 상대경로.
-            예: "src/service.py"
+            예: "src/services.py"
 
         edits:
             old_text와 new_text 문자열을 가진 edit 목록. old_text는 수정 전
@@ -803,7 +803,7 @@ def apply_patch(
 
     Returns:
         {
-            "path": "src/service.py",
+            "path": "src/services.py",
             "operation": "patched",
             "edits_applied": 1,
             "snapshot_id": "불투명한 고유 ID",
