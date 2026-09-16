@@ -2,7 +2,7 @@ import re
 from collections.abc import Sequence
 
 
-from services.model_normalization.schemas import (
+from services.jobs.model_normalization.schemas import (
     NormalizationPreview,
     NormalizationRow,
     Operation,
@@ -67,4 +67,3 @@ def build_preview(
         changed_count=sum(row.changed for row in results),
         rows=tuple(results),
     )
-

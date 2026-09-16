@@ -4,8 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from api.router import router
-from api.normalization import router as normalization_router
+from api.router import router, service_error_response
+from repositories.conversation_repository import ConversationNotFound
+from services.errors import ServiceError
 from runtime import create_runtime
 from repositories.memory_conversation_repository import (
     MemoryConversationRepository,
@@ -51,4 +52,6 @@ app.mount(
     name="static",
 )
 app.include_router(router)
-app.include_router(normalization_router)
+
+app.add_exception_handler(ServiceError, service_error_response)
+app.add_exception_handler(ConversationNotFound, service_error_response)

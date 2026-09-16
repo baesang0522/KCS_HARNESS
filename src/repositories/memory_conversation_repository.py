@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from workflows.state import WorkFlowState
+from services.chat_state import WorkFlowState
 from repositories.conversation_repository import (
     ConversationNotFound,
     StoredTurn,
