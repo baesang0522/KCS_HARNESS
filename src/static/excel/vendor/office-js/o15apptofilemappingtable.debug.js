@@ -1806,7 +1806,7 @@ Microsoft.Office.Common.XdmCommunicationManager=(function () {
 	function _lookupMethodObject(serviceEndPoint, messageObject) {
 		var methodOrEventMethodObject=serviceEndPoint._methodObjectList[messageObject._actionName];
 		if (!methodOrEventMethodObject) {
-			OsfMsAjaxFactory.msAjaxDebug.trace("The specified method is not registered on service endpoint:"+messageObject._actionName);
+			OsfMsAjaxFactory.msAjaxDebug.trace("The specified method is not registered on services endpoint:"+messageObject._actionName);
 			throw OsfMsAjaxFactory.msAjaxError.argument("messageObject");
 		}
 		var methodObject=null;

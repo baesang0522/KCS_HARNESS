@@ -55,6 +55,71 @@ html,body{height:100%}.app{height:100vh;min-height:0}.topbar,footer{flex-shrink:
     overflow-y: auto;
 }
 
+.norm-preview-button {
+    margin-top: 12px;
+    padding: 8px 12px;
+    border: 1px solid #ddd4eb;
+    border-radius: 8px;
+    background: #f5f1fb;
+    color: #70598b;
+    font-size: 12px;
+}
+
+.norm-result-preview {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid #e8e5ef;
+}
+
+.norm-result-preview h3 {
+    margin: 0;
+    font-size: 13px;
+}
+
+.chat-message p.norm-preview-note {
+    font-size: 11px;
+    color: #777383;
+}
+
+.norm-preview-note:empty {
+    display: none;
+}
+
+.norm-result-preview details {
+    margin-top: 12px;
+}
+
+.norm-result-preview summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: #70598b;
+}
+
+.norm-preview-row {
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid #e8e5ef;
+    border-radius: 8px;
+    background: #faf9fc;
+}
+
+.norm-preview-row.is-changed {
+    border-color: #c7b8e6;
+    background: #f6f1ff;
+}
+
+.norm-preview-row p {
+    font-size: 11px;
+}
+
+.norm-preview-row pre {
+    margin: 8px 0;
+    font-size: 12px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 /* Conversation actions */
 .attach-range{border:0;background:#f1edf8;color:#70598b;border-radius:7px;padding:7px 9px;font-size:11px;white-space:nowrap}
 .composer-bottom{gap:8px}.composer-bottom>span{margin-left:auto;font-size:9px}
