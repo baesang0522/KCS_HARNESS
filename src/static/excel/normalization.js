@@ -56,12 +56,12 @@
                     throw new Error("확인한 결과와 승인된 결과가 다릅니다.");
                 }
 
-                var result = await excel.writeNormalizationSample(approved);
+                var result = await excel.writeNormalizationPreview(approved);
 
                 exported = true;
                 ui.setExported(result);
                 ui.setStatus(
-                    result.sheet_name + "에 표본 " +
+                    result.sheet_name + "에 선택 영역 전체 " +
                     result.row_count + "행을 출력했습니다."
                 );
             } catch (error) {
@@ -84,7 +84,7 @@
                 if (!options.isReady()) {
                     throw new Error("엑셀 안에서 추가 기능을 열어주세요.");
                 }
-                selection = await excel.readNormalizationSample();
+                selection = await excel.readNormalizationRows();
                 ui.showSelection(selection);
             } catch (error) {
                 selection = null;
@@ -123,7 +123,7 @@
                     body: JSON.stringify(payload)
                 });
                 await renderJobWithPreview(job);
-                ui.setStatus("LLM이 표본을 확인하고 있습니다…");
+                ui.setStatus("선택 영역 전체를 나눠 분석한 뒤 결과를 종합하고 있습니다…");
                 job = await api.requestJson(
                     "/jobs/" + payload.job_id + "/analyze",
                     { method: "POST" }

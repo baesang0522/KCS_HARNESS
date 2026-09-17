@@ -83,10 +83,14 @@
                 });
                 select.value = String(matched >= 0 ? matched : roleIndex);
             });
-            sourceText.textContent = selection.address + " · 데이터 " +
-                (selection.row_count - 1) + "행 · 앞부분 표본 " + selection.samples.length + "행";
+            sourceText.textContent =
+                selection.address + " · 전체 데이터 " +
+                selection.rows.length + "행";
+
             preview.textContent = [selection.headers.join(" | ")].concat(
-                selection.samples.map(function (row) { return row.cells.join(" | "); })
+                selection.rows.slice(0, 20).map(function (row) {
+                    return row.cells.join(" | ");
+                })
             ).join("\n");
             mappingPanel.hidden = false;
             selectButton.textContent = "다시 선택";
@@ -96,11 +100,27 @@
         function renderJob(job) {
             var labels = {
                 CREATED: "작업 생성됨",
-                ANALYZING: "LLM 확인 중",
-                REVIEW_READY: "표본 확인 완료 · 규칙 승인 전",
+                ANALYZING: "전체 데이터 분석 중",
+                REVIEW_READY: "전체 분석 완료 · 결과 승인 전",
+                PREVIEWING: "전체 정제 미리보기 생성 중",
                 FAILED: "확인 실패"
             };
+
             statusText.textContent = labels[job.status] + " · 작업 " + job.job_id;
+
+            if (job.status === "ANALYZING") {
+                statusText.textContent += job.analysis_phase === "COMBINING"
+                    ? " · 분석 결과 종합 중"
+                    : " · " + job.analyzed_row_count +
+                      "/" + job.data_row_count + "행 분석";
+            }
+
+            if (job.status === "PREVIEWING") {
+                statusText.textContent +=
+                    " · " + job.processed_row_count +
+                    "/" + job.data_row_count + "행 정제";
+            }
+
             if (job.status === "REVIEW_READY") {
                 if (!resultText) {
                     resultText = chat.appendMessage("assistant", job.analysis).querySelector("p");
@@ -119,58 +139,68 @@
             if (exportPanel) exportPanel.remove();
 
             exportPanel = document.createElement("section");
+            exportPanel.className = "norm-result-preview";
+
+            var title = document.createElement("h3");
+            title.textContent = "정제 결과 미리보기";
+            exportPanel.appendChild(title);
 
             var summary = document.createElement("p");
             summary.textContent =
-                "공백 정리 미리보기: 표본 " + data.sample_count +
+                "선택 영역 전체 " + data.row_count +
                 "행 중 " + data.changed_count + "행 변경";
             exportPanel.appendChild(summary);
 
-            var changedRows = data.rows.filter(function (row) {
-                return row.changed;
-            });
+            // DOM에 전체 결과를 만들지 않고 변경 예시만 표시한다.
+            var examples = [];
+            for (var index = 0; index < data.rows.length; index += 1) {
+                if (data.rows[index].changed) {
+                    examples.push(data.rows[index]);
+                    if (examples.length === 50) break;
+                }
+            }
 
-            if (changedRows.length) {
-                var toggle = document.createElement("button");
-                toggle.type = "button";
-                toggle.textContent = "변경된 " + changedRows.length + "행 보기";
-                toggle.setAttribute("aria-expanded", "false");
+            if (examples.length) {
+                var details = document.createElement("details");
+                var toggle = document.createElement("summary");
+                toggle.textContent =
+                    "변경 예시 " + examples.length +
+                    "행 보기 · 전체 변경 " + data.changed_count + "행";
+                details.appendChild(toggle);
 
-                var beforeAfter = document.createElement("pre");
-                beforeAfter.hidden = true;
-                beforeAfter.style.whiteSpace = "pre-wrap";
-                beforeAfter.style.overflowWrap = "anywhere";
-                beforeAfter.textContent = changedRows.map(function (row) {
-                    return "원본 " + row.excel_row + "행\n" +
+                examples.forEach(function (row) {
+                    var card = document.createElement("div");
+                    card.className = "norm-preview-row is-changed";
+
+                    var label = document.createElement("p");
+                    label.textContent = "원본 " + row.excel_row + "행";
+                    card.appendChild(label);
+
+                    var beforeAfter = document.createElement("pre");
+                    beforeAfter.textContent =
                         "전: " + JSON.stringify(row.original_model_spec) + "\n" +
                         "후: " + JSON.stringify(row.normalized_model_spec);
-                }).join("\n\n");
+                    card.appendChild(beforeAfter);
 
-                toggle.addEventListener("click", function () {
-                    beforeAfter.hidden = !beforeAfter.hidden;
-                    toggle.textContent = beforeAfter.hidden
-                        ? "변경된 " + changedRows.length + "행 보기"
-                        : "변경된 행 접기";
-                    toggle.setAttribute(
-                        "aria-expanded", String(!beforeAfter.hidden)
-                    );
+                    details.appendChild(card);
                 });
 
-                exportPanel.appendChild(toggle);
-                exportPanel.appendChild(beforeAfter);
+                exportPanel.appendChild(details);
             }
 
             var note = document.createElement("p");
+            note.className = "norm-preview-note";
             note.textContent =
-                "앞뒤 공백 제거·연속 공백 통일을 적용했습니다. " +
-                "현재 표본 " + data.sample_count +
-                "행 전체를 새 시트에 출력합니다. 원본은 수정하지 않습니다.";
+                "전체에 동일한 앞뒤 공백 제거·연속 공백 통일 규칙을 적용했습니다. " +
+                "승인하면 변경되지 않은 행을 포함한 전체 " +
+                data.row_count + "행을 새 시트에 출력합니다. 원본은 유지합니다.";
             exportPanel.appendChild(note);
 
             exported = false;
             exportButton = document.createElement("button");
             exportButton.type = "button";
-            exportButton.textContent = "이 결과를 새 시트에 쓰기";
+            exportButton.className = "norm-preview-button";
+            exportButton.textContent = "전체 결과 승인 후 새 시트에 쓰기";
             exportButton.disabled = true;
             exportButton.addEventListener("click", function () {
                 if (exportHandler) exportHandler();

@@ -48,7 +48,7 @@ class NormalizationPreview(BaseModel):
 
     preview_id: UUID = Field(default_factory=uuid4)
     rule_set: RuleSet
-    sample_count: int
+    row_count: int
     changed_count: int
     rows: tuple[PreviewRow, ...]
 
@@ -73,11 +73,15 @@ class ColumnMapping(BaseModel):
         return self
 
 
-class SampleRow(BaseModel):
-    cells: list[CellText] = Field(min_length=3, max_length=3)
+class InputRow(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    cells: tuple[CellText, ...] = Field(min_length=3, max_length=3)
 
 
 class CreateJobRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
     conversation_id: UUID
     job_id: UUID
     worksheet_id: str = Field(min_length=1, max_length=256)
@@ -85,18 +89,30 @@ class CreateJobRequest(BaseModel):
     address: str = Field(min_length=1, max_length=512)
     row_start: int = Field(ge=0)
     column_start: int = Field(ge=0)
-    row_count: int = Field(ge=0, le=400001)
+    row_count: int = Field(ge=2, le=400001)
     headers: list[CellText] = Field(min_length=3, max_length=3)
     mapping: ColumnMapping
-    samples: list[SampleRow] = Field(min_length=1, max_length=20)
+    rows: list[InputRow] = Field(min_length=1, max_length=400000)
 
     @model_validator(mode="after")
-    def check_samples(self):
-        if len(self.samples) > self.row_count - 1:
-            raise ValueError("표본 수가 선택 가능한 데이터 행 수보다 많습니다.")
+    def check_rows(self):
+        if len(self.rows) != self.row_count - 1:
+            raise ValueError(
+                "선택 범위의 데이터 행 수와 전송된 행 수가 다릅니다."
+            )
 
-        if not any(cell.strip() for row in self.samples for cell in row.cells):
-            raise ValueError("표본 데이터가 모두 비어 있습니다.")
+        if self.row_start + self.row_count > 1048576:
+            raise ValueError("선택 범위가 Excel 행 경계를 벗어납니다.")
+
+        if self.column_start + 3 > 16384:
+            raise ValueError("선택 범위가 Excel 열 경계를 벗어납니다.")
+
+        if not any(
+            cell.strip()
+            for row in self.rows
+            for cell in row.cells
+        ):
+            raise ValueError("선택한 데이터가 모두 비어 있습니다.")
 
         return self
 
@@ -105,6 +121,22 @@ class Job(BaseModel):
     source: CreateJobRequest
     preview: NormalizationPreview | None = None
     approved_preview_id: UUID | None = None
-    status: Literal["CREATED", "ANALYZING", "REVIEW_READY", "FAILED"] = "CREATED"
+
+    status: Literal[
+        "CREATED",
+        "ANALYZING",
+        "REVIEW_READY",
+        "PREVIEWING",
+        "FAILED",
+    ] = "CREATED"
+
+    analyzed_row_count: int = 0
+    processed_row_count: int = 0
+    analysis_batch_count: int = 0
+    completed_analysis_batches: int = 0
+    analysis_phase: Literal[
+        "NOT_STARTED", "INSPECTING", "COMBINING", "DONE"
+    ] = "NOT_STARTED"
+
     analysis: str = ""
     error: str = ""

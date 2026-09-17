@@ -63,7 +63,7 @@ def build_preview(
 
     return NormalizationPreview(
         rule_set=rule_set,
-        sample_count=len(results),
+        row_count=len(results),
         changed_count=sum(row.changed for row in results),
         rows=tuple(results),
     )
