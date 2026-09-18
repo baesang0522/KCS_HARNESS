@@ -4,7 +4,11 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-Operation = Literal["trim", "collapse_whitespace"]
+Operation = Literal[
+    "trim",
+    "collapse_whitespace",
+    "normalize_fullwidth_ascii",
+]
 
 
 class NormalizationRule(BaseModel):
