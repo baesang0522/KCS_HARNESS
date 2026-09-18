@@ -1,8 +1,8 @@
 import json
+import pandas as pd
 from pathlib import Path
 from typing import Any
-
-import pandas as pd
+from collections.abc import Iterable, Sequence
 
 from utils.excel_utils import read_excel_dataframe
 
@@ -12,6 +12,25 @@ SUPPORTED_TABLE_SUFFIXES = {
     ".xlsx",
     ".csv",
 }
+
+# 전각 ASCII 문자 U+FF01~U+FF5E → ASCII 문자
+FULLWIDTH_ASCII_TRANSLATION = {
+    code: code - 0xFEE0
+    for code in range(0xFF01, 0xFF5F)
+}
+
+# 전각 공백 U+3000 → 일반 공백
+FULLWIDTH_ASCII_TRANSLATION[0x3000] = 0x20
+
+
+def normalize_fullwidth_ascii(values: pd.Series) -> pd.Series:
+    """
+    전각 영문·숫자·ASCII 기호·공백을 반각으로 변환한다.
+
+    원문을 변경하지 않고 새로운 Series를 반환한다.
+    원문자, 단위 기호, 위첨자 등은 유지한다.
+    """
+    return values.str.translate(FULLWIDTH_ASCII_TRANSLATION)
 
 
 def _resolve_table_path(
@@ -235,3 +254,20 @@ def dataframe_to_records(
     )
 
     return json.loads(serialized)
+
+
+def text_rows_to_dataframe(
+    rows: Iterable[Sequence[str]],
+        columns: Sequence[str],
+) -> pd.DataFrame:
+    """
+    검증된 문자열 행을 DataFrame으로 만든다.
+
+    숫자·날짜로 자동 해석하지 않고 빈 문자열과 앞자리 0을 보존한다.
+    입력값 검증은 호출부의 DTO가 담당한다.
+    """
+    return pd.DataFrame(
+        rows,
+        columns=list(columns),
+        dtype=pd.StringDtype(storage="python"),
+    )

@@ -5,6 +5,7 @@ from uuid import UUID
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from utils.dataframe_utils import text_rows_to_dataframe
 from services.chat_state import WorkFlowState
 from services.errors import ConflictError, NotFoundError
 from services.jobs.model_normalization.rule_engine import build_preview
@@ -36,37 +37,69 @@ def get_rows(
 def analysis_batches(job: Job) -> list[list[dict]]:
     source = job.source
     mapping = source.mapping
-    grouped = {}
 
-    # 세 값이 완전히 같은 경우에만 합친다.
-    # 모델규격만 같고 품명이 다르면 별도 분석 대상으로 유지한다.
-    for index, row in enumerate(source.rows):
-        key = (
-            row.cells[mapping.trade_name],
-            row.cells[mapping.declared_name],
-            row.cells[mapping.model_spec],
+    dataframe = text_rows_to_dataframe(
+        rows=(
+            (
+                row.cells[mapping.trade_name],
+                row.cells[mapping.declared_name],
+                row.cells[mapping.model_spec],
+            )
+            for row in source.rows
+        ),
+        columns=(
+            "trade_name",
+            "declared_name",
+            "model_spec",
+        ),
+    )
+
+    # Excel 행 번호는 1부터 시작하고 선택 범위 첫 행은 머리글이다.
+    first_data_row = source.row_start + 2
+    dataframe["excel_row"] = range(
+        first_data_row,
+        first_data_row + len(dataframe),
+    )
+
+    # 공백 등을 정제하기 전의 원본 세 값으로 집계한다.
+    # 모델규격만 같고 품명이 다르면 서로 다른 그룹이다.
+    grouped = (
+        dataframe
+        .groupby(
+            ["trade_name", "declared_name", "model_spec"],
+            sort=False,
+            dropna=False,
+            as_index=False,
         )
+        .agg(
+            excel_row=("excel_row", "min"),
+            count=("excel_row", "size"),
+        )
+    )
 
-        if key not in grouped:
-            grouped[key] = {
-                "excel_row": source.row_start + index + 2,
-                "거래품명": key[0],
-                "신고품명": key[1],
-                "모델규격": key[2],
-                "count": 0,
-            }
-        grouped[key]["count"] += 1
+    # 원본 DataFrame은 집계 이후 더 이상 사용하지 않는다.
+    del dataframe
 
     batches = []
     batch = []
     batch_chars = 0
 
-    for record in grouped.values():
-        record_chars = len(json.dumps(record, ensure_ascii=False))
+    for row in grouped.itertuples(index=False):
+        record = {
+            "excel_row": int(row.excel_row),
+            "거래품명": row.trade_name,
+            "신고품명": row.declared_name,
+            "모델규격": row.model_spec,
+            "count": int(row.count),
+        }
+
+        record_chars = len(
+            json.dumps(record, ensure_ascii=False)
+        )
 
         if batch and (
-                len(batch) >= 100
-                or batch_chars + record_chars > 10000
+            len(batch) >= 100
+            or batch_chars + record_chars > 10000
         ):
             batches.append(batch)
             batch = []

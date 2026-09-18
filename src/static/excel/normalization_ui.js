@@ -191,7 +191,8 @@
             var note = document.createElement("p");
             note.className = "norm-preview-note";
             note.textContent =
-                "전체에 동일한 앞뒤 공백 제거·연속 공백 통일 규칙을 적용했습니다. " +
+                "전체에 동일한 전각 영문·숫자·기호 변환, " +
+                "앞뒤 공백 제거·연속 공백 통일 규칙을 적용했습니다. " +
                 "승인하면 변경되지 않은 행을 포함한 전체 " +
                 data.row_count + "행을 새 시트에 출력합니다. 원본은 유지합니다.";
             exportPanel.appendChild(note);

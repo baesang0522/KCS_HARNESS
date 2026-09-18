@@ -23,6 +23,7 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         rules: [
+                            { operation: "normalize_fullwidth_ascii" },
                             { operation: "trim" },
                             { operation: "collapse_whitespace" }
                         ]
