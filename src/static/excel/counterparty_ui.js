@@ -15,6 +15,12 @@
         var previewButton = document.getElementById("party-approval-preview");
         var exportButton = document.getElementById("party-export");
         var refreshButton = document.getElementById("party-refresh");
+        var policyCurrent = document.getElementById("party-policy-current");
+        var policyRequest = document.getElementById("party-policy-request");
+        var policySuggestButton = document.getElementById("party-policy-suggest");
+        var policyDraft = document.getElementById("party-policy-draft");
+        var policyDraftText = document.getElementById("party-policy-draft-text");
+        var policyApplyButton = document.getElementById("party-policy-apply");
         var selects = ["party-code", "party-country", "party-name"].map(function (id) {
             return document.getElementById(id);
         });
@@ -32,13 +38,25 @@
             approvalResult.textContent = "";
             previewHasRows = false;
             exportButton.disabled = true;
-            exportButton.textContent = "승인 후 새 시트에 반영";
+            exportButton.textContent = "전체 정제 결과를 새 시트에 생성";
+        }
+        function formatPolicy(policy) {
+            return "유사도 " + Math.round(policy.similarity_threshold * 100) + "% 이상" +
+                " · 무시할 단어 " + (policy.ignored_terms.length ? policy.ignored_terms.join(", ") : "없음") +
+                " · 같은 국가코드만 비교";
+        }
+        function clearPolicySuggestion() {
+            policyDraft.hidden = true;
+            policyDraftText.textContent = "";
         }
         function reset() {
             panel.hidden = true;
             chat.scrollArea.appendChild(panel);
             mapping.hidden = candidates.hidden = true;
             source.textContent = preview.textContent = status.textContent = candidates.textContent = "";
+            policyCurrent.textContent = "기본 기준 · 유사도 90% 이상 · 같은 국가코드만 비교";
+            policyRequest.value = "";
+            clearPolicySuggestion();
             clearApprovalPreview();
         }
         function beginSelection() {
@@ -46,6 +64,7 @@
             mapping.hidden = candidates.hidden = true;
             refreshButton.disabled = reviewButton.disabled = previewButton.disabled = true;
             clearApprovalPreview();
+            clearPolicySuggestion();
         }
         function showSelection(selection) {
             selects.forEach(function (select, role) {
@@ -126,14 +145,22 @@
                 candidates.appendChild(text);
             }
             candidates.hidden = false;
+            policyCurrent.textContent = "현재 기준 · " + formatPolicy(job.policy);
             reviewButton.disabled = reviewed || !job.candidate_groups.length;
             previewButton.disabled = !reviewed || !groups.length;
             refreshButton.disabled = false;
-            status.textContent = job.error || (reviewed
+            var missingLabels = {party_code: "부호", country_code: "국가", company_name: "상호"};
+            var missing = Object.keys(job.missing_counts).filter(function (role) {
+                return job.missing_counts[role] > 0;
+            }).map(function (role) {
+                return missingLabels[role] + " " + job.missing_counts[role] + "행";
+            });
+            status.textContent = job.error || ((reviewed
                 ? "모델 검토 완료 · 최종 후보 " + job.final_candidates.length +
                     "건 · 제외 " + job.excluded_candidate_count +
                     "건\n승인할 그룹을 체크하고 대표 부호를 선택하세요. 체크하지 않은 그룹은 제외됩니다."
-                : "후보 " + job.candidate_groups.length + "건 · 같은 국가끼리만 비교했습니다.");
+                : "후보 " + job.candidate_groups.length + "건 · 같은 국가끼리만 비교했습니다.") +
+                (missing.length ? "\n누락 데이터 · " + missing.join(", ") : ""));
             if (reviewed && groups.length) candidates.scrollIntoView({block: "start"});
         }
         function getDecisions() {
@@ -149,18 +176,20 @@
             });
         }
         function showApprovalPreview(data) {
+            var changedRows = data.rows.filter(function (row) { return row.changed; });
             previewHasRows = data.row_count > 0;
             approvalResult.hidden = false;
             approvalResult.textContent =
                 "승인 " + data.approved_group_count + "그룹 · 제외 " +
                 data.excluded_group_count + "그룹 · " + data.changed_count + "행 변경\n\n" +
-                (data.rows.length ? data.rows.map(function (row) {
+                (changedRows.length ? changedRows.slice(0, 100).map(function (row) {
                     return row.excel_row + "행 · " + row.company_name + "\n전: " +
                         row.original_party_code + "\n후: " + row.representative_party_code;
-                }).join("\n\n") : "승인한 후보가 없어 새 시트에 반영할 행이 없습니다.");
+                }).join("\n\n") + (changedRows.length > 100 ? "\n\n외 " + (changedRows.length - 100) + "행" : "")
+                    : "부호가 변경되는 행은 없습니다.");
             exportButton.disabled = !previewHasRows;
             status.textContent = previewHasRows
-                ? "미리보기를 확인한 뒤 승인 결과를 새 시트에 반영하세요."
+                ? "전체 " + data.row_count + "행 중 변경 " + data.changed_count + "행입니다. 확인 후 새 시트를 생성하세요."
                 : "모든 후보를 제외했습니다.";
         }
         return {
@@ -168,19 +197,54 @@
             showSelection: showSelection, renderJob: renderJob,
             clearApprovalPreview: clearApprovalPreview, getDecisions: getDecisions,
             showApprovalPreview: showApprovalPreview,
+            clearCandidates: function () {
+                candidates.hidden = true;
+                candidates.textContent = "";
+                clearApprovalPreview();
+            },
+            getPolicyInstruction: function () { return policyRequest.value.trim(); },
+            setPolicyInstruction: function (value) { policyRequest.value = value; },
+            clearPolicySuggestion: clearPolicySuggestion,
+            showPolicySuggestion: function (suggestion) {
+                policyDraft.hidden = false;
+                policyDraftText.textContent = "제안 기준 · " + formatPolicy(suggestion.policy) +
+                    "\n근거 · " + suggestion.reason;
+            },
+            getDecisionState: function () {
+                return Array.from(candidates.querySelectorAll(".party-candidate")).map(function (card) {
+                    return {
+                        group_id: card.dataset.groupId,
+                        approved: card.querySelector(".party-approve").checked,
+                        representative: card.querySelector(".party-representative").value
+                    };
+                });
+            },
+            restoreDecisionState: function (states) {
+                states.forEach(function (state) {
+                    var card = candidates.querySelector('[data-group-id="' + state.group_id + '"]');
+                    if (!card) return;
+                    var approval = card.querySelector(".party-approve");
+                    var representative = card.querySelector(".party-representative");
+                    approval.checked = state.approved;
+                    representative.disabled = !state.approved;
+                    representative.value = state.representative;
+                });
+            },
             setExported: function (result) {
                 exportButton.disabled = true;
                 exportButton.textContent = result.sheet_name + " · " + result.row_count + "행 반영 완료";
             },
             setStatus: function (text) { status.textContent = text; },
             getMapping: function () { return selects.map(function (item) { return Number(item.value); }); },
-            setBusy: function (busy, hasPayload, canReview, canApprove, hasPreview, exported) {
+            setBusy: function (busy, hasPayload, canReview, canApprove, hasPreview, exported, hasPolicyDraft) {
                 selectButton.disabled = busy;
                 createButton.disabled = busy;
                 refreshButton.disabled = busy || !hasPayload;
                 reviewButton.disabled = busy || !hasPayload || !canReview;
                 previewButton.disabled = busy || !canApprove;
                 exportButton.disabled = busy || !hasPreview || exported || !previewHasRows;
+                policySuggestButton.disabled = busy;
+                policyApplyButton.disabled = busy || !hasPolicyDraft;
                 selects.forEach(function (item) { item.disabled = busy; });
             },
             bind: function (handlers) {
@@ -190,6 +254,8 @@
                 previewButton.addEventListener("click", handlers.preview);
                 exportButton.addEventListener("click", handlers.export);
                 refreshButton.addEventListener("click", handlers.refresh);
+                policySuggestButton.addEventListener("click", handlers.suggestPolicy);
+                policyApplyButton.addEventListener("click", handlers.applyPolicy);
                 candidates.addEventListener("change", function (event) {
                     if (event.target.classList.contains("party-approve")) {
                         event.target.closest(".party-candidate")

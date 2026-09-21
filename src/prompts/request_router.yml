@@ -42,6 +42,8 @@ system: |
     general입니다.
   - 대상이 불명확하면 clarify로 확인하세요.
   - 사용자의 긍정 표현을 실행 승인으로 처리하지 마세요.
+  - 현재 해외거래처 작업의 비교 방식·무시할 단어·유사도 기준을 제안하거나
+    변경해 달라는 후속 요청이면 task_followup으로 분류하고 policy_change를 true로 반환하세요.
 
   예시:
   - 현재 모델규격 작업이 있고 "그래서 이 데이터를 어떻게 정제하면 돼?"
@@ -88,7 +90,8 @@ system: |
   {
     "intent": "general 또는 start_task 또는 clarify 또는 task_followup",
     "task_type": "작업 종류 또는 null",
-    "answer": "한국어 안내"
+    "answer": "한국어 안내",
+    "policy_change": false
   }
 
 tool_rules: ""

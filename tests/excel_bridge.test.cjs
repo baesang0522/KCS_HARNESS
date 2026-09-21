@@ -71,7 +71,7 @@ function setupWriter() {
     };
     const sheets = {
         items: [], load() {},
-        add(name) { addedName = name; return sheet; },
+        add(name) { addedName = name; sheet.name = name; sheets.items.push(sheet); return sheet; },
     };
     const sandbox = {
         window: {},
@@ -127,6 +127,7 @@ test('승인한 거래처 부호를 원본 위치와 함께 새 시트에 쓴다
     const writer = setupWriter();
     const result = await writer.write({
         preview_id: '12345678-1234-1234-1234-123456789012',
+        policy: { similarity_threshold: 0.9, ignored_terms: ['CO', 'LTD'] },
         rows: [{
             excel_row: 7, country_code: 'VN', company_name: 'MINH HOANG CO LTD',
             original_party_code: 'VN-2', representative_party_code: 'VN-1',
@@ -136,8 +137,14 @@ test('승인한 거래처 부호를 원본 위치와 함께 새 시트에 쓴다
     assert.equal(result.row_count, 1);
     assert.match(writer.result().addedName, /^거래처_/);
     assert.deepEqual(JSON.parse(JSON.stringify(writer.result().values[1])), [
-        7, "'VN", "'MINH HOANG CO LTD", "'VN-2", "'VN-1", "'변경", "'VN-0001"
+        7, "'VN", "'MINH HOANG CO LTD", "'VN-2", "'VN-1", "'변경", "'VN-0001", 0.9, "'CO, LTD"
     ]);
+    const retried = await writer.write({
+        preview_id: '12345678-1234-1234-1234-123456789012',
+        policy: { similarity_threshold: 0.9, ignored_terms: ['CO', 'LTD'] },
+        rows: [{excel_row: 7}],
+    });
+    assert.equal(retried.existing, true);
 });
 
 test('호스트·API·선택 크기·셀 길이 오류를 거절한다', async () => {

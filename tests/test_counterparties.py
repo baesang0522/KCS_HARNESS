@@ -29,12 +29,26 @@ class ReviewGraph:
         return {"messages": [AIMessage(content=json.dumps({"reviews": reviews}))]}
 
 
+class PolicyGraph:
+    def __init__(self):
+        self.calls = []
+
+    async def ainvoke(self, state, **kwargs):
+        self.calls.append(state)
+        return {"messages": [AIMessage(content=json.dumps({
+            "policy": {"similarity_threshold": 0.85, "ignored_terms": ["CO", "LTD"]},
+            "reason": "반복되는 법인 표기를 제외합니다.",
+        }))]}
+
+
 class CounterpartyContract(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.review = ReviewGraph()
+        self.policy = PolicyGraph()
         app.state.runtime = SimpleNamespace(
             settings=SimpleNamespace(llm=SimpleNamespace(timeout_seconds=1)),
             counterparty_review_graph=self.review,
+            counterparty_policy_graph=self.policy,
         )
         app.state.conversations = MemoryConversationRepository()
         app.state.jobs = {}
@@ -93,13 +107,22 @@ class CounterpartyContract(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(preview.status_code, 200, preview.text)
         preview = preview.json()
         self.assertEqual(preview["approved_group_count"], 1)
-        self.assertEqual(preview["row_count"], 2)
+        self.assertEqual(preview["row_count"], 5)
         self.assertEqual(preview["changed_count"], 1)
         self.assertEqual(preview["rows"][1]["representative_party_code"], "VN-1")
         approved = await self.client.post(
             path + "/previews/" + preview["preview_id"] + "/approve"
         )
         self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertIsNone((await self.client.get(path)).json()["approved_preview_id"])
+        completed = await self.client.post(
+            path + "/previews/" + preview["preview_id"] + "/complete"
+        )
+        self.assertEqual(completed.status_code, 200, completed.text)
+        self.assertEqual(
+            (await self.client.get(path)).json()["approved_preview_id"],
+            preview["preview_id"],
+        )
 
         invalid = await self.client.post(path + "/preview", json={"decisions": [{
             "group_id": group["group_id"], "decision": "APPROVE",
@@ -139,6 +162,37 @@ class CounterpartyContract(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post(
             "/jobs", json=payload
         )).status_code, 422)
+        payload = self.payload([["A", "", "VN"], ["B", "", "VN"]])
+        self.assertEqual((await self.client.post("/jobs", json=payload)).status_code, 422)
+
+    async def test_policy_suggestion_application_and_disjoint_groups(self):
+        payload = self.payload([
+            ["ACME COMPANY A", "P1", "US"],
+            ["ACME COMPANY B", "P2", "US"],
+            ["ACME COMPANY C", "P3", "US"],
+            ["OTHER CO LTD", "P4", "US"],
+            ["OTHER", "P5", "US"],
+        ])
+        created = (await self.client.post("/jobs", json=payload)).json()
+        self.assertEqual(len(created["candidate_groups"]), 1)
+        self.assertEqual(
+            len(created["candidate_groups"][0]["rows"]), 3,
+        )
+        path = "/jobs/" + payload["job_id"]
+        suggestion = await self.client.post(
+            path + "/policy/suggest", json={"instruction": "CO와 LTD는 빼줘"}
+        )
+        self.assertEqual(suggestion.status_code, 200, suggestion.text)
+        self.assertEqual(suggestion.json()["policy"]["ignored_terms"], ["CO", "LTD"])
+        applied = await self.client.post(path + "/policy", json=suggestion.json()["policy"])
+        self.assertEqual(applied.status_code, 200, applied.text)
+        result = applied.json()
+        self.assertEqual(result["status"], "CANDIDATES_READY")
+        self.assertEqual(result["policy"]["similarity_threshold"], 0.85)
+        self.assertTrue(any(
+            {row["party_code"] for row in group["rows"]} == {"P4", "P5"}
+            for group in result["candidate_groups"]
+        ))
 
 
 if __name__ == "__main__":

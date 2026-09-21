@@ -119,6 +119,34 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conv["workflow"]["phase"], "WAITING_SELECTION")
         self.assertEqual(len(conv["messages"]), 2)
 
+    async def test_counterparty_policy_followup_opens_draft_action(self):
+        job = {
+            "conversation_id": self.cid, "job_id": str(uuid4()),
+            "worksheet_id": "sheet-1", "sheet_name": "Sheet1",
+            "address": "Sheet1!A1:C3", "row_start": 0, "column_start": 0,
+            "row_count": 3, "headers": ["부호", "국가", "상호"],
+            "mapping": {"party_code": 0, "country_code": 1, "company_name": 2},
+            "rows": [
+                {"cells": ["P1", "US", "ACME CO LTD"]},
+                {"cells": ["P2", "US", "ACME"]},
+            ],
+        }
+        self.assertEqual((await self.client.post("/jobs", json=job)).status_code, 200)
+        self.runtime.request_router_graph.content = json.dumps({
+            "intent": "task_followup", "task_type": None,
+            "answer": "기준 제안", "policy_change": True,
+        })
+        self.runtime.chat_graph.content = "제안된 기준 초안을 화면에서 확인하세요."
+        message = "CO와 LTD는 빼고 비교해줘"
+        answer = await self.client.post("/chat", json={
+            "conversation_id": self.cid, "request_id": str(uuid4()),
+            "message": message,
+        })
+        self.assertEqual(answer.status_code, 200, answer.text)
+        self.assertEqual(answer.json()["ui_action"], {
+            "type": "review_counterparty_policy", "instruction": message,
+        })
+
     async def test_general_chat_and_failure(self):
         self.runtime.request_router_graph.content = json.dumps({
             "intent": "general", "task_type": "null", "answer": "일반 질문"
@@ -148,7 +176,7 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
 
     async def test_route_contract(self):
         schema = (await self.client.get("/openapi.json")).json()
-        self.assertEqual(set(schema["paths"]), {"/health", "/chat", "/conversations", "/conversations/{conversation_id}", "/jobs", "/jobs/{job_id}", "/jobs/{job_id}/analyze", "/jobs/{job_id}/preview", "/jobs/{job_id}/previews/{preview_id}/approve", "/jobs/{job_id}/previews/{preview_id}/complete"})
+        self.assertEqual(set(schema["paths"]), {"/health", "/chat", "/conversations", "/conversations/{conversation_id}", "/jobs", "/jobs/{job_id}", "/jobs/{job_id}/analyze", "/jobs/{job_id}/policy", "/jobs/{job_id}/policy/suggest", "/jobs/{job_id}/preview", "/jobs/{job_id}/previews/{preview_id}/approve", "/jobs/{job_id}/previews/{preview_id}/complete"})
         response_schema = schema["paths"]["/jobs/{job_id}/preview"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
         self.assertEqual(
             {item["$ref"] for item in response_schema["anyOf"]},

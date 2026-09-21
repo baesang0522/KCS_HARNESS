@@ -5,9 +5,12 @@ from fastapi import APIRouter, Request
 from services.errors import ConflictError
 from services.jobs.counterparty_cleanup import service as counterparty_service
 from services.jobs.counterparty_cleanup.schemas import (
+    CounterpartyPolicy,
     CounterpartyPreview,
     CreateJobRequest as CounterpartyCreateJobRequest,
     Job as CounterpartyJob,
+    PolicySuggestion,
+    PolicySuggestionRequest,
     PreviewRequest as CounterpartyPreviewRequest,
 )
 from services.jobs.model_normalization import service as model_service
@@ -24,6 +27,24 @@ from services.jobs.formula.schemas import (
 )
 
 router = APIRouter(prefix="/jobs")
+
+
+@router.post("/{job_id}/policy/suggest", response_model=PolicySuggestion)
+async def suggest_counterparty_policy(
+    job_id: UUID, payload: PolicySuggestionRequest, request: Request,
+):
+    return await counterparty_service.suggest_policy(
+        job_id, payload, request.app.state.jobs, request.app.state.runtime,
+    )
+
+
+@router.post("/{job_id}/policy")
+async def apply_counterparty_policy(
+    job_id: UUID, payload: CounterpartyPolicy, request: Request,
+):
+    return counterparty_service.apply_policy(
+        job_id, payload, request.app.state.jobs,
+    )
 
 
 @router.post("")
@@ -129,6 +150,7 @@ async def complete_preview(
     preview_id: UUID,
     request: Request,
 ):
-    return formula_service.complete_job(
-        job_id, preview_id, request.app.state.jobs,
-    )
+    jobs = request.app.state.jobs
+    if isinstance(jobs.get(str(job_id)), CounterpartyJob):
+        return counterparty_service.complete_preview(job_id, preview_id, jobs)
+    return formula_service.complete_job(job_id, preview_id, jobs)

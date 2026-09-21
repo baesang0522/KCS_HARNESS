@@ -237,24 +237,32 @@
             var sheets = context.workbook.worksheets;
             sheets.load("items/name");
             await context.sync();
-            if (sheets.items.some(function (sheet) { return sheet.name === sheetName; })) {
-                throw new Error(sheetName + " 시트가 이미 있습니다. 이전 출력 결과를 확인하세요.");
+            var existing = sheets.items.find(function (sheet) { return sheet.name === sheetName; });
+            if (existing) {
+                existing.activate();
+                await context.sync();
+                return {sheet_name: sheetName, row_count: preview.rows.length, existing: true};
             }
 
             var values = [[
                 "원본 행 번호", "국가코드", "상호명", "기존 해외거래처부호",
-                "대표 해외거래처부호", "변경 여부", "후보 그룹"
+                "대표 해외거래처부호", "변경 여부", "후보 그룹",
+                "적용 유사도 기준", "무시 단어"
             ]].concat(preview.rows.map(function (row) {
                 return [
                     row.excel_row, row.country_code, row.company_name,
                     row.original_party_code, row.representative_party_code,
-                    row.changed ? "변경" : "유지", row.group_id
+                    row.changed ? "변경" : "유지", row.group_id,
+                    preview.policy.similarity_threshold,
+                    preview.policy.ignored_terms.join(", ")
                 ];
             }));
             var sheet = sheets.add(sheetName);
-            var range = sheet.getRange("A1:G" + values.length);
+            var range = sheet.getRange("A1:I" + values.length);
             range.numberFormat = values.map(function () {
-                return ["@", "@", "@", "@", "@", "@", "@"];
+                return [
+                    "@", "@", "@", "@", "@", "@", "@", "0%", "@"
+                ];
             });
             await context.sync();
             range.values = values.map(function (row) {
@@ -262,10 +270,10 @@
                     return typeof value === "string" && value !== "" ? "'" + value : value;
                 });
             });
-            sheet.getRange("A1:G1").format.font.bold = true;
+            sheet.getRange("A1:I1").format.font.bold = true;
             preview.rows.forEach(function (row, index) {
                 if (row.changed) {
-                    sheet.getRange("A" + (index + 2) + ":G" + (index + 2))
+                    sheet.getRange("A" + (index + 2) + ":I" + (index + 2))
                         .format.fill.color = "#FFF2CC";
                 }
             });

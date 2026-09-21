@@ -241,6 +241,13 @@ async def process_chat(*, runtime, repository, jobs: dict,
             )
             raise ModelProcessingError("모델 처리에 실패했습니다. 하네스 로그를 확인하세요.") from error
 
+        action = None
+        if decision.intent == "task_followup" and decision.policy_change:
+            action = {
+                "type": "review_counterparty_policy",
+                "instruction": message,
+            }
+
         # 모델 호출이 성공한 뒤 질문·답변을 함께 저장한다.
         await conversation.save_turn(
             StoredTurn(
@@ -248,7 +255,7 @@ async def process_chat(*, runtime, repository, jobs: dict,
                 question=message,
                 answer=answer,
                 reasoning=reasoning,
-                ui_action=None,
+                ui_action=action,
             )
         )
 
@@ -257,5 +264,5 @@ async def process_chat(*, runtime, repository, jobs: dict,
             request_id=rid,
             answer=answer,
             reasoning=reasoning,
-            ui_action=None,
+            ui_action=action,
         )

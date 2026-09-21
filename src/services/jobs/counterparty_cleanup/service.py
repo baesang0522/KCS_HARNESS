@@ -7,12 +7,11 @@ from uuid import UUID
 from langchain_core.messages import AIMessage, HumanMessage
 
 from services.chat_state import WorkFlowState
-from services.errors import ConflictError, NotFoundError
-from services.jobs.counterparty_cleanup.rule_engine import (
-    SIMILARITY_THRESHOLD, candidate_groups, model_review_input,
-)
+from services.errors import ConflictError, ModelProcessingError, NotFoundError
+from services.jobs.counterparty_cleanup.rule_engine import candidate_groups, model_review_input
 from services.jobs.counterparty_cleanup.schemas import (
-    CounterpartyPreview, CreateJobRequest, Job, ModelReviewResponse,
+    CounterpartyPolicy, CounterpartyPreview, CreateJobRequest, Job,
+    ModelReviewResponse, PolicySuggestion, PolicySuggestionRequest,
     PreviewRequest, PreviewRow, ReviewResult,
 )
 
@@ -55,9 +54,13 @@ def public_job(job: Job) -> dict:
         "country_codes": countries,
         "missing_counts": missing,
         "same_country_only": True,
+        "policy": job.policy.model_dump(),
+        "policy_suggestion": (
+            job.policy_suggestion.model_dump() if job.policy_suggestion else None
+        ),
         "grouping_policy": (
             "같은 국가코드끼리만 그룹핑. 완전 일치 또는 문자열 유사도 "
-            f"{SIMILARITY_THRESHOLD} 이상만 검토 후보로 표시하며 자동 통합하지 않습니다."
+            f"{job.policy.similarity_threshold} 이상만 검토 후보로 표시하며 자동 통합하지 않습니다."
         ),
         "candidate_groups": groups,
         "review_results": reviews,
@@ -81,6 +84,7 @@ def job_context(job: Job) -> dict:
         "address": public["address"],
         "data_row_count": public["data_row_count"],
         "same_country_only": True,
+        "policy": public["policy"],
         "grouping_policy": public["grouping_policy"],
         "samples": public["samples"],
         "final_candidate_count": len(public["final_candidates"]),
@@ -179,6 +183,57 @@ async def review_candidates(
     return public_job(job)
 
 
+async def suggest_policy(
+    job_id: UUID, payload: PolicySuggestionRequest, jobs: dict, runtime,
+) -> PolicySuggestion:
+    job = find_job(jobs, job_id)
+    source, mapping = job.source, job.source.mapping
+    names = list(dict.fromkeys(
+        row.cells[mapping.company_name].strip()
+        for row in source.rows
+        if row.cells[mapping.company_name].strip()
+    ))[:100]
+    prompt = json.dumps({
+        "instruction": payload.instruction.strip(),
+        "current_policy": job.policy.model_dump(),
+        "company_name_samples": names,
+        "fixed_rule": "국가코드가 같은 행만 비교",
+    }, ensure_ascii=False)
+    try:
+        response = await asyncio.wait_for(
+            runtime.counterparty_policy_graph.ainvoke({
+                "messages": [HumanMessage(content=prompt)],
+                "request_id": f"{job_id}:policy",
+                "tool_history": [],
+            }),
+            timeout=runtime.settings.llm.timeout_seconds + 10,
+        )
+        last = response["messages"][-1]
+        if (not isinstance(last, AIMessage) or last.tool_calls
+                or not isinstance(last.content, str)):
+            raise ValueError("유효한 정제 기준 추천이 없습니다.")
+        suggestion = PolicySuggestion.model_validate_json(last.content)
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        logger.exception("해외거래처 정제 기준 추천 실패: job_id=%s", job_id)
+        raise ModelProcessingError("정제 기준 추천에 실패했습니다. 다시 시도하세요.") from error
+    job.policy_suggestion = suggestion
+    return suggestion
+
+
+def apply_policy(job_id: UUID, policy: CounterpartyPolicy, jobs: dict) -> dict:
+    job = find_job(jobs, job_id)
+    job.policy = policy
+    job.policy_suggestion = None
+    job.review_results = []
+    job.preview = None
+    job.approved_preview_id = None
+    job.status = "CANDIDATES_READY"
+    job.error = ""
+    return public_job(job)
+
+
 async def preview_job(
     job_id: UUID, payload: PreviewRequest, jobs: dict,
 ) -> CounterpartyPreview:
@@ -194,7 +249,7 @@ async def preview_job(
     if len(decisions) != len(payload.decisions) or set(decisions) != set(candidates):
         raise ConflictError("현재 최종 후보 전체를 승인 또는 제외로 확인하세요.")
 
-    rows: dict[int, PreviewRow] = {}
+    approved_rows: dict[int, tuple[str, str]] = {}
     for group_id, decision in decisions.items():
         if decision.decision == "EXCLUDE":
             continue
@@ -203,24 +258,34 @@ async def preview_job(
         if representative not in candidate.existing_party_codes:
             raise ConflictError("대표 해외거래처부호는 후보의 기존 부호 중에서 선택하세요.")
         for row in candidate.rows:
-            existing = rows.get(row["excel_row"])
-            if existing and existing.representative_party_code != representative:
+            existing = approved_rows.get(row["excel_row"])
+            if existing and existing[0] != representative:
                 raise ConflictError(
                     f"{row['excel_row']}행이 서로 다른 대표 부호로 중복 승인됐습니다."
                 )
-            if existing:
-                continue
-            rows[row["excel_row"]] = PreviewRow(
-                group_id=group_id,
-                excel_row=row["excel_row"],
-                country_code=candidate.country_code,
-                company_name=row["company_name"],
-                original_party_code=row["party_code"],
-                representative_party_code=representative,
-                changed=row["party_code"].strip() != representative,
-            )
+            approved_rows[row["excel_row"]] = (representative, group_id)
 
-    ordered = tuple(rows[key] for key in sorted(rows))
+    source, mapping = job.source, job.source.mapping
+    ordered = tuple(
+        PreviewRow(
+            group_id=approved_rows.get(excel_row, ("", ""))[1],
+            excel_row=excel_row,
+            country_code=row.cells[mapping.country_code],
+            company_name=row.cells[mapping.company_name],
+            original_party_code=row.cells[mapping.party_code],
+            representative_party_code=approved_rows.get(
+                excel_row, (row.cells[mapping.party_code], "")
+            )[0],
+            changed=(
+                row.cells[mapping.party_code].strip()
+                != approved_rows.get(
+                    excel_row, (row.cells[mapping.party_code].strip(), "")
+                )[0]
+            ),
+        )
+        for index, row in enumerate(source.rows)
+        if (excel_row := source.row_start + index + 2)
+    )
     preview = CounterpartyPreview(
         decisions=payload.decisions,
         approved_group_count=sum(
@@ -232,6 +297,7 @@ async def preview_job(
         row_count=len(ordered),
         changed_count=sum(row.changed for row in ordered),
         rows=ordered,
+        policy=job.policy,
     )
     job.preview = preview
     job.approved_preview_id = None
@@ -248,5 +314,11 @@ def approve_preview(
         or job.preview.preview_id != preview_id
     ):
         raise ConflictError("확인한 미리보기가 현재 결과와 다릅니다. 다시 확인하세요.")
-    job.approved_preview_id = preview_id
     return job.preview
+
+
+def complete_preview(job_id: UUID, preview_id: UUID, jobs: dict) -> CounterpartyPreview:
+    preview = approve_preview(job_id, preview_id, jobs)
+    job = find_job(jobs, job_id)
+    job.approved_preview_id = preview_id
+    return preview

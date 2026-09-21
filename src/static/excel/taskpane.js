@@ -165,6 +165,11 @@
     async function handleUIAction(action, instruction) {
         if (!action) return;
 
+        if (action.type === "review_counterparty_policy") {
+            counterparty.openPolicy(action.instruction);
+            return;
+        }
+
         if (action.type !== "confirm_selection") {
             throw new Error("지원하지 않는 화면 요청입니다.");
         }

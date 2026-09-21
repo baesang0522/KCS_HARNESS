@@ -12,6 +12,7 @@ class RequestDecision(BaseModel):
     task_type: Literal["model_normalization", "counterparty_cleanup", "formula"] | None = None
 
     answer: str = Field(min_length=1, max_length=2000)
+    policy_change: bool = False
 
     @field_validator("task_type", mode="before")
     @classmethod
@@ -103,5 +104,11 @@ async def route_request(
 
     if decision.intent == "task_followup" and active_job is None:
         raise ValueError("후속 질문을 연결할 현재 작업이 없습니다.")
+    if decision.policy_change and (
+        decision.intent != "task_followup"
+        or not active_job
+        or active_job["task_type"] != "counterparty_cleanup"
+    ):
+        raise ValueError("해외거래처 후속 요청에서만 정제 기준을 변경할 수 있습니다.")
 
     return decision

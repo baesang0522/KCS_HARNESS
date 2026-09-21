@@ -9,6 +9,7 @@
         var canApprove = false;
         var currentPreview = null;
         var exported = false;
+        var policyDraft = null;
 
         function render(job) {
             canReview = job.status !== "REVIEW_READY" && job.candidate_groups.length > 0;
@@ -20,10 +21,24 @@
             exported = false;
             ui.clearApprovalPreview();
         }
+        async function ensureJob() {
+            var indexes = ui.getMapping();
+            if (new Set(indexes).size !== 3) throw new Error("부호·국가·상호에 서로 다른 열을 지정하세요.");
+            if (!payload) payload = Object.assign({}, selection, {
+                conversation_id: options.getConversationId(),
+                job_id: options.api.newRequestId(),
+                mapping: {party_code: indexes[0], country_code: indexes[1], company_name: indexes[2]}
+            });
+            return await options.api.requestJson("/jobs", {
+                method: "POST", headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(payload)
+            });
+        }
         async function selectRange() {
             if (options.isBusy()) return;
             ui.beginSelection();
             selection = payload = null;
+            policyDraft = null;
             canReview = canApprove = false;
             clearApproval();
             options.setBusy(true);
@@ -40,20 +55,54 @@
             if (!selection || options.isBusy()) return;
             options.setBusy(true);
             try {
-                var indexes = ui.getMapping();
-                if (new Set(indexes).size !== 3) throw new Error("부호·국가·상호에 서로 다른 열을 지정하세요.");
-                if (!payload) payload = Object.assign({}, selection, {
-                    conversation_id: options.getConversationId(),
-                    job_id: options.api.newRequestId(),
-                    mapping: {party_code: indexes[0], country_code: indexes[1], company_name: indexes[2]}
-                });
-                var job = await options.api.requestJson("/jobs", {
-                    method: "POST", headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify(payload)
-                });
+                await ensureJob();
                 clearApproval();
+                ui.setStatus("후보를 찾고 모델이 검토하고 있습니다…");
+                var job = await options.api.requestJson(
+                    "/jobs/" + payload.job_id + "/analyze?conversation_id=" +
+                    encodeURIComponent(payload.conversation_id), {method: "POST"}
+                );
                 render(job);
             } catch (error) { ui.setStatus(error.message); }
+            finally { options.setBusy(false); }
+        }
+        async function suggestPolicy() {
+            if (!selection || options.isBusy()) return;
+            options.setBusy(true);
+            ui.setStatus("정제 기준을 추천하고 있습니다…");
+            try {
+                await ensureJob();
+                policyDraft = await options.api.requestJson(
+                    "/jobs/" + payload.job_id + "/policy/suggest", {
+                        method: "POST", headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({instruction: ui.getPolicyInstruction()})
+                    }
+                );
+                ui.showPolicySuggestion(policyDraft);
+                ui.setStatus("제안된 기준을 확인한 뒤 적용하세요.");
+            } catch (error) { ui.setStatus("기준 추천 실패: " + error.message); }
+            finally { options.setBusy(false); }
+        }
+        async function applyPolicy() {
+            if (!payload || !policyDraft || options.isBusy()) return;
+            options.setBusy(true);
+            try {
+                var job = await options.api.requestJson(
+                    "/jobs/" + payload.job_id + "/policy", {
+                        method: "POST", headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify(policyDraft.policy)
+                    }
+                );
+                clearApproval();
+                ui.clearPolicySuggestion();
+                policyDraft = null;
+                ui.setStatus("새 기준으로 후보를 찾고 모델이 검토하고 있습니다…");
+                job = await options.api.requestJson(
+                    "/jobs/" + payload.job_id + "/analyze?conversation_id=" +
+                    encodeURIComponent(payload.conversation_id), {method: "POST"}
+                );
+                render(job);
+            } catch (error) { ui.setStatus("기준 적용 실패: " + error.message); }
             finally { options.setBusy(false); }
         }
         async function review() {
@@ -78,8 +127,9 @@
                     "/jobs/" + payload.job_id + "?conversation_id=" +
                     encodeURIComponent(payload.conversation_id)
                 );
-                clearApproval();
+                var decisions = ui.getDecisionState();
                 render(job);
+                ui.restoreDecisionState(decisions);
             } catch (error) { ui.setStatus(error.message); }
             finally { options.setBusy(false); }
         }
@@ -111,6 +161,10 @@
                     throw new Error("확인한 결과와 승인된 결과가 다릅니다.");
                 }
                 var result = await options.excel.writeCounterpartyPreview(approved);
+                await options.api.requestJson(
+                    "/jobs/" + payload.job_id + "/previews/" +
+                    currentPreview.preview_id + "/complete", {method: "POST"}
+                );
                 exported = true;
                 ui.setExported(result);
                 ui.setStatus(result.sheet_name + "에 승인 결과 " + result.row_count + "행을 출력했습니다.");
@@ -121,21 +175,28 @@
         ui.bind({
             select: selectRange, create: create, review: review, refresh: refresh,
             preview: previewApproval, export: exportPreview,
+            suggestPolicy: suggestPolicy, applyPolicy: applyPolicy,
             decisionChange: clearApproval,
             mappingChange: function () {
-                payload = null; canReview = canApprove = false; clearApproval();
+                payload = null; policyDraft = null; canReview = canApprove = false; clearApproval();
+                ui.clearCandidates(); ui.clearPolicySuggestion();
                 ui.setStatus("열 역할 변경됨 · 다시 확인하세요.");
             }
         });
         return {
             openAndSelect: function () { ui.open(); window.setTimeout(selectRange, 0); },
+            openPolicy: function (instruction) {
+                ui.open();
+                ui.setPolicyInstruction(instruction);
+                window.setTimeout(suggestPolicy, 0);
+            },
             reset: function () {
                 selection = payload = null; canReview = canApprove = false;
-                currentPreview = null; exported = false; ui.reset();
+                currentPreview = null; policyDraft = null; exported = false; ui.reset();
             },
             setBusy: function (busy) {
                 ui.setBusy(busy, payload !== null, canReview, canApprove,
-                    currentPreview !== null, exported);
+                    currentPreview !== null, exported, policyDraft !== null);
             }
         };
     };
