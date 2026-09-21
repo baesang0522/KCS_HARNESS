@@ -1,7 +1,7 @@
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 CellText = Annotated[str, Field(max_length=1000)]
@@ -25,6 +25,31 @@ class InputRow(BaseModel):
     cells: list[CellText] = Field(min_length=3, max_length=3)
 
 
+class CounterpartyPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    similarity_threshold: float = Field(default=0.9, ge=0.8, le=1.0)
+    ignored_terms: tuple[str, ...] = Field(default=(), max_length=30)
+
+    @field_validator("ignored_terms")
+    @classmethod
+    def normalize_terms(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        cleaned = tuple(dict.fromkeys(value.strip().upper() for value in values if value.strip()))
+        if any(len(value) > 50 for value in cleaned):
+            raise ValueError("무시할 단어는 각각 50자 이하여야 합니다.")
+        return cleaned
+
+
+class PolicySuggestionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    instruction: str = Field(default="", max_length=1000)
+
+
+class PolicySuggestion(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    policy: CounterpartyPolicy
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class CreateJobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     conversation_id: UUID
@@ -45,8 +70,14 @@ class CreateJobRequest(BaseModel):
             raise ValueError("선택 범위의 데이터 행 수와 전송된 행 수가 다릅니다.")
         if any(not header.strip() for header in self.headers):
             raise ValueError("세 열의 머리글을 포함해 선택하세요.")
-        if not any(row.cells[self.mapping.company_name].strip() for row in self.rows):
-            raise ValueError("선택한 상호명 열이 모두 비어 있습니다.")
+        labels = {
+            "party_code": "해외거래처부호",
+            "country_code": "국가코드",
+            "company_name": "상호명",
+        }
+        for role, index in self.mapping.model_dump().items():
+            if not any(row.cells[index].strip() for row in self.rows):
+                raise ValueError(f"선택한 {labels[role]} 열이 모두 비어 있습니다.")
         return self
 
 
@@ -113,6 +144,7 @@ class CounterpartyPreview(BaseModel):
     row_count: int
     changed_count: int
     rows: tuple[PreviewRow, ...]
+    policy: CounterpartyPolicy
 
 
 class Job(BaseModel):
@@ -121,6 +153,8 @@ class Job(BaseModel):
         "CANDIDATES_READY", "REVIEWING", "REVIEW_READY", "REVIEW_FAILED"
     ] = "CANDIDATES_READY"
     source: CreateJobRequest
+    policy: CounterpartyPolicy = Field(default_factory=CounterpartyPolicy)
+    policy_suggestion: PolicySuggestion | None = None
     same_country_only: Literal[True] = True
     review_results: list[ReviewResult] = Field(default_factory=list)
     preview: CounterpartyPreview | None = None

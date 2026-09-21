@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Literal
+from typing import Annotated, Literal
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -19,13 +19,24 @@ class ChatRequest(BaseModel):
         return value
 
 
-class UIAction(BaseModel):
+class ConfirmSelectionAction(BaseModel):
     type: Literal["confirm_selection"]
     task_type: Literal[
         "model_normalization",
         "counterparty_cleanup",
         "formula",
     ]
+
+
+class CounterpartyPolicyAction(BaseModel):
+    type: Literal["review_counterparty_policy"]
+    instruction: str = Field(min_length=1, max_length=1000)
+
+
+UIAction = Annotated[
+    ConfirmSelectionAction | CounterpartyPolicyAction,
+    Field(discriminator="type"),
+]
 
 
 class ChatResponse(BaseModel):

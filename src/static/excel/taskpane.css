@@ -150,6 +150,11 @@ button:disabled{cursor:default;opacity:.5}
 #party-review{background:#75609d;color:white;border-color:#75609d}
 #party-export{background:#75609d;color:white;border-color:#75609d}
 #party-status{white-space:pre-line}
+.party-policy{margin:12px 0;padding:10px;border:1px solid #e5dff0;border-radius:8px;background:#faf9fc}
+.party-policy h3{margin:0 0 7px;font-size:12px;color:#5f4d7b}
+.party-policy textarea{min-height:52px;margin-top:5px;padding:7px;border:1px solid #e3dfea;border-radius:7px;background:#fff}
+.party-policy pre{margin:6px 0;max-height:140px}
+#party-policy-apply{background:#75609d;color:#fff;border-color:#75609d}
 .formula-ranges{margin:8px 0 10px;padding:8px 10px;border-radius:8px;background:#faf9fc}
 .formula-range-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:3px 0!important;font-size:11px!important}
 .formula-range-row strong{font-weight:600;color:#4d4164}

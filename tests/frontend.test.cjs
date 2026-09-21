@@ -157,7 +157,6 @@ test('거래처 컨트롤러는 후보 검토·승인 미리보기 뒤 같은 �
     });
     await handlers.select();
     await handlers.create();
-    await handlers.review();
     await handlers.preview();
     await handlers.export();
     assert.equal(calls[0].url, '/jobs');
@@ -178,4 +177,49 @@ test('거래처 화면·컨트롤러도 Excel과 HTTP 구현을 직접 소유하
     const html = readFileSync(path.join(root, 'taskpane.html'), 'utf8');
     assert.ok(html.indexOf('src="counterparty_ui.js"') < html.indexOf('src="counterparty.js"'));
     assert.ok(html.indexOf('src="counterparty.js"') < html.indexOf('src="taskpane.js"'));
+});
+
+test('채팅의 자연어 거래처 기준을 추천 초안으로 열고 자동 적용하지 않는다', async () => {
+    let handlers, busy = false, pending, instruction = '', shown = null;
+    const calls = [];
+    const ui = {
+        bind(value) { handlers = value; }, open() {}, beginSelection() {},
+        showSelection() {}, setStatus() {}, setBusy() {}, reset() {},
+        clearApprovalPreview() {}, clearCandidates() {}, clearPolicySuggestion() {},
+        getMapping() { return [0, 1, 2]; }, renderJob() {},
+        getPolicyInstruction() { return instruction; },
+        setPolicyInstruction(value) { instruction = value; },
+        showPolicySuggestion(value) { shown = value; },
+        getDecisionState() { return []; }, restoreDecisionState() {},
+    };
+    const api = {
+        newRequestId() { return 'job-1'; },
+        async requestJson(url, options) {
+            calls.push({url, options});
+            if (url.endsWith('/policy/suggest')) return {
+                policy: {similarity_threshold: 0.85, ignored_terms: ['CO', 'LTD']},
+                reason: '반복 법인 표기'
+            };
+            return {status: 'CANDIDATES_READY', candidate_groups: [], final_candidates: [],
+                policy: {similarity_threshold: 0.9, ignored_terms: []}};
+        }
+    };
+    const win = load('counterparty.js');
+    win.setTimeout = function (callback) { pending = Promise.resolve().then(callback); };
+    const controller = win.createCounterpartyController({
+        ui, api,
+        excel: {async readCounterpartyRows() {
+            return {headers: ['부호', '국가', '상호'], rows: [{cells: ['P1', 'US', 'ACME']}]} ;
+        }},
+        isReady: () => true, isBusy: () => busy,
+        setBusy(value) { busy = value; controller.setBusy(value); },
+        getConversationId: () => 'conversation-1'
+    });
+    await handlers.select();
+    controller.openPolicy('CO와 LTD는 빼고 85% 이상으로 비교해줘');
+    await pending;
+    assert.equal(instruction, 'CO와 LTD는 빼고 85% 이상으로 비교해줘');
+    assert.equal(shown.policy.similarity_threshold, 0.85);
+    assert.deepEqual(shown.policy.ignored_terms, ['CO', 'LTD']);
+    assert.equal(calls.filter(call => call.url.endsWith('/policy')).length, 0);
 });
