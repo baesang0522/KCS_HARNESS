@@ -12,8 +12,6 @@
         var sourceText = document.getElementById("norm-source");
         var preview = document.getElementById("norm-preview");
         var statusText = document.getElementById("norm-status");
-        panel.querySelector("h2").textContent =
-            "모델규격 정제 · 규칙선택 v2";
         var selects = ["norm-trade", "norm-declared", "norm-spec"].map(function (id) {
             return document.getElementById(id);
         });
