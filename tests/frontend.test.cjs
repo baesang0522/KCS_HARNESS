@@ -157,7 +157,6 @@ test('거래처 컨트롤러는 후보 검토·승인 미리보기 뒤 같은 �
     });
     await handlers.select();
     await handlers.create();
-    await handlers.review();
     await handlers.preview();
     await handlers.export();
     assert.equal(calls[0].url, '/jobs');

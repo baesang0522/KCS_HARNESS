@@ -5,14 +5,12 @@
         var ui = options.ui;
         var selection = null;
         var payload = null;
-        var canReview = false;
         var canApprove = false;
         var currentPreview = null;
         var exported = false;
         var policyDraft = null;
 
         function render(job) {
-            canReview = job.status !== "REVIEW_READY" && job.candidate_groups.length > 0;
             canApprove = job.status === "REVIEW_READY" && job.final_candidates.length > 0;
             ui.renderJob(job);
         }
@@ -39,7 +37,7 @@
             ui.beginSelection();
             selection = payload = null;
             policyDraft = null;
-            canReview = canApprove = false;
+            canApprove = false;
             clearApproval();
             options.setBusy(true);
             try {
@@ -105,34 +103,6 @@
             } catch (error) { ui.setStatus("기준 적용 실패: " + error.message); }
             finally { options.setBusy(false); }
         }
-        async function review() {
-            if (!payload || !canReview || options.isBusy()) return;
-            options.setBusy(true);
-            ui.setStatus("모델이 후보를 검토하고 있습니다…");
-            try {
-                var job = await options.api.requestJson(
-                    "/jobs/" + payload.job_id + "/analyze?conversation_id=" +
-                    encodeURIComponent(payload.conversation_id), {method: "POST"}
-                );
-                clearApproval();
-                render(job);
-            } catch (error) { ui.setStatus(error.message); }
-            finally { options.setBusy(false); }
-        }
-        async function refresh() {
-            if (!payload || options.isBusy()) return;
-            options.setBusy(true);
-            try {
-                var job = await options.api.requestJson(
-                    "/jobs/" + payload.job_id + "?conversation_id=" +
-                    encodeURIComponent(payload.conversation_id)
-                );
-                var decisions = ui.getDecisionState();
-                render(job);
-                ui.restoreDecisionState(decisions);
-            } catch (error) { ui.setStatus(error.message); }
-            finally { options.setBusy(false); }
-        }
         async function previewApproval() {
             if (!payload || !canApprove || options.isBusy()) return;
             options.setBusy(true);
@@ -173,12 +143,12 @@
         }
 
         ui.bind({
-            select: selectRange, create: create, review: review, refresh: refresh,
+            select: selectRange, create: create,
             preview: previewApproval, export: exportPreview,
             suggestPolicy: suggestPolicy, applyPolicy: applyPolicy,
             decisionChange: clearApproval,
             mappingChange: function () {
-                payload = null; policyDraft = null; canReview = canApprove = false; clearApproval();
+                payload = null; policyDraft = null; canApprove = false; clearApproval();
                 ui.clearCandidates(); ui.clearPolicySuggestion();
                 ui.setStatus("열 역할 변경됨 · 다시 확인하세요.");
             }
@@ -191,12 +161,12 @@
                 window.setTimeout(suggestPolicy, 0);
             },
             reset: function () {
-                selection = payload = null; canReview = canApprove = false;
+                selection = payload = null; canApprove = false;
                 currentPreview = null; policyDraft = null; exported = false; ui.reset();
             },
             setBusy: function (busy) {
-                ui.setBusy(busy, payload !== null, canReview, canApprove,
-                    currentPreview !== null, exported, policyDraft !== null);
+                ui.setBusy(busy, canApprove, currentPreview !== null,
+                    exported, policyDraft !== null);
             }
         };
     };

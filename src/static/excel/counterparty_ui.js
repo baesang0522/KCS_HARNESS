@@ -11,10 +11,8 @@
         var approvalResult = document.getElementById("party-approval-result");
         var selectButton = document.getElementById("party-select");
         var createButton = document.getElementById("party-create");
-        var reviewButton = document.getElementById("party-review");
         var previewButton = document.getElementById("party-approval-preview");
         var exportButton = document.getElementById("party-export");
-        var refreshButton = document.getElementById("party-refresh");
         var policyCurrent = document.getElementById("party-policy-current");
         var policyRequest = document.getElementById("party-policy-request");
         var policySuggestButton = document.getElementById("party-policy-suggest");
@@ -62,7 +60,7 @@
         function beginSelection() {
             open();
             mapping.hidden = candidates.hidden = true;
-            refreshButton.disabled = reviewButton.disabled = previewButton.disabled = true;
+            previewButton.disabled = true;
             clearApprovalPreview();
             clearPolicySuggestion();
         }
@@ -146,9 +144,7 @@
             }
             candidates.hidden = false;
             policyCurrent.textContent = "현재 기준 · " + formatPolicy(job.policy);
-            reviewButton.disabled = reviewed || !job.candidate_groups.length;
             previewButton.disabled = !reviewed || !groups.length;
-            refreshButton.disabled = false;
             var missingLabels = {party_code: "부호", country_code: "국가", company_name: "상호"};
             var missing = Object.keys(job.missing_counts).filter(function (role) {
                 return job.missing_counts[role] > 0;
@@ -236,11 +232,9 @@
             },
             setStatus: function (text) { status.textContent = text; },
             getMapping: function () { return selects.map(function (item) { return Number(item.value); }); },
-            setBusy: function (busy, hasPayload, canReview, canApprove, hasPreview, exported, hasPolicyDraft) {
+            setBusy: function (busy, canApprove, hasPreview, exported, hasPolicyDraft) {
                 selectButton.disabled = busy;
                 createButton.disabled = busy;
-                refreshButton.disabled = busy || !hasPayload;
-                reviewButton.disabled = busy || !hasPayload || !canReview;
                 previewButton.disabled = busy || !canApprove;
                 exportButton.disabled = busy || !hasPreview || exported || !previewHasRows;
                 policySuggestButton.disabled = busy;
@@ -250,10 +244,8 @@
             bind: function (handlers) {
                 selectButton.addEventListener("click", handlers.select);
                 createButton.addEventListener("click", handlers.create);
-                reviewButton.addEventListener("click", handlers.review);
                 previewButton.addEventListener("click", handlers.preview);
                 exportButton.addEventListener("click", handlers.export);
-                refreshButton.addEventListener("click", handlers.refresh);
                 policySuggestButton.addEventListener("click", handlers.suggestPolicy);
                 policyApplyButton.addEventListener("click", handlers.applyPolicy);
                 candidates.addEventListener("change", function (event) {
