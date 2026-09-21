@@ -1,8 +1,9 @@
 from collections.abc import Sequence
-
+from typing import get_args
 import pandas as pd
 
 from services.jobs.model_normalization.schemas import (
+    CreateJobRequest,
     NormalizationPreview,
     NormalizationRow,
     Operation,
@@ -32,6 +33,47 @@ def apply_rule(
     raise ValueError(
         f"지원하지 않는 정제 규칙입니다: {operation}"
     )
+
+
+def build_rule_examples(
+    source: CreateJobRequest,
+) -> dict[Operation, dict | None]:
+    """각 규칙을 원본에 단독 적용했을 때 변경되는 첫 행을 찾는다."""
+    examples = {
+        operation: None
+        for operation in get_args(Operation)
+    }
+
+    for offset in range(0, len(source.rows), 1000):
+        values = pd.Series(
+            [
+                row.cells[source.mapping.model_spec]
+                for row in source.rows[offset:offset + 1000]
+            ],
+            dtype=pd.StringDtype(storage="python"),
+        )
+
+        for operation in examples:
+            if examples[operation] is not None:
+                continue
+
+            normalized = apply_rule(values, operation)
+            changed = values.ne(normalized)
+
+            if changed.any():
+                index = int(changed.idxmax())
+
+                examples[operation] = {
+                    "excel_row": source.row_start + offset + index + 2,
+                    "original": values.iloc[index],
+                    "normalized": normalized.iloc[index],
+                }
+
+        # 모든 규칙의 예시를 찾았다면 더 읽을 필요가 없다.
+        if all(example is not None for example in examples.values()):
+            break
+
+    return examples
 
 
 def build_preview(

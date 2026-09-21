@@ -123,6 +123,7 @@ class CreateJobRequest(BaseModel):
 
 class Job(BaseModel):
     source: CreateJobRequest
+    rule_examples: dict[Operation, dict | None] = Field(default_factory=dict)
     preview: NormalizationPreview | None = None
     approved_preview_id: UUID | None = None
 

@@ -15,7 +15,7 @@
             ui.renderJob(job);
 
             if (job.status === "REVIEW_READY") {
-                ui.showRuleSelector();
+                ui.showRuleSelector(job.rule_examples || {});
             }
         }
 

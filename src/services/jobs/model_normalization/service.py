@@ -8,7 +8,10 @@ from langchain_core.messages import AIMessage, HumanMessage
 from utils.dataframe_utils import text_rows_to_dataframe
 from services.chat_state import WorkFlowState
 from services.errors import ConflictError, NotFoundError
-from services.jobs.model_normalization.rule_engine import build_preview
+from services.jobs.model_normalization.rule_engine import (
+    build_preview,
+    build_rule_examples,
+)
 from services.jobs.model_normalization.schemas import (
     CreateJobRequest, Job, NormalizationPreview, NormalizationRow, RuleSet,
 )
@@ -189,6 +192,7 @@ def public_job(job: Job) -> dict:
         "processed_row_count": job.processed_row_count,
         "analysis_batch_count": job.analysis_batch_count,
         "completed_analysis_batches": job.completed_analysis_batches,
+        "rule_examples": job.rule_examples,
         "analysis_phase": job.analysis_phase,
         "analysis": job.analysis,
         "error": job.error,
@@ -233,7 +237,7 @@ async def create_job(payload: CreateJobRequest, repository, jobs: dict) -> dict:
         if len(jobs) >= 100:
             raise ConflictError("개발용 작업 수 제한에 도달했습니다.")
 
-        job = Job(source=payload)
+        job = Job(source=payload, rule_examples=build_rule_examples(payload))
         jobs[key] = job
 
         attach_model_job(

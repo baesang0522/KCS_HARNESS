@@ -31,17 +31,14 @@
             {
                 operation: "normalize_fullwidth_ascii",
                 label: "전각 영문·숫자·기호 변환",
-                example: "ＡＢ－１００ → AB-100"
             },
             {
                 operation: "trim",
                 label: "앞뒤 공백 제거",
-                example: '"  AB-100  " → "AB-100"'
             },
             {
                 operation: "collapse_whitespace",
                 label: "연속 공백 통일",
-                example: '"AB-100   220V" → "AB-100 220V"'
             }
         ];
 
@@ -64,9 +61,22 @@
             exported = false;
         }
 
-        function showRuleSelector() {
+        function showRuleSelector(examples) {
             // 상태 조회나 분석 재시도로 선택 상태를 초기화하지 않는다.
             if (rulePanel || !resultText) return;
+
+            // 예시 정보 누락을 "적용할 규칙 없음"으로 판단하지 않는다.
+            if (!examples || ruleOptions.some(function (rule) {
+                return examples[rule.operation] === undefined;
+            })) {
+                statusText.textContent =
+                    "규칙 예시 정보가 없습니다. 범위를 다시 가져와 주세요.";
+                return;
+            }
+
+            var applicableRules = ruleOptions.filter(function (rule) {
+                return examples[rule.operation] !== null;
+            });
 
             rulePanel = document.createElement("fieldset");
             rulePanel.className = "norm-result-preview";
@@ -77,11 +87,19 @@
 
             var note = document.createElement("p");
             note.textContent =
-                "분석 내용을 참고해 필요한 규칙만 선택하세요. " +
-                "현재 실행 가능한 규칙은 아래 세 가지입니다.";
+                "필요한 규칙만 선택하세요. 예시는 선택한 실제 데이터에 " +
+                "각 규칙을 단독 적용한 결과입니다.";
             rulePanel.appendChild(note);
+            if (applicableRules.length === 0) {
+                legend.textContent = "정제 규칙 확인";
+                note.textContent =
+                    "현재 지원하는 세 규칙으로 변경되는 값이 없습니다.";
 
-            ruleInputs = ruleOptions.map(function (rule) {
+                resultText.parentElement.appendChild(rulePanel);
+                return;
+            }
+
+            ruleInputs = applicableRules.map(function (rule) {
                 var label = document.createElement("label");
                 label.style.display = "block";
                 label.style.margin = "10px 0";
@@ -96,9 +114,30 @@
                 });
 
                 label.appendChild(input);
-                label.appendChild(document.createTextNode(
-                    " " + rule.label + " · " + rule.example
-                ));
+                label.appendChild(document.createTextNode(" " + rule.label));
+
+                var example = examples[rule.operation];
+                var sample = document.createElement("span");
+
+                sample.style.display = "block";
+                sample.style.margin = "4px 0 0 22px";
+                sample.style.whiteSpace = "pre-wrap";
+                sample.style.overflowWrap = "anywhere";
+
+                if (example) {
+                    sample.textContent =
+                        "원본 " + example.excel_row + "행\n" +
+                        JSON.stringify(example.original) +
+                        " → " +
+                        JSON.stringify(example.normalized);
+                } else if (example === null) {
+                    sample.textContent = "선택한 데이터에서 변경되는 값이 없습니다.";
+                } else {
+                    sample.textContent =
+                        "예시 정보가 없습니다. 범위를 다시 가져와 주세요.";
+                }
+
+                label.appendChild(sample);
                 rulePanel.appendChild(label);
 
                 return input;
