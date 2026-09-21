@@ -2,7 +2,7 @@ import json
 from typing import Literal
 
 from langchain_core.messages import AIMessage, HumanMessage
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class RequestDecision(BaseModel):
@@ -12,6 +12,13 @@ class RequestDecision(BaseModel):
     task_type: Literal["model_normalization", "counterparty_cleanup", "formula"] | None = None
 
     answer: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("task_type", mode="before")
+    @classmethod
+    def normalize_null_task_type(cls, value):
+        if isinstance(value, str) and value.strip().lower() in {"null", "none"}:
+            return None
+        return value
 
 
 async def route_request(
@@ -40,6 +47,7 @@ async def route_request(
             "status": active_job["status"],
             "address": active_job["address"],
             "analysis": analysis[:3000],
+            "plan": active_job.get("plan"),
             "analysis_truncated": (
                 active_job.get("analysis_truncated", False)
                 or len(analysis) > 3000
@@ -97,4 +105,3 @@ async def route_request(
         raise ValueError("후속 질문을 연결할 현재 작업이 없습니다.")
 
     return decision
-

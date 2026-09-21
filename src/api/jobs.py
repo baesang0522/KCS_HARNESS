@@ -15,20 +15,32 @@ from services.jobs.model_normalization.schemas import (
     CreateJobRequest as ModelCreateJobRequest,
     NormalizationPreview, RuleSet,
 )
+from services.jobs.formula import service as formula_service
+from services.jobs.formula.schemas import (
+    CreateJobRequest as FormulaCreateJobRequest,
+    FormulaApprovalRequest,
+    FormulaPreview,
+    Job as FormulaJob,
+)
 
 router = APIRouter(prefix="/jobs")
 
 
 @router.post("")
 async def create_job(
-    payload: ModelCreateJobRequest | CounterpartyCreateJobRequest,
+    payload: (
+        FormulaCreateJobRequest
+        | ModelCreateJobRequest
+        | CounterpartyCreateJobRequest
+    ),
     request: Request,
 ):
-    service = (
-        counterparty_service
-        if isinstance(payload, CounterpartyCreateJobRequest)
-        else model_service
-    )
+    if isinstance(payload, FormulaCreateJobRequest):
+        service = formula_service
+    elif isinstance(payload, CounterpartyCreateJobRequest):
+        service = counterparty_service
+    else:
+        service = model_service
     return await service.create_job(
         payload, request.app.state.conversations,
         request.app.state.jobs,
@@ -41,6 +53,8 @@ async def read_job(
 ):
     jobs = request.app.state.jobs
     job = jobs.get(str(job_id))
+    if isinstance(job, FormulaJob):
+        return formula_service.public_job(formula_service.find_job(jobs, job_id))
     if isinstance(job, CounterpartyJob):
         return counterparty_service.public_job(counterparty_service.find_job(
             jobs, job_id, conversation_id,
@@ -55,6 +69,10 @@ async def analyze_job(
     job_id: UUID, request: Request, conversation_id: UUID | None = None,
 ):
     jobs = request.app.state.jobs
+    if isinstance(jobs.get(str(job_id)), FormulaJob):
+        return await formula_service.plan_job(
+            job_id, jobs, request.app.state.runtime,
+        )
     if isinstance(jobs.get(str(job_id)), CounterpartyJob):
         return await counterparty_service.review_candidates(
             job_id, conversation_id, jobs, request.app.state.runtime,
@@ -85,16 +103,32 @@ async def preview_job(
 
 @router.post(
     "/{job_id}/previews/{preview_id}/approve",
-    response_model=NormalizationPreview | CounterpartyPreview,
+    response_model=FormulaPreview | NormalizationPreview | CounterpartyPreview,
 )
 async def approve_preview(
     job_id: UUID,
     preview_id: UUID,
     request: Request,
+    payload: FormulaApprovalRequest | None = None,
 ):
     jobs = request.app.state.jobs
+    if isinstance(jobs.get(str(job_id)), FormulaJob):
+        return formula_service.approve_preview(
+            job_id, preview_id, payload, jobs,
+        )
     if isinstance(jobs.get(str(job_id)), CounterpartyJob):
         return counterparty_service.approve_preview(job_id, preview_id, jobs)
     return model_service.approve_preview(
         job_id, preview_id, jobs,
+    )
+
+
+@router.post("/{job_id}/previews/{preview_id}/complete")
+async def complete_preview(
+    job_id: UUID,
+    preview_id: UUID,
+    request: Request,
+):
+    return formula_service.complete_job(
+        job_id, preview_id, request.app.state.jobs,
     )

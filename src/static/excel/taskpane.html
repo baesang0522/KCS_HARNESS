@@ -12,6 +12,8 @@
   <script defer src="normalization.js"></script>
   <script defer src="counterparty_ui.js"></script>
   <script defer src="counterparty.js"></script>
+  <script defer src="formula_ui.js"></script>
+  <script defer src="formula.js"></script>
   <script defer src="taskpane.js"></script>
 </head>
 <body>
@@ -98,6 +100,17 @@
         <pre id="party-approval-result" hidden></pre>
         <button type="button" id="party-export" disabled>승인 후 새 시트에 반영</button>
         <button type="button" id="party-refresh" disabled>작업 상태 조회</button>
+      </section>
+      <section class="normalization-panel" id="formula-panel" hidden>
+        <h2>수식 작업 확인</h2>
+        <p id="formula-request"></p>
+        <div id="formula-ranges" class="formula-ranges">
+          <p class="formula-range-row"><span>원본: <strong id="formula-source-address">선택 필요</strong></span><button type="button" class="range-change" id="formula-source-change">변경</button></p>
+          <p class="formula-range-row" id="formula-target-row" hidden><span>결과: <strong id="formula-target-address"></strong></span><button type="button" class="range-change" id="formula-target-change">변경</button></p>
+        </div>
+        <pre id="formula-preview"></pre>
+        <button type="button" id="formula-apply" disabled>승인 후 수식 적용</button>
+        <p id="formula-status" role="status"></p>
       </section>
     </main>
     <footer>

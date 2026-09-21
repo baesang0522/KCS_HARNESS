@@ -22,6 +22,7 @@ class CustomsHarness:
     chat_graph: CompiledStateGraph
     inspection_graph: CompiledStateGraph
     counterparty_review_graph: CompiledStateGraph
+    formula_graph: CompiledStateGraph
     request_router_graph: CompiledStateGraph
 
 
@@ -82,6 +83,14 @@ def create_runtime() -> CustomsHarness:
         tools=[],
     )
 
+    formula_prompt = load_agent_prompt(PROMPT_DIR / "formula.yml")
+    formula_graph = build_harness_graph(
+        agent_node=AgentNode(
+            model=model, tools=[], system_prompt=formula_prompt.render(),
+        ),
+        tools=[],
+    )
+
     router_prompt = load_agent_prompt(PROMPT_DIR / "request_router.yml")
     request_router_graph = build_harness_graph(
         agent_node=AgentNode(
@@ -97,5 +106,6 @@ def create_runtime() -> CustomsHarness:
         chat_graph=chat_graph,
         inspection_graph=inspection_graph,
         counterparty_review_graph=counterparty_review_graph,
+        formula_graph=formula_graph,
         request_router_graph=request_router_graph,
     )

@@ -5,12 +5,13 @@
   <ProviderName>Customs Prototype</ProviderName>
   <DefaultLocale>ko-KR</DefaultLocale>
   <DisplayName DefaultValue="관세업무 도우미"/>
-  <Description DefaultValue="관세업무 도우미 화면 프로토타입. 파일 읽기·수정 및 AI 연결 기능은 없습니다."/>
+  <Description DefaultValue="선택한 Excel 데이터를 분석하고 승인된 정제 결과와 수식을 적용합니다."/>
   <IconUrl DefaultValue="http://localhost:8000/static/excel/assets/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="http://localhost:8000/static/excel/assets/icon-80.png"/>
   <SupportUrl DefaultValue="http://localhost:8000/static/excel/taskpane.html"/>
   <AppDomains><AppDomain>http://localhost:8000</AppDomain></AppDomains>
   <Hosts><Host Name="Workbook"/></Hosts>
+  <Requirements><Sets DefaultMinVersion="1.9"><Set Name="ExcelApi"/></Sets></Requirements>
   <DefaultSettings><SourceLocation DefaultValue="http://localhost:8000/static/excel/taskpane.html"/></DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">

@@ -37,13 +37,13 @@ test('HTTP 오류 상세·상태와 네트워크 오류를 보존한다', async 
 function controllerSetup() {
     let handlers, busy = false, ids = 0, fail = true;
     const calls = [], displays = [];
-    const selection = { headers: ['a', 'b', 'c'], samples: [{ cells: ['a', 'b', 'c'] }] };
+    const selection = { headers: ['a', 'b', 'c'], rows: [{ cells: ['a', 'b', 'c'] }] };
     const ui = {
         bind(value) { handlers = value; },
         open() {}, archive() {}, beginSelection() {}, clearResult() {},
         showSelection(value) { displays.push(value); },
         renderJob(value) { displays.push(value); },
-        reset() { displays.push('reset'); },
+        reset() { displays.push('reset'); }, showExportPreview() {},
         setStatus(value) { displays.push(value); },
         getMapping() { return [0, 1, 2]; },
         setBusy(value, hasPayload) { displays.push({ busy: value, hasPayload }); },
@@ -56,11 +56,12 @@ function controllerSetup() {
                 fail = false;
                 throw new Error('응답 유실');
             }
+            if (url.endsWith('/preview')) return {preview_id: 'preview-1', rows: [], row_count: 1, changed_count: 0};
             return { job_id: 'job-' + ids, status: url.endsWith('/analyze') ? 'REVIEW_READY' : 'CREATED', analysis: '결과' };
         },
     };
     const options = {
-        ui, api, excel: { async readNormalizationSample() { return selection; } },
+        ui, api, excel: { async readNormalizationRows() { return selection; } },
         isReady: () => true, isBusy: () => busy,
         setBusy(value) { busy = value; controller.setBusy(value); },
         getConversationId: () => 'conversation-1',
