@@ -14,24 +14,62 @@
         async function renderJobWithPreview(job) {
             ui.renderJob(job);
 
-            if (job.status !== "REVIEW_READY" || currentPreview) return;
+            if (job.status === "REVIEW_READY") {
+                ui.showRuleSelector();
+            }
+        }
 
-            currentPreview = await api.requestJson(
-                "/jobs/" + payload.job_id + "/preview",
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        rules: [
-                            { operation: "normalize_fullwidth_ascii" },
-                            { operation: "trim" },
-                            { operation: "collapse_whitespace" }
-                        ]
-                    })
-                }
+        function invalidatePreview() {
+            currentPreview = null;
+            exported = false;
+
+            ui.clearPreview();
+            ui.setBusy(options.isBusy(), payload !== null);
+            ui.setStatus(
+                "규칙 선택이 변경되었습니다. 미리보기를 다시 생성하세요."
             );
+        }
 
-            ui.showExportPreview(currentPreview);
+        async function rebuildPreview() {
+            if (options.isBusy() || !payload) return;
+
+            var rules = ui.getSelectedRules();
+
+            if (!rules.length) {
+                ui.setStatus("적용할 규칙을 하나 이상 선택하세요.");
+                return;
+            }
+
+            options.setBusy(true);
+            currentPreview = null;
+            exported = false;
+            ui.clearPreview();
+
+            try {
+                ui.setStatus("선택한 규칙으로 전체 미리보기를 생성하고 있습니다…");
+
+                var preview = await api.requestJson(
+                    "/jobs/" + payload.job_id + "/preview",
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ rules: rules })
+                    }
+                );
+
+                ui.showExportPreview(preview);
+                currentPreview = preview;
+
+                ui.setStatus(
+                    "미리보기를 확인한 뒤 결과를 승인하세요."
+                );
+            } catch (error) {
+                currentPreview = null;
+                ui.clearPreview();
+                ui.setStatus("미리보기 생성 실패: " + error.message);
+            } finally {
+                options.setBusy(false);
+            }
         }
 
         async function exportPreview() {
@@ -155,6 +193,10 @@
             analyze: analyze,
             refresh: refresh,
             export: exportPreview,
+
+            preview: rebuildPreview,
+            rulesChange: invalidatePreview,
+
             mappingChange: function () {
                 payload = null;
                 currentPreview = null;

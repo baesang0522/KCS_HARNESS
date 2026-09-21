@@ -160,6 +160,13 @@ def job_context(job: Job) -> dict:
             str(job.approved_preview_id)
             if job.approved_preview_id else None
         ),
+        "preview_rules": (
+            [
+                rule.operation
+                for rule in job.preview.rule_set.rules
+            ]
+            if job.preview else []
+        ),
     }
 
 

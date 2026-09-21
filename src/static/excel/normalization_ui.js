@@ -12,6 +12,8 @@
         var sourceText = document.getElementById("norm-source");
         var preview = document.getElementById("norm-preview");
         var statusText = document.getElementById("norm-status");
+        panel.querySelector("h2").textContent =
+            "모델규격 정제 · 규칙선택 v2";
         var selects = ["norm-trade", "norm-declared", "norm-spec"].map(function (id) {
             return document.getElementById(id);
         });
@@ -21,6 +23,102 @@
         var exported = false;
         var exportHandler = null;
         var exportPanel = null;
+        var rulePanel = null;
+        var ruleInputs = [];
+        var previewButton = null;
+        var previewHandler = null;
+        var rulesChangeHandler = null;
+
+        var ruleOptions = [
+            {
+                operation: "normalize_fullwidth_ascii",
+                label: "전각 영문·숫자·기호 변환",
+                example: "ＡＢ－１００ → AB-100"
+            },
+            {
+                operation: "trim",
+                label: "앞뒤 공백 제거",
+                example: '"  AB-100  " → "AB-100"'
+            },
+            {
+                operation: "collapse_whitespace",
+                label: "연속 공백 통일",
+                example: '"AB-100   220V" → "AB-100 220V"'
+            }
+        ];
+
+        function getSelectedRules() {
+            return ruleInputs
+                .filter(function (input) {
+                    return input.checked;
+                })
+                .map(function (input) {
+                    return { operation: input.value };
+                });
+        }
+
+        function clearPreview() {
+            if (exportButton) exportButton.disabled = true;
+            if (exportPanel) exportPanel.remove();
+
+            exportButton = null;
+            exportPanel = null;
+            exported = false;
+        }
+
+        function showRuleSelector() {
+            // 상태 조회나 분석 재시도로 선택 상태를 초기화하지 않는다.
+            if (rulePanel || !resultText) return;
+
+            rulePanel = document.createElement("fieldset");
+            rulePanel.className = "norm-result-preview";
+
+            var legend = document.createElement("legend");
+            legend.textContent = "적용할 정제 규칙 선택";
+            rulePanel.appendChild(legend);
+
+            var note = document.createElement("p");
+            note.textContent =
+                "분석 내용을 참고해 필요한 규칙만 선택하세요. " +
+                "현재 실행 가능한 규칙은 아래 세 가지입니다.";
+            rulePanel.appendChild(note);
+
+            ruleInputs = ruleOptions.map(function (rule) {
+                var label = document.createElement("label");
+                label.style.display = "block";
+                label.style.margin = "10px 0";
+
+                var input = document.createElement("input");
+                input.type = "checkbox";
+                input.value = rule.operation;
+                input.checked = false;
+
+                input.addEventListener("change", function () {
+                    if (rulesChangeHandler) rulesChangeHandler();
+                });
+
+                label.appendChild(input);
+                label.appendChild(document.createTextNode(
+                    " " + rule.label + " · " + rule.example
+                ));
+                rulePanel.appendChild(label);
+
+                return input;
+            });
+
+            previewButton = document.createElement("button");
+            previewButton.type = "button";
+            previewButton.className = "norm-preview-button";
+            previewButton.textContent = "선택한 규칙으로 미리보기";
+            previewButton.disabled = true;
+
+            previewButton.addEventListener("click", function () {
+                if (previewHandler) previewHandler();
+            });
+
+            rulePanel.appendChild(previewButton);
+            resultText.parentElement.appendChild(rulePanel);
+        }
 
         function open() {
             chat.enterConversation();
@@ -30,13 +128,14 @@
         }
 
         function clearResult() {
-            // 과거 분석 메시지는 대화에 남겨둔다.
-            if (exportButton) exportButton.disabled = true;
+            clearPreview()
 
+            if (rulePanel) rulePanel.remove();
+
+            rulePanel = null;
+            ruleInputs = [];
+            previewButton = null;
             resultText = null;
-            exportButton = null;
-            exportPanel = null;
-            exported = false;
         }
 
         function reset() {
@@ -190,11 +289,20 @@
 
             var note = document.createElement("p");
             note.className = "norm-preview-note";
+
+            var selectedLabels = data.rule_set.rules.map(function (rule) {
+                var option = ruleOptions.find(function (item) {
+                    return item.operation === rule.operation;
+                });
+
+                return option ? option.label : rule.operation;
+            });
+
             note.textContent =
-                "전체에 동일한 전각 영문·숫자·기호 변환, " +
-                "앞뒤 공백 제거·연속 공백 통일 규칙을 적용했습니다. " +
+                "적용 규칙: " + selectedLabels.join(" → ") + "\n" +
                 "승인하면 변경되지 않은 행을 포함한 전체 " +
                 data.row_count + "행을 새 시트에 출력합니다. 원본은 유지합니다.";
+
             exportPanel.appendChild(note);
 
             exported = false;
@@ -218,6 +326,9 @@
             showSelection: showSelection,
             clearResult: clearResult,
             renderJob: renderJob,
+            showRuleSelector: showRuleSelector,
+            getSelectedRules: getSelectedRules,
+            clearPreview: clearPreview,
             setStatus: function (text) { statusText.textContent = text; },
             showExportPreview: showExportPreview,
             setExported: function (result) {
@@ -233,10 +344,28 @@
                 selectButton.disabled = busy;
                 analyzeButton.disabled = busy;
                 refreshButton.disabled = busy || !hasPayload;
-                selects.forEach(function (select) { select.disabled = busy; });
-                if (exportButton) { exportButton.disabled = busy || exported; }
+
+                selects.forEach(function (select) {
+                    select.disabled = busy;
+                });
+
+                ruleInputs.forEach(function (input) {
+                    input.disabled = busy;
+                });
+
+                if (previewButton) {
+                    previewButton.disabled =
+                        busy || getSelectedRules().length === 0;
+                }
+
+                if (exportButton) {
+                    exportButton.disabled = busy || exported;
+                }
             },
             bind: function (handlers) {
+                previewHandler = handlers.preview;
+                rulesChangeHandler = handlers.rulesChange;
+
                 exportHandler = handlers.export;
                 selectButton.addEventListener("click", handlers.select);
                 attachButton.addEventListener("click", handlers.select);

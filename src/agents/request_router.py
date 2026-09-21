@@ -32,7 +32,7 @@ async def route_request(
     }
 
     if active_job is not None:
-        analysis = active_job["analysis"]
+        analysis = active_job.get("analysis", "")
 
         routing_context["active_job"] = {
             "job_id": active_job["job_id"],
@@ -41,7 +41,7 @@ async def route_request(
             "address": active_job["address"],
             "analysis": analysis[:3000],
             "analysis_truncated": (
-                active_job["analysis_truncated"]
+                active_job.get("analysis_truncated", False)
                 or len(analysis) > 3000
             ),
         }
