@@ -33,6 +33,7 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
             settings=SimpleNamespace(llm=SimpleNamespace(timeout_seconds=1),
                                      agent=SimpleNamespace(max_iterations=5)),
             inspection_graph=FakeGraph("표본 분석 결과"),
+            formula_graph=FakeGraph("{}"),
             request_router_graph=FakeGraph(json.dumps({
                 "intent": "general", "task_type": None, "answer": "일반 질문"})),
             chat_graph=FakeGraph("답변"),
@@ -48,8 +49,8 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
             "row_start": 0, "column_start": 0, "row_count": 3,
             "headers": ["모델규격", "거래품명", "신고품명"],
             "mapping": {"trade_name": 1, "declared_name": 2, "model_spec": 0},
-            "samples": [{"cells": ["  AB-100   220V  ", "펌프", "원심펌프"]},
-                        {"cells": ["00123", "센서", "센서"]}],
+            "rows": [{"cells": ["  AB-100   220V  ", "펌프", "원심펌프"]},
+                     {"cells": ["00123", "센서", "센서"]}],
         }
         self.path = "/jobs/" + self.job["job_id"]
         self.rules = {"rules": [{"operation": "trim"}, {"operation": "collapse_whitespace"}]}
@@ -71,8 +72,8 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
         await self.client.post(self.path + "/analyze")
         self.assertEqual(len(self.runtime.inspection_graph.calls), 1)
         source = json.loads(self.runtime.inspection_graph.calls[0]["messages"][0].content)
-        self.assertEqual(source["samples"][0]["거래품명"], "펌프")
-        self.assertEqual(source["samples"][0]["excel_row"], 2)
+        self.assertEqual(source["records"][0]["거래품명"], "펌프")
+        self.assertEqual(source["records"][0]["excel_row"], 2)
         preview = (await self.client.post(self.path + "/preview", json=self.rules)).json()
         self.assertEqual(preview["changed_count"], 1)
         self.assertEqual(preview["rows"][0]["normalized_model_spec"], "AB-100 220V")
@@ -119,6 +120,9 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(conv["messages"]), 2)
 
     async def test_general_chat_and_failure(self):
+        self.runtime.request_router_graph.content = json.dumps({
+            "intent": "general", "task_type": "null", "answer": "일반 질문"
+        })
         payload = {"conversation_id": self.cid, "request_id": str(uuid4()), "message": "안녕"}
         first = await self.client.post("/chat", json=payload)
         self.assertEqual(first.json()["answer"], "답변")
@@ -144,7 +148,7 @@ class ApiContract(unittest.IsolatedAsyncioTestCase):
 
     async def test_route_contract(self):
         schema = (await self.client.get("/openapi.json")).json()
-        self.assertEqual(set(schema["paths"]), {"/health", "/chat", "/conversations", "/conversations/{conversation_id}", "/jobs", "/jobs/{job_id}", "/jobs/{job_id}/analyze", "/jobs/{job_id}/preview", "/jobs/{job_id}/previews/{preview_id}/approve"})
+        self.assertEqual(set(schema["paths"]), {"/health", "/chat", "/conversations", "/conversations/{conversation_id}", "/jobs", "/jobs/{job_id}", "/jobs/{job_id}/analyze", "/jobs/{job_id}/preview", "/jobs/{job_id}/previews/{preview_id}/approve", "/jobs/{job_id}/previews/{preview_id}/complete"})
         response_schema = schema["paths"]["/jobs/{job_id}/preview"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
         self.assertEqual(
             {item["$ref"] for item in response_schema["anyOf"]},

@@ -12,11 +12,11 @@ system: |
   작업 종류:
   - model_normalization: 모델명·모델규격·품번 정제와 그룹화
   - counterparty_cleanup: 거래처명 정제와 거래처 후보 매칭
-  - formula: 실제 엑셀 데이터에 적용할 수식 제안
+  - formula: 실제 엑셀 셀·열·선택 범위의 값을 수식으로 변환하고 적용
 
   intent:
   - general: 현재 작업과 관계없는 일반 질문이나 개념 설명
-  - start_task: 새로운 작업을 명시적으로 시작하려는 요청
+  - start_task: 새로운 작업을 시작하거나 실제 엑셀 데이터를 변경해 달라는 요청
   - clarify: 요청을 어느 작업으로 처리할지 추가 확인이 필요한 경우
   - task_followup: 현재 연결된 작업의 데이터·분석·정제 방향에 대한
     질문이나 수정 의견
@@ -25,9 +25,21 @@ system: |
   - active_job이 있고 사용자가 "이 데이터", "그래서", "방금 분석한 것"을
     언급하면 최근 대화와 작업 정보를 함께 보고 task_followup 여부를 판단하세요.
   - active_job이 있다고 모든 질문을 후속 질문으로 분류하지 마세요.
+  - active_job이 formula일 때 사용자가 다른 변환을 명령하거나 직전 수식의 조건·반환값을
+    고쳐서 다시 적용하라고 하면 start_task, formula입니다. "그렇게", "이 상품들",
+    "다시" 같은 표현은 최근 대화와 active_job.plan을 기준으로 해석하세요.
+    이전 작업의 설명·오류·결과를 묻는 경우에만 task_followup입니다.
+  - active_job.status가 NEEDS_INPUT이고 사용자가 요청받은 열·조건을 답하면
+    start_task, formula입니다.
   - pending_intent에 대한 사용자의 답은 원래 요청을 명확하게 하는 답입니다.
   - 동일 작업의 정제 방향 질문을 새로운 작업 시작으로 분류하지 마세요.
   - 다른 범위나 다른 업무로 새 작업을 시작한다고 명시한 경우에는 start_task입니다.
+  - 셀·열·선택 범위 같은 엑셀 대상과 더하기, 바꾸기, 제거, 반올림 등
+    변환 동작을 함께 말하면 결과 위치가 생략되어도 start_task, formula입니다.
+  - 결과 위치를 생략한 수식 작업은 원본 덮어쓰기 여부를 묻기 위해 clarify로
+    보내지 마세요. 수식 작업 단계에서 오른쪽 빈 열을 제안합니다.
+  - 함수의 의미나 수식 작성 방법만 묻고 실제 데이터 변경을 요청하지 않으면
+    general입니다.
   - 대상이 불명확하면 clarify로 확인하세요.
   - 사용자의 긍정 표현을 실행 승인으로 처리하지 마세요.
 
@@ -42,6 +54,26 @@ system: |
     → start_task, counterparty_cleanup
   - 모델규격인지 거래처인지 확인 중이고 "모델규격 정제말이야"
     → start_task, model_normalization
+  - "A열에 있는 값에서 10씩 더해줄래?"
+    → start_task, formula
+  - "선택한 값의 공백을 제거해줘"
+    → start_task, formula
+  - "상품코드 정보 보고 상품명 채워줘"
+    → start_task, formula
+  - "상품코드로 상품명 찾아서 옆 열에 넣어줘"
+    → start_task, formula
+  - "A열에 10을 더하는 수식이 뭐야?"
+    → general
+  - 하이픈 제거 formula 작업이 완료된 상태에서
+    "A열에서 5번째 글자부터 3글자만 가져와줘"
+    → start_task, formula
+  - 하이픈 제거 formula 작업이 완료된 상태에서
+    "방금 수식은 왜 SUBSTITUTE를 사용했어?"
+    → task_followup
+  - 재고 조회 formula 작업이 있는 상태에서 "재고가 0이면 판매불가로 바꿔줘"
+    → start_task, formula
+  - 직전 대화에서 재고 0 조건을 말한 뒤 "그렇게 다시 적용해볼래?"
+    → start_task, formula
 
   answer 작성:
   - start_task: 작업 종류와 데이터 확인이 필요함을 짧게 안내하세요.
@@ -50,6 +82,7 @@ system: |
   - task_followup: "현재 작업을 바탕으로 답변합니다."
 
   task_type은 start_task에서만 지정하고 나머지는 null로 반환하세요.
+  task_type이 없을 때는 문자열 "null"이 아니라 JSON null을 사용하세요.
   다음 구조의 JSON만 출력하세요. Markdown 코드 블록은 사용하지 마세요.
 
   {

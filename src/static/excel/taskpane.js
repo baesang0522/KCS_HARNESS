@@ -5,6 +5,7 @@
     var api = window.apiClient;
     var normalization = null;
     var counterparty = null;
+    var formula = null;
     var connection = document.getElementById('connection');
     var message = document.getElementById('message');
     var notice = document.getElementById('notice');
@@ -78,6 +79,7 @@
         });
         if (normalization) normalization.setBusy(value);
         if (counterparty) counterparty.setBusy(value);
+        if (formula) formula.setBusy(value);
     }
 
     async function createConversation() {
@@ -93,6 +95,7 @@
     function renderMessages(messages) {
         normalization.reset();
         counterparty.reset();
+        formula.reset();
         pendingBubble = null;
         conversation.textContent = '';
         welcome.hidden = messages.length > 0;
@@ -159,7 +162,7 @@
         }
     }
 
-    async function handleUIAction(action) {
+    async function handleUIAction(action, instruction) {
         if (!action) return;
 
         if (action.type !== "confirm_selection") {
@@ -173,6 +176,11 @@
 
         if (action.task_type === "counterparty_cleanup") {
             counterparty.openAndSelect();
+            return;
+        }
+
+        if (action.task_type === "formula") {
+            formula.openAndSelect(instruction);
             return;
         }
 
@@ -239,7 +247,7 @@
             notice.textContent = '';
 
             try {
-                await handleUIAction(reply.ui_action);
+                await handleUIAction(reply.ui_action, value);
             } catch (uiError) {
                 // 서버에서 성공한 요청을 다시 전송하게 만들지 않는다.
                 notice.textContent =
@@ -316,6 +324,20 @@
     });
     counterparty = window.createCounterpartyController({
         ui: window.createCounterpartyUI({
+            conversation: conversation,
+            scrollArea: scrollArea,
+            enterConversation: enterConversation,
+            appendMessage: appendMessage
+        }),
+        api: api,
+        excel: window.excelBridge,
+        isReady: function () { return ready; },
+        isBusy: function () { return sending; },
+        setBusy: setBusy,
+        getConversationId: function () { return conversationId; }
+    });
+    formula = window.createFormulaController({
+        ui: window.createFormulaUI({
             conversation: conversation,
             scrollArea: scrollArea,
             enterConversation: enterConversation,

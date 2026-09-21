@@ -55,7 +55,7 @@ function setup(options = {}) {
     }
     vm.runInNewContext(source, sandbox);
     return {
-        read: sandbox.window.excelBridge.readNormalizationSample,
+        read: sandbox.window.excelBridge.readNormalizationRows,
         readCounterpartyRows: sandbox.window.excelBridge.readCounterpartyRows,
         calls
     };
@@ -94,21 +94,22 @@ test('범위 위치·머리글·셀 문자열을 보존한다', async () => {
         worksheet_id: 'sheet-1', sheet_name: 'Sheet1', address: 'Sheet1!B4:D5',
         row_start: 3, column_start: 1, row_count: 2,
         headers: ['거래품명', '신고품명', '모델규격'],
-        samples: [{ cells: ['펌프', '원심펌프', '  AB-100   220V  '] }],
+        rows: [{ cells: ['펌프', '원심펌프', '  AB-100   220V  '] }],
     });
     assert.deepEqual(calls.filter(call => call[0] === 'resize'), [['resize', 1, 2]]);
     assert.equal(calls.filter(call => call[0] === 'sync').length, 2);
     assert.ok(!calls.find(call => call[0] === 'range.load')[1].includes('text'));
 });
 
-test('40만 행도 머리글과 앞부분 20행만 읽는다', async () => {
-    const cells = Array.from({ length: 21 }, () => ['품명', '신고품명', '00123']);
-    const { read, calls } = setup({ rowCount: 400001, cells });
+test('선택한 전체 행을 200행씩 나눠 읽는다', async () => {
+    const cells = Array.from({ length: 401 }, () => ['품명', '신고품명', '00123']);
+    const { read, calls } = setup({ rowCount: 401, cells });
     const result = await read();
-    assert.equal(result.row_count, 400001);
-    assert.equal(result.samples.length, 20);
-    assert.equal(result.samples[0].cells[2], '00123');
-    assert.deepEqual(calls.filter(call => call[0] === 'resize'), [['resize', 20, 2]]);
+    assert.equal(result.row_count, 401);
+    assert.equal(result.rows.length, 400);
+    assert.equal(result.rows[0].cells[2], '00123');
+    assert.deepEqual(calls.filter(call => call[0] === 'resize'),
+        [['resize', 199, 2], ['resize', 199, 2], ['resize', 0, 2]]);
 });
 
 test('거래처 데이터는 총행 제한 없이 1,000행씩 전부 읽는다', async () => {
@@ -159,6 +160,6 @@ test('호출 전에 브리지를 로드하고 기존 UI는 브리지만 호출�
     const html = readFileSync(path.join(root, 'src/static/excel/taskpane.html'), 'utf8');
     const ui = readFileSync(path.join(root, 'src/static/excel/normalization.js'), 'utf8');
     assert.ok(html.indexOf('src="excel_bridge.js"') < html.indexOf('src="normalization.js"'));
-    assert.match(ui, /await excel\.readNormalizationSample\(\)/);
+    assert.match(ui, /await excel\.readNormalizationRows\(\)/);
     assert.doesNotMatch(ui, /Excel\.run/);
 });
