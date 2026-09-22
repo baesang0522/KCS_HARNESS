@@ -14,6 +14,7 @@ def create_model(*, base_url: str, model: str, api_key: str="not-needed", temper
 
     extra_body: dict[str, Any] = {
         "reasoning_format": "deepseek",
+        "chat_template_kwargs": {"enable_thinking": False},
     }
 
     return ChatDeepSeek(
