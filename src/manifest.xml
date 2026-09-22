@@ -2,9 +2,9 @@
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xsi:type="TaskPaneApp">
   <Id>31bd0a2e-bd62-4b5f-a0c9-d21b6c46d95f</Id>
   <Version>1.0.0.0</Version>
-  <ProviderName>Customs Prototype</ProviderName>
+  <ProviderName>Okestro</ProviderName>
   <DefaultLocale>ko-KR</DefaultLocale>
-  <DisplayName DefaultValue="관세업무 도우미"/>
+  <DisplayName DefaultValue="엑셀 전처리 도우미"/>
   <Description DefaultValue="선택한 Excel 데이터를 분석하고 승인된 정제 결과와 수식을 적용합니다."/>
   <IconUrl DefaultValue="http://localhost:8000/static/excel/assets/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="http://localhost:8000/static/excel/assets/icon-80.png"/>
@@ -32,8 +32,8 @@
     <Resources>
       <bt:Images><bt:Image id="Icon.16" DefaultValue="http://localhost:8000/static/excel/assets/icon-16.png"/><bt:Image id="Icon.32" DefaultValue="http://localhost:8000/static/excel/assets/icon-32.png"/><bt:Image id="Icon.80" DefaultValue="http://localhost:8000/static/excel/assets/icon-80.png"/></bt:Images>
       <bt:Urls><bt:Url id="Taskpane.Url" DefaultValue="http://localhost:8000/static/excel/taskpane.html"/></bt:Urls>
-      <bt:ShortStrings><bt:String id="GetStarted.Title" DefaultValue="관세업무 도우미"/><bt:String id="Group.Label" DefaultValue="관세업무"/><bt:String id="Button.Label" DefaultValue="도우미 열기"/></bt:ShortStrings>
-      <bt:LongStrings><bt:String id="GetStarted.Description" DefaultValue="홈 탭에서 도우미 열기를 선택해 화면을 살펴보세요."/><bt:String id="Button.Description" DefaultValue="관세업무 도우미 화면 프로토타입을 엽니다."/></bt:LongStrings>
+      <bt:ShortStrings><bt:String id="GetStarted.Title" DefaultValue="엑셀 전처리 도우미"/><bt:String id="Group.Label" DefaultValue="엑셀 전처리"/><bt:String id="Button.Label" DefaultValue="도우미 열기"/></bt:ShortStrings>
+      <bt:LongStrings><bt:String id="GetStarted.Description" DefaultValue="홈 탭에서 도우미 열기를 선택해 화면을 살펴보세요."/><bt:String id="Button.Description" DefaultValue="엑셀 전처리 도우미를 엽니다."/></bt:LongStrings>
     </Resources>
   </VersionOverrides>
 </OfficeApp>

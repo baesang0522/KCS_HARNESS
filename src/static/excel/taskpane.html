@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>관세업무 도우미</title>
+  <title>엑셀 전처리 도우미</title>
   <link rel="stylesheet" href="taskpane.css">
   <script src="vendor/office-js/office.js"></script>
   <script defer src="api_client.js"></script>
@@ -19,7 +19,7 @@
 <body>
   <div class="app">
     <header class="topbar">
-      <div class="brand"><img src="assets/icon-32.png" width="28" height="28" alt=""><span>관세업무 도우미</span></div>
+      <div class="brand"><img src="assets/icon-32.png" width="28" height="28" alt=""><span>엑셀 전처리 도우미</span></div>
       <button class="icon-button" id="new-chat" aria-label="새 대화" title="새 대화"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
     </header>
     <main>
@@ -130,7 +130,7 @@
         <textarea id="message" rows="3" maxlength="8000" placeholder="어떤 작업을 도와드릴까요?"></textarea>
         <div class="composer-bottom"><button type="button" id="attach-range" class="attach-range" title="모델규격 정제에 사용할 세 열의 범위 첨부" aria-label="엑셀 범위 첨부">＋ 범위 첨부</button><span>Enter 전송 · Shift+Enter 줄바꿈</span><button class="send" type="submit" aria-label="요청 보내기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 6-6 6 6M12 6v13"/></svg></button></div>
       </form>
-      <div class="status-row"><span id="connection">화면 미리보기</span><span>프로토타입 · 0.1</span></div>
+      <div class="status-row"><span id="connection">화면 미리보기</span><span>Okestro</span></div>
       <details class="diagnostics"><summary>실행 환경 확인</summary><pre id="diagnostic"></pre></details>
     </footer>
   </div>
