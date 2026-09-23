@@ -9,6 +9,8 @@ Operation = Literal[
     "collapse_whitespace",
     "normalize_fullwidth_ascii",
 ]
+CellText = Annotated[str, Field(max_length=1000)]
+ColumnIndex = Annotated[int, Field(ge=0, le=2)]
 
 
 class NormalizationRule(BaseModel):
@@ -56,9 +58,6 @@ class NormalizationPreview(BaseModel):
     changed_count: int
     rows: tuple[PreviewRow, ...]
 
-
-CellText = Annotated[str, Field(max_length=1000)]
-ColumnIndex = Annotated[int, Field(ge=0, le=2)]
 
 class ColumnMapping(BaseModel):
     trade_name: ColumnIndex
