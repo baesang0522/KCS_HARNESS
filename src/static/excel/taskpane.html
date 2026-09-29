@@ -24,7 +24,12 @@
   <div class="app">
     <header class="topbar">
       <div class="brand"><img src="assets/icon-32.png" width="28" height="28" alt=""><span>엑셀 전처리 도우미</span></div>
-      <button class="icon-button" id="new-chat" aria-label="새 대화" title="새 대화"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button type="button" class="icon-button" id="new-chat"
+              aria-label="홈으로 · 새 대화" title="홈으로 · 새 대화">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m3 10 9-7 9 7M5 9v12h5v-7h4v7h5V9"/>
+        </svg>
+      </button>
     </header>
     <main>
       <div id="welcome-content">
@@ -133,9 +138,22 @@
     <footer>
       <p id="notice" class="notice" role="status" aria-live="polite"></p>
       <form id="composer" class="composer">
-        <label class="sr-only" for="message">도우미에게 요청할 내용</label>
-        <textarea id="message" rows="3" maxlength="8000" placeholder="어떤 작업을 도와드릴까요?"></textarea>
-        <div class="composer-bottom"><button type="button" id="attach-range" class="attach-range" title="모델규격 정제에 사용할 세 열의 범위 첨부" aria-label="엑셀 범위 첨부">＋ 범위 첨부</button><span>Enter 전송 · Shift+Enter 줄바꿈</span><button class="send" type="submit" aria-label="요청 보내기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 6-6 6 6M12 6v13"/></svg></button></div>
+        <div class="composer-top">
+          <button type="button" id="message-resize" class="composer-resize"
+                  aria-controls="composer-fields" aria-expanded="true">입력칸 접기</button>
+        </div>
+        <div id="composer-fields">
+          <label class="sr-only" for="message">도우미에게 요청할 내용</label>
+          <textarea id="message" rows="3" maxlength="8000" placeholder="어떤 작업을 도와드릴까요?"></textarea>
+          <div class="composer-bottom">
+            <span>Enter 전송 · Shift+Enter 줄바꿈</span>
+            <button class="send" type="submit" aria-label="요청 보내기">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m6 12 6-6 6 6M12 6v13"/>
+              </svg>
+            </button>
+          </div>
+        </div>
       </form>
       <div class="status-row"><span id="connection">화면 미리보기</span><span>Okestro</span></div>
       <details class="diagnostics"><summary>실행 환경 확인</summary><pre id="diagnostic"></pre></details>

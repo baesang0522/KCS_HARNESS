@@ -6,7 +6,6 @@
         var selectButton = document.getElementById("norm-select");
         var analyzeButton = document.getElementById("norm-analyze");
         var refreshButton = document.getElementById("norm-refresh");
-        var attachButton = document.getElementById("attach-range");
         var panel = document.getElementById("normalization-panel");
         var mappingPanel = document.getElementById("norm-mapping");
         var sourceText = document.getElementById("norm-source");
@@ -406,7 +405,6 @@
 
                 exportHandler = handlers.export;
                 selectButton.addEventListener("click", handlers.select);
-                attachButton.addEventListener("click", handlers.select);
                 analyzeButton.addEventListener("click", handlers.analyze);
                 refreshButton.addEventListener("click", handlers.refresh);
                 selects.forEach(function (select) {

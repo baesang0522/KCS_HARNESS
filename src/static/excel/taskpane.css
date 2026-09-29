@@ -129,7 +129,34 @@ html,body{height:100%}.app{height:100vh;min-height:0}.topbar,footer{flex-shrink:
 }
 
 /* Conversation actions */
-.attach-range{border:0;background:#f1edf8;color:#70598b;border-radius:7px;padding:7px 9px;font-size:11px;white-space:nowrap}
+.composer-top {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 4px;
+}
+
+.composer-resize {
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #70598b;
+    padding: 4px 6px;
+    font-size: 11px;
+}
+
+.composer-resize:hover {
+    background: #f1edf8;
+}
+
+#message {
+    resize: none;
+}
+
+footer {
+    max-height: calc(100vh - 144px);
+    overflow-y: auto;
+}
+
 .composer-bottom{gap:8px}.composer-bottom>span{margin-left:auto;font-size:9px}
 button:disabled{cursor:default;opacity:.5}
 .normalization-panel{margin:0 0 14px;border-color:#ded5ec;background:#fff;overflow-wrap:anywhere}

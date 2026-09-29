@@ -79,7 +79,6 @@
         document.querySelector('.send').disabled = value;
         document.getElementById('new-chat').disabled = value;
         message.readOnly = value;
-        document.getElementById('attach-range').disabled = value;
         document.querySelectorAll('[data-prompt]').forEach(function (button) {
             button.disabled = value;
         });
@@ -309,6 +308,13 @@
     document.getElementById('composer').addEventListener('submit', function (event) {
         event.preventDefault();
         sendMessage();
+    });
+    document.getElementById('message-resize').addEventListener('click', function () {
+        var expanded = this.getAttribute('aria-expanded') !== 'true';
+        document.getElementById('composer-fields').hidden = !expanded;
+        this.setAttribute('aria-expanded', String(expanded));
+        this.textContent = expanded ? '입력칸 접기' : '입력칸 펼치기';
+        if (expanded) message.focus();
     });
     message.addEventListener('compositionstart', function () { composing = true; });
     message.addEventListener('compositionend', function () { composing = false; });
