@@ -5,7 +5,10 @@ from uuid import UUID
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from utils.dataframe_utils import text_rows_to_dataframe
+from utils.dataframe_utils import (
+    normalize_fullwidth_ascii,
+    text_rows_to_dataframe,
+)
 from services.chat_state import WorkFlowState
 from services.errors import ConflictError, NotFoundError
 from services.jobs.model_normalization.rule_engine import (
@@ -83,38 +86,61 @@ def analysis_batches(job: Job) -> list[list[dict]]:
     # 원본 DataFrame은 집계 이후 더 이상 사용하지 않는다.
     del dataframe
 
-    batches = []
-    batch = []
-    batch_chars = 0
+    grouped["sort_key"] = (
+        normalize_fullwidth_ascii(grouped["model_spec"])
+        .str.casefold()
+        .str.replace(r"\s+", "", regex=True)
+    )
+    grouped = grouped.sort_values(
+        ["sort_key", "trade_name", "declared_name", "model_spec", "excel_row"],
+    )
+
+    batches, batch, batch_chars = [], [], 2
 
     for row in grouped.itertuples(index=False):
         record = {
+            # 동일 조합의 최초 원본 행 번호를 작업 내 고유 ID로 사용함.
+            "record_id": int(row.excel_row),
             "excel_row": int(row.excel_row),
             "거래품명": row.trade_name,
             "신고품명": row.declared_name,
             "모델규격": row.model_spec,
             "count": int(row.count),
+            "context_only": False,
         }
 
-        record_chars = len(
-            json.dumps(record, ensure_ascii=False)
-        )
+        # Json 배열의 구분자 공간까지 보수적으로 계산
+        record_chars = len(json.dumps(record, ensure_ascii=False)) + 2
+        if record_chars + 2 > 10000:
+            raise ValueError("한 항목이 분석 입력 길이 제한을 초과했습니다.")
 
         if batch and (
             len(batch) >= 100
             or batch_chars + record_chars > 10000
         ):
             batches.append(batch)
-            batch = []
-            batch_chars = 0
+
+            # 앞 배치의 마지막 10개를 비교 참고용으로 다시 전달
+            # 복사로 전달하므로 앞 배치의 context_only 값은 변경되지 않음
+            batch = [
+                dict(item, context_only=False) for item in batch[-10:]
+            ]
+            batch_chars = 2 + sum(
+                len(json.dumps(item, ensure_ascii=False)) + 2 for item in batch
+            )
+
+            # 새 항목이 반드시 들어가도록 필요하면 겹침 개수를 감소
+            while batch and batch_chars + record_chars > 10000:
+                removed = batch.pop(0)
+                batch_chars -= (len(json.dumps(removed, ensure_ascii=False)) + 2)
 
         batch.append(record)
         batch_chars += record_chars
 
-    if batch:
-        batches.append(batch)
+        if batch:
+            batches.append(batch)
 
-    return batches
+        return batches
 
 
 async def inspect_payload(runtime, job_id: UUID, payload: dict) -> str:
@@ -153,8 +179,10 @@ def job_context(job: Job) -> dict:
         "headers": list(job.source.headers),
         "column_mapping": job.source.mapping.model_dump(),
         "analysis_scope": (
-            "선택 영역 전체. 동일한 세 값은 출현 횟수를 집계하고 "
-            "모든 고유 조합을 분할 분석한 뒤 종합함."
+            "선택 영역 전체. 동일한 세 값의 출현 횟수를 집계하고, "
+            "모델규격의 정렬용 키로 정렬한 뒤 "
+            "일부가 겹치는 묶음으로 분석하여 종합함. "
+            "원본 데이터와 출력 행 순서는 유지함."
         ),
         "preview_row_count": (
             job.preview.row_count if job.preview else 0
@@ -281,17 +309,22 @@ async def analyze_job(job_id: UUID, jobs: dict, runtime):
                     "batch_count": len(batches),
                     "records": records,
                     "instruction": (
-                        "전체 데이터 중 한 묶음입니다. "
-                        "각 항목의 count는 동일한 세 값의 출현 횟수입니다. "
-                        "관찰한 패턴, 의미 있는 차이, 예외를 보고하세요. "
-                        "이 묶음만으로 실행 규칙을 확정하지 마세요."
+                        "모델규격의 정렬용 키로 정렬한 데이터 중 한 묶음입니다. "
+                        "실제 필드 값은 정제 전 원문입니다. "
+                        "record_id는 이 작업 내 동일 조합의 고유 ID이고, "
+                        "count는 원본 전체에서 해당 조합의 출현 횟수입니다. "
+                        "context_only=true인 항목은 앞 묶음과 겹치는 비교 자료입니다. "
+                        "새 항목과의 관계를 검토하되 발생 건수에 다시 더하지 마세요. "
+                        "정제 방향 후보, 근거가 되는 record_id와 원문, "
+                        "의미 있는 차이와 예외를 보고하세요. "
+                        "이 묶음만으로 전체에 적용할 실행 규칙을 확정하지 마세요."
                     ),
                 },
             )
 
             summaries.append(summary)
             job.analyzed_row_count += sum(
-                record["count"] for record in records
+                record["count"] for record in records if not record["context_only"]
             )
             job.completed_analysis_batches += 1
 
@@ -319,9 +352,13 @@ async def analyze_job(job_id: UUID, jobs: dict, runtime):
                             "reports": group,
                             "instruction": (
                                 "서로 다른 묶음의 분석을 종합하세요. "
-                                "충돌하는 판단과 예외를 명시하고, "
-                                "같은 표기를 서로 다르게 처리하도록 "
-                                "규칙을 확정하지 마세요. "
+                                "묶음 사이에는 겹치는 자료가 있으므로 "
+                                "같은 정제 제안과 같은 record_id의 근거는 합치세요. "
+                                "보고서에 나온 건수를 단순 합산하거나 "
+                                "자료에 없는 전체 빈도를 추정하지 마세요. "
+                                "정제 방향별 근거 사례와 record_id, 예외를 유지하세요. "
+                                "충돌하는 판단은 임의로 결정하지 말고 "
+                                "사용자 확인 필요로 표시하세요. "
                                 "실행 규칙은 별도 승인 대상입니다."
                             ),
                         },
