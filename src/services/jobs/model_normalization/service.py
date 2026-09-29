@@ -137,8 +137,8 @@ def analysis_batches(job: Job) -> list[list[dict]]:
         batch.append(record)
         batch_chars += record_chars
 
-        if batch:
-            batches.append(batch)
+    if batch:
+        batches.append(batch)
 
     return batches
 
