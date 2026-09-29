@@ -240,3 +240,4 @@ __pycache__
 # Local developer launch scripts may contain machine-specific paths.
 /run_external_sj.sh
 /data/
+.DS_Store
