@@ -308,17 +308,6 @@ async def analyze_job(job_id: UUID, jobs: dict, runtime):
                     "batch_index": index + 1,
                     "batch_count": len(batches),
                     "records": records,
-                    "instruction": (
-                        "모델규격의 정렬용 키로 정렬한 데이터 중 한 묶음입니다. "
-                        "실제 필드 값은 정제 전 원문입니다. "
-                        "record_id는 이 작업 내 동일 조합의 고유 ID이고, "
-                        "count는 원본 전체에서 해당 조합의 출현 횟수입니다. "
-                        "context_only=true인 항목은 앞 묶음과 겹치는 비교 자료입니다. "
-                        "새 항목과의 관계를 검토하되 발생 건수에 다시 더하지 마세요. "
-                        "정제 방향 후보, 근거가 되는 record_id와 원문, "
-                        "의미 있는 차이와 예외를 보고하세요. "
-                        "이 묶음만으로 전체에 적용할 실행 규칙을 확정하지 마세요."
-                    ),
                 },
             )
 
@@ -350,17 +339,6 @@ async def analyze_job(job_id: UUID, jobs: dict, runtime):
                             "phase": "combine",
                             "selected_data_rows": len(job.source.rows),
                             "reports": group,
-                            "instruction": (
-                                "서로 다른 묶음의 분석을 종합하세요. "
-                                "묶음 사이에는 겹치는 자료가 있으므로 "
-                                "같은 정제 제안과 같은 record_id의 근거는 합치세요. "
-                                "보고서에 나온 건수를 단순 합산하거나 "
-                                "자료에 없는 전체 빈도를 추정하지 마세요. "
-                                "정제 방향별 근거 사례와 record_id, 예외를 유지하세요. "
-                                "충돌하는 판단은 임의로 결정하지 말고 "
-                                "사용자 확인 필요로 표시하세요. "
-                                "실행 규칙은 별도 승인 대상입니다."
-                            ),
                         },
                     )
                 )
