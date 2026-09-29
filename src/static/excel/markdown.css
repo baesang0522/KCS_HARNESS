@@ -115,3 +115,8 @@
 :is(.chat-message, .normalization-panel) .markdown-body > :last-child {
   margin-bottom: 0;
 }
+
+:is(.chat-message, .normalization-panel) .markdown-body p {
+  font-size: inherit;
+  line-height: inherit;
+}
