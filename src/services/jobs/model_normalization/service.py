@@ -140,7 +140,7 @@ def analysis_batches(job: Job) -> list[list[dict]]:
         if batch:
             batches.append(batch)
 
-        return batches
+    return batches
 
 
 async def inspect_payload(runtime, job_id: UUID, payload: dict) -> str:
