@@ -5,6 +5,7 @@
         var panel = document.getElementById("formula-panel");
         var requestText = document.getElementById("formula-request");
         var previewText = document.getElementById("formula-preview");
+        var summaryText = document.getElementById("formula-summary");
         var status = document.getElementById("formula-status");
         var sourceAddress = document.getElementById("formula-source-address");
         var targetRow = document.getElementById("formula-target-row");
@@ -23,6 +24,7 @@
             panel.hidden = true;
             chat.scrollArea.appendChild(panel);
             requestText.textContent = previewText.textContent = status.textContent = "";
+            summaryText.textContent = "";
             sourceAddress.textContent = "선택 필요";
             targetAddress.textContent = "";
             targetRow.hidden = true;
@@ -44,8 +46,12 @@
                     "결과: " + action.target_range + "\n" +
                     "수식: " + action.formula;
             }).join("\n\n") + "\n" +
-                "적용: " + target.row_count + "행\n" +
-                "설명: " + preview.plan.summary;
+                "적용: " + target.row_count + "행";
+
+            window.markdownRenderer.render(
+                summaryText,
+                preview.plan.summary
+            );
             status.textContent = target.reason === "automatic"
                 ? "기존 결과를 피해 오른쪽의 빈 열을 자동으로 제안했습니다."
                 : target.reason === "manual"
