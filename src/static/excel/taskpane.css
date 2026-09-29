@@ -128,6 +128,27 @@ html,body{height:100%}.app{height:100vh;min-height:0}.topbar,footer{flex-shrink:
     overflow-wrap: anywhere;
 }
 
+.brand img,
+.hero-icon {
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.hero-icon {
+    background: none;
+    box-shadow: none;
+    border-radius: 0;
+}
+
+.status-row {
+    align-items: center;
+}
+
+.status-row img {
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
 /* Conversation actions */
 .composer-top {
     display: flex;
