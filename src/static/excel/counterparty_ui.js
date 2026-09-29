@@ -18,6 +18,7 @@
         var policySuggestButton = document.getElementById("party-policy-suggest");
         var policyDraft = document.getElementById("party-policy-draft");
         var policyDraftText = document.getElementById("party-policy-draft-text");
+        var policyDraftReason = document.getElementById("party-policy-draft-reason");
         var policyApplyButton = document.getElementById("party-policy-apply");
         var selects = ["party-code", "party-country", "party-name"].map(function (id) {
             return document.getElementById(id);
@@ -46,6 +47,7 @@
         function clearPolicySuggestion() {
             policyDraft.hidden = true;
             policyDraftText.textContent = "";
+            policyDraftReason.textContent = "";
         }
         function reset() {
             panel.hidden = true;
@@ -86,13 +88,24 @@
             status.textContent = "부호·국가·상호 열을 확인하세요.";
         }
         function format(group, reviewed, index) {
-            var decision = {SAME_HIGH_CONFIDENCE: "동일 가능성 높음", NEEDS_REVIEW: "추가 확인 필요"}[group.decision];
-            return "후보 " + (index + 1) + " · [" + group.group_id + "]\n국가 " + group.country_code +
+            var decision = {
+                SAME_HIGH_CONFIDENCE: "동일 가능성 높음",
+                NEEDS_REVIEW: "추가 확인 필요"
+            }[group.decision];
+
+            return "후보 " + (index + 1) + " · [" + group.group_id + "]\n" +
+                "국가 " + group.country_code +
                 " · 기존 부호 " + group.existing_party_codes.join(", ") + "\n" +
                 group.rows.map(function (row) {
-                    return row.excel_row + "행 · " + row.party_code + " · " + row.company_name;
-                }).join("\n") + "\n" + (reviewed ? "모델 판단: " + decision + "\n" : "") +
-                "근거: " + group.reason + (group.similarity ? " (유사도 " + group.similarity + ")" : "");
+                    return row.excel_row + "행 · " +
+                        row.party_code + " · " + row.company_name;
+                }).join("\n") +
+                (reviewed
+                    ? "\n모델 판단: " + decision
+                    : "\n근거: " + group.reason) +
+                (group.similarity != null
+                    ? "\n유사도: " + group.similarity
+                    : "");
         }
         function renderCandidate(group, index) {
             var card = document.createElement("section");
@@ -101,6 +114,13 @@
             var text = document.createElement("pre");
             text.textContent = format(group, true, index);
             card.appendChild(text);
+            var reasonLabel = document.createElement("div");
+            reasonLabel.textContent = "판단 근거";
+            card.appendChild(reasonLabel);
+            var reason = document.createElement("div");
+            reason.className = "model-explanation";
+            window.markdownRenderer.render(reason, group.reason);
+            card.appendChild(reason);
             var approvalLabel = document.createElement("label");
             var approval = document.createElement("input");
             approval.type = "checkbox";
@@ -203,8 +223,13 @@
             clearPolicySuggestion: clearPolicySuggestion,
             showPolicySuggestion: function (suggestion) {
                 policyDraft.hidden = false;
-                policyDraftText.textContent = "제안 기준 · " + formatPolicy(suggestion.policy) +
-                    "\n근거 · " + suggestion.reason;
+                policyDraftText.textContent =
+                    "제안 기준 · " + formatPolicy(suggestion.policy);
+
+                window.markdownRenderer.render(
+                    policyDraftReason,
+                    suggestion.reason
+                );
             },
             getDecisionState: function () {
                 return Array.from(candidates.querySelectorAll(".party-candidate")).map(function (card) {

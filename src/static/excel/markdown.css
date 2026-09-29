@@ -1,0 +1,117 @@
+:is(.chat-message, .normalization-panel) .markdown-body {
+  white-space: normal;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body p {
+  margin: 0 0 10px;
+  white-space: normal;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body strong {
+  font-size: inherit;
+  color: inherit;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body h1,
+:is(.chat-message, .normalization-panel) .markdown-body h2,
+:is(.chat-message, .normalization-panel) .markdown-body h3,
+:is(.chat-message, .normalization-panel) .markdown-body h4,
+:is(.chat-message, .normalization-panel) .markdown-body h5,
+:is(.chat-message, .normalization-panel) .markdown-body h6 {
+  margin: 14px 0 7px;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.5;
+  color: inherit;
+  letter-spacing: normal;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body ul,
+:is(.chat-message, .normalization-panel) .markdown-body ol {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body li {
+  margin: 4px 0;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body blockquote {
+  margin: 10px 0;
+  padding-left: 12px;
+  border-left: 3px solid #bcafe2;
+  color: #777383;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body code {
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: #f0eef7;
+  font-family: Consolas, monospace;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body pre {
+  overflow-x: auto;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f0eef7;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body pre code {
+  padding: 0;
+  background: none;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 10px 0;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body th,
+:is(.chat-message, .normalization-panel) .markdown-body td {
+  padding: 6px 9px;
+  border: 1px solid #ded8e9;
+  text-align: left;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body th {
+  background: #f5f2fb;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body a {
+  color: #7057d9;
+  text-decoration: underline;
+}
+
+.model-explanation {
+  margin: 8px 0;
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body {
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body pre {
+  font-family: Consolas, monospace;
+  font-size: 12px;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body > :first-child {
+  margin-top: 0;
+}
+
+:is(.chat-message, .normalization-panel) .markdown-body > :last-child {
+  margin-bottom: 0;
+}

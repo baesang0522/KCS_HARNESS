@@ -259,9 +259,10 @@
 
             if (job.status === "REVIEW_READY") {
                 if (!resultText) {
-                    resultText = chat.appendMessage("assistant", job.analysis).querySelector("p");
+                    resultText = chat.appendMessage("assistant", job.analysis)
+                        .querySelector(".message-body");
                 } else {
-                    resultText.textContent = job.analysis;
+                    window.markdownRenderer.render(resultText, job.analysis);
                 }
                 mappingPanel.hidden = true;
                 selectButton.textContent = "다시 선택";

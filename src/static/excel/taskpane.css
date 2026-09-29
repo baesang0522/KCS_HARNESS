@@ -160,3 +160,11 @@ button:disabled{cursor:default;opacity:.5}
 .formula-range-row strong{font-weight:600;color:#4d4164}
 .range-change{margin:0!important;padding:2px 5px!important;border:0!important;background:transparent!important;color:#70598b!important;font-size:10px!important;text-decoration:underline}
 @media(max-width:340px){.composer-bottom>span{display:none}.composer-bottom .send{margin-left:auto}}
+
+.chat-message .message-body {
+  margin-top: 7px;
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

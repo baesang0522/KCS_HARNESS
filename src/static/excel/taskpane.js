@@ -37,8 +37,14 @@
         bubble.className = 'chat-message ' + role;
         var label = document.createElement('strong');
         label.textContent = role === 'user' ? '나' : '도우미';
-        var body = document.createElement('p');
-        body.textContent = text;
+        var body = document.createElement('div');
+        body.className = 'message-body';
+
+        if (role === 'assistant') {
+            window.markdownRenderer.render(body, text);
+        } else {
+            body.textContent = text;
+        }
         bubble.appendChild(label);
         bubble.appendChild(body);
         conversation.appendChild(bubble);
