@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
 
 from services.errors import ConflictError
 from services.jobs.counterparty_cleanup import service as counterparty_service
@@ -15,6 +15,8 @@ from services.jobs.counterparty_cleanup.schemas import (
 )
 from services.jobs.model_normalization import service as model_service
 from services.jobs.model_normalization.schemas import (
+    ColumnTransformRequest,
+    ColumnTransformResponse,
     CreateJobRequest as ModelCreateJobRequest,
     NormalizationPreview, RuleSet,
 )
@@ -28,6 +30,20 @@ from services.jobs.formula.schemas import (
 
 router = APIRouter(prefix="/jobs")
 
+
+@router.post(
+    "/model-normalization/transform",
+    response_model=ColumnTransformResponse,
+)
+def transform_model_column(
+        payload: ColumnTransformRequest,
+) -> ColumnTransformResponse:
+    try:
+        return model_service.transform_column(payload)
+    except ValueError as error:
+        raise HTTPException(status_code=422,
+                            detail=str(error),
+                            ) from error
 
 @router.post("/{job_id}/policy/suggest", response_model=PolicySuggestion)
 async def suggest_counterparty_policy(

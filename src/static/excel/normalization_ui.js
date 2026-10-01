@@ -11,10 +11,23 @@
         var sourceText = document.getElementById("norm-source");
         var preview = document.getElementById("norm-preview");
         var statusText = document.getElementById("norm-status");
+        var createButton = document.getElementById("norm-create-workspace");
+        var returnButton = document.getElementById("norm-return-workspace");
+        var workspacePanel = document.getElementById("norm-workspace");
+        var title = document.getElementById("norm-title");
+        var selectionHint = document.getElementById("norm-selection-hint");
+        var initialHint = selectionHint.textContent;
+        var instructionText = document.getElementById("norm-instruction");
+        var initialInstruction = instructionText.textContent;
+        var createReady = false;
+        var busyState = false;
         var selects = ["norm-trade", "norm-declared", "norm-spec"].map(function (id) {
             return document.getElementById(id);
         });
         var roles = ["거래품명", "신고품명", "모델규격"];
+        var columns = window.createNormalizationColumns(
+            selects, document.getElementById("norm-extra-columns")
+        );
         var resultText = null;
         var exportButton = null;
         var exported = false;
@@ -175,6 +188,14 @@
         }
 
         function reset() {
+            columns.clear();
+            createReady = false;
+            createButton.disabled = true;
+            workspacePanel.hidden = true;
+            returnButton.hidden = true;
+            title.textContent = "선택한 데이터 확인";
+            selectionHint.textContent = initialHint;
+            instructionText.textContent = initialInstruction;
             panel.hidden = true;
             // 대화 내용을 비우기 전에 재사용할 선택 카드를 바깥으로 옮긴다.
             chat.scrollArea.appendChild(panel);
@@ -190,46 +211,73 @@
         function archive() {
             var summary = chat.appendMessage("user", sourceText.textContent + "\n" +
                 selects.map(function (select, index) {
-                    return roles[index] + ": " + select.options[select.selectedIndex].textContent;
+                    var option = select.options[select.selectedIndex];
+                    return roles[index] + ": " + (option ? option.textContent : "미선택");
                 }).join("\n"));
             summary.classList.add("range-summary");
             chat.conversation.insertBefore(summary, panel);
         }
 
         function beginSelection() {
+            columns.clear();
+            createReady = false;
+            createButton.disabled = true;
+            workspacePanel.hidden = true;
             open();
             chat.conversation.appendChild(panel);
             mappingPanel.hidden = true;
             refreshButton.disabled = true;
+            sourceText.textContent = "";
+            preview.textContent = "";
             clearResult();
         }
 
         function showSelection(selection) {
-            selects.forEach(function (select, roleIndex) {
-                select.textContent = "";
-                selection.headers.forEach(function (header, index) {
-                    var option = document.createElement("option");
-                    option.value = String(index);
-                    option.textContent = (index + 1) + "번째 열 · " + (header || "(머리글 없음)");
-                    select.appendChild(option);
-                });
-                var matched = selection.headers.findIndex(function (header) {
-                    return header.trim() === roles[roleIndex];
-                });
-                select.value = String(matched >= 0 ? matched : roleIndex);
-            });
+            title.textContent = "작업 시트에 가져올 열 선택";
+            selectionHint.textContent = initialHint;
+            instructionText.textContent = initialInstruction;
+            columns.showSelection(selection);
             sourceText.textContent =
                 selection.address + " · 전체 데이터 " +
-                selection.rows.length + "행";
+                selection.data_row_count.toLocaleString() + "행 · " +
+                selection.column_count + "열";
 
             preview.textContent = [selection.headers.join(" | ")].concat(
-                selection.rows.slice(0, 20).map(function (row) {
+                selection.sample_rows.map(function (row) {
                     return row.cells.join(" | ");
                 })
             ).join("\n");
             mappingPanel.hidden = false;
-            selectButton.textContent = "다시 선택";
-            statusText.textContent = "세 열의 역할을 확인한 뒤 LLM 확인을 눌러주세요.";
+            selectButton.textContent = "범위 다시 선택";
+            statusText.textContent = "필수 세 열과 추가로 사용할 열을 선택하세요.";
+        }
+
+        function showWorkspace(workspace, target) {
+            mappingPanel.hidden = true;
+            workspacePanel.hidden = false;
+            returnButton.hidden = false;
+            createReady = false;
+            createButton.disabled = true;
+            title.textContent = "모델규격 작업 시트";
+            instructionText.textContent = "작업 시트의 값을 직접 수정하며 검토할 수 있습니다.";
+            selectButton.textContent = "범위 다시 선택";
+            selectionHint.textContent =
+                "작업 시트에서 한 열이나 일부 행을 선택한 뒤 이 버튼을 누르세요. " +
+                "다른 원본 시트도 선택할 수 있으며, 기존 작업 시트는 유지됩니다.";
+            document.getElementById("norm-workspace-source").textContent =
+                "작업 시트: " + target.sheet_name + " · 복사한 데이터 " +
+                workspace.row_count.toLocaleString() + "행";
+            document.getElementById("norm-workspace-target").textContent =
+                "현재 작업 범위: " + target.address + " · " +
+                target.row_count.toLocaleString() + "행 · " + target.column_count + "열";
+            document.getElementById("norm-workspace-columns").textContent =
+                workspace.columns.map(function (column) {
+                    var current = target.columns.find(function (item) {
+                        return item.column_id === column.column_id;
+                    });
+                    return (current ? current.header : column.header) +
+                        (column.description ? " — " + column.description : "");
+                }).join("\n");
         }
 
         function renderJob(job) {
@@ -264,7 +312,7 @@
                     window.markdownRenderer.render(resultText, job.analysis);
                 }
                 mappingPanel.hidden = true;
-                selectButton.textContent = "다시 선택";
+                selectButton.textContent = "범위 다시 선택";
                 statusText.textContent = sourceText.textContent + " · 범위·열 설정 확인됨";
                 analyzeButton.textContent = "이 설정으로 확인";
             } else if (job.error) {
@@ -361,6 +409,11 @@
             archive: archive,
             beginSelection: beginSelection,
             showSelection: showSelection,
+            showWorkspace: showWorkspace,
+            setCreateReady: function (value) {
+                createReady = value;
+                createButton.disabled = busyState || !createReady;
+            },
             clearResult: clearResult,
             renderJob: renderJob,
             showRuleSelector: showRuleSelector,
@@ -374,17 +427,17 @@
                 exportButton.textContent =
                     result.sheet_name + " · " + result.row_count + "행 출력 완료";
             },
-            getMapping: function () {
-                return selects.map(function (select) { return Number(select.value); });
-            },
+            getMapping: columns.getMapping,
+            getExtraColumns: columns.getExtraColumns,
             setBusy: function (busy, hasPayload) {
+                busyState = busy;
                 selectButton.disabled = busy;
-                analyzeButton.disabled = busy;
-                refreshButton.disabled = busy || !hasPayload;
-
-                selects.forEach(function (select) {
-                    select.disabled = busy;
-                });
+                createButton.disabled = busy || !createReady;
+                returnButton.disabled = busy;
+                // 새 작업 시트 경로를 연결할 때까지 기존 전체 분석은 막는다.
+                analyzeButton.disabled = true;
+                refreshButton.disabled = true;
+                columns.setBusy(busy);
 
                 ruleInputs.forEach(function (input) {
                     input.disabled = busy;
@@ -405,11 +458,11 @@
 
                 exportHandler = handlers.export;
                 selectButton.addEventListener("click", handlers.select);
+                createButton.addEventListener("click", handlers.createWorkspace);
+                returnButton.addEventListener("click", handlers.returnWorkspace);
                 analyzeButton.addEventListener("click", handlers.analyze);
                 refreshButton.addEventListener("click", handlers.refresh);
-                selects.forEach(function (select) {
-                    select.addEventListener("change", handlers.mappingChange);
-                });
+                columns.bind(handlers.mappingChange);
             }
         };
     };

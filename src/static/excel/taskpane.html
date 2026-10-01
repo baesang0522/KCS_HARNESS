@@ -12,6 +12,12 @@
   <script defer src="markdown_renderer.js"></script>
   <script defer src="api_client.js"></script>
   <script defer src="excel_bridge.js"></script>
+  <script defer src="normalization_sheet.js"></script>
+  <script defer src="normalization_workspace.js"></script>
+  <script defer src="normalization_columns.js"></script>
+  <script defer src="normalization_transform_sheet.js"></script>
+  <script defer src="normalization_transform_ui.js"></script>
+  <script defer src="normalization_transform.js"></script>
   <script defer src="normalization_ui.js"></script>
   <script defer src="normalization.js"></script>
   <script defer src="counterparty_ui.js"></script>
@@ -49,12 +55,14 @@
       </div>
       <section id="conversation" role="log" aria-label="대화 내용" aria-live="polite" hidden></section>
       <section class="normalization-panel" id="normalization-panel" hidden>
-        <h2>선택한 데이터 확인</h2>
-        <p>머리글을 포함한 연속된 세 열의 데이터 범위를 선택하세요.</p>
+        <h2 id="norm-title">선택한 데이터 확인</h2>
+        <p id="norm-instruction">머리글을 포함한 데이터 범위를 선택하세요. 가져온 범위에서 필수 열과 추가로 사용할 열을 지정합니다.</p>
 
-        <button type="button" id="norm-select">
+        <button type="button" id="norm-select" aria-describedby="norm-selection-hint">
           선택 범위 가져오기
         </button>
+        <p id="norm-selection-hint">범위를 바꾸려면 Excel에서 새 범위를 선택한 뒤 이 버튼을 누르세요. 새 범위를 가져오면 필수 열·추가 열·설명을 다시 지정합니다.</p>
+        <button type="button" id="norm-return-workspace" hidden>작업 시트로 이동</button>
 
         <div id="norm-mapping" hidden>
           <p id="norm-source"></p>
@@ -74,16 +82,65 @@
             <select id="norm-spec"></select>
           </label>
 
+          <details id="norm-extra">
+            <summary>추가로 사용할 열과 설명</summary>
+            <p id="norm-extra-hint">필수 세 열은 자동으로 포함됩니다. 추가 열을 선택하고 필요한 경우 의미나 용도를 적어주세요. 설명은 1,000자까지 입력할 수 있습니다.</p>
+            <div id="norm-extra-columns"></div>
+          </details>
+
           <details id="norm-samples"><summary>선택 데이터 보기 · 화면에는 앞 20행 표시</summary>
             <pre id="norm-preview"></pre>
           </details>
 
-          <button type="button" id="norm-analyze">
+          <p>선택한 열의 전체 행을 새 작업 시트로 복사합니다. 필터로 숨겨진 행도 포함하며, 원본 시트는 유지합니다.</p>
+          <button type="button" id="norm-create-workspace" disabled>작업 시트 만들기</button>
+
+          <button type="button" id="norm-analyze" hidden disabled>
             이 설정으로 확인
           </button>
         </div>
 
-        <button type="button" id="norm-refresh" disabled>
+        <section id="norm-workspace" hidden>
+          <p id="norm-workspace-source"></p>
+          <p id="norm-workspace-target"></p>
+          <details>
+            <summary>가져온 열과 설명</summary>
+            <pre id="norm-workspace-columns"></pre>
+          </details>
+          <p>시트에서 값을 직접 수정하거나 필터·정렬할 수 있습니다. 다른 열이나 일부 행을 작업하려면 범위를 다시 선택하세요.</p>
+          <section id="norm-transform" aria-label="열 전처리와 문자열 치환">
+            <label>처리할 열 <select id="norm-transform-column"></select></label>
+            <p>현재 범위의 모든 행을 처리합니다. 필터로 숨겨진 행도 포함합니다.</p>
+            <fieldset id="norm-transform-rules">
+              <legend>전처리 · 선택한 항목을 위에서 아래로 적용</legend>
+              <label><input type="checkbox" value="normalize_fullwidth_ascii"> 전각 영문·숫자·기호 변환</label>
+              <label><input type="checkbox" value="trim"> 앞뒤 공백 제거</label>
+              <label><input type="checkbox" value="collapse_whitespace"> 연속 공백을 한 칸으로</label>
+              <label><input type="checkbox" id="norm-replace-enabled"> 마지막에 문자열 치환</label>
+              <div id="norm-replace-fields" hidden>
+                <label>찾을 문자열 <input id="norm-replace-find" type="text" maxlength="1000"></label>
+                <label>바꿀 문자열 <input id="norm-replace-value" type="text" maxlength="1000"></label>
+                <p>대소문자를 구분하여 포함된 문자열을 모두 바꿉니다. 바꿀 문자열을 비우면 삭제합니다.</p>
+              </div>
+            </fieldset>
+            <button type="button" id="norm-transform-preview">변경 내용 확인</button>
+            <button type="button" id="norm-transform-cancel" hidden>처리 취소</button>
+            <section id="norm-transform-result" hidden>
+              <p id="norm-transform-summary"></p>
+              <details><summary>변경 예시 보기 · 최대 10행</summary><pre id="norm-transform-examples"></pre></details>
+              <label>결과 열 이름 <input type="text" id="norm-transform-name" maxlength="240"></label>
+              <label>이 열을 기준으로 <select id="norm-transform-anchor"></select></label>
+              <label>결과 위치
+                <select id="norm-transform-side"><option value="after">바로 뒤에 새 열</option><option value="before">바로 앞에 새 열</option></select>
+              </label>
+              <button type="button" id="norm-transform-pick">Excel에서 선택한 열을 기준으로</button>
+              <p>작업 표 안에 새 결과 열을 만듭니다. 선택 범위 밖의 행은 빈칸으로 남습니다.</p>
+              <button type="button" id="norm-transform-apply">확인한 결과를 새 열로 만들기</button>
+            </section>
+          </section>
+        </section>
+
+        <button type="button" id="norm-refresh" hidden disabled>
           작업 상태 조회
         </button>
 
