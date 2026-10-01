@@ -216,3 +216,122 @@ button:disabled{cursor:default;opacity:.5}
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+#norm-extra {
+    margin: 12px 0;
+    font-size: 12px;
+    color: #70677f;
+}
+
+#norm-extra-columns {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.norm-extra-column {
+    margin: 8px 0;
+    padding: 8px;
+    border: 1px solid #e3dfea;
+    border-radius: 7px;
+    background: #faf9fc;
+}
+
+.normalization-panel .norm-extra-choice {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 0;
+}
+
+.norm-extra-choice input {
+    flex: 0 0 auto;
+    margin: 2px 0 0;
+}
+
+.norm-extra-description {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 56px;
+    padding: 7px;
+    border: 1px solid #e3dfea;
+    border-radius: 7px;
+    background: #fff;
+    color: #383045;
+    font: inherit;
+    resize: vertical;
+}
+
+.norm-extra-description:focus-visible {
+    outline: 2px solid #75609d;
+    outline-offset: 1px;
+}
+
+#norm-create-workspace {
+    background: #75609d;
+    color: #fff;
+    border-color: #75609d;
+}
+
+#norm-workspace {
+    padding: 10px;
+    margin-top: 10px;
+    background: #faf9fc;
+    border: 1px solid #e3dfea;
+    border-radius: 7px;
+    font-size: 12px;
+}
+
+#norm-workspace-columns {
+    max-height: 160px;
+}
+
+#norm-transform {
+    border-top: 1px solid #e3dfea;
+    margin-top: 12px;
+    padding-top: 12px;
+}
+
+#norm-transform fieldset {
+    border: 1px solid #e3dfea;
+    border-radius: 7px;
+    margin: 10px 0;
+    padding: 8px;
+    min-width: 0;
+}
+
+#norm-transform label {
+    display: block;
+    margin: 8px 0;
+}
+
+#norm-transform input[type="text"],
+#norm-transform select {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    padding: 7px;
+    margin-top: 4px;
+    border: 1px solid #e3dfea;
+    border-radius: 7px;
+    background: #fff;
+    color: #383045;
+    font: inherit;
+}
+
+#norm-transform input:focus-visible,
+#norm-transform select:focus-visible {
+    outline: 2px solid #75609d;
+    outline-offset: 1px;
+}
+
+#norm-transform-examples {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 240px;
+}
+
+#norm-transform-apply {
+    background: #75609d;
+    color: #fff;
+}

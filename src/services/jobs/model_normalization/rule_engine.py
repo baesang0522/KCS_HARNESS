@@ -6,6 +6,7 @@ from services.jobs.model_normalization.schemas import (
     CreateJobRequest,
     NormalizationPreview,
     NormalizationRow,
+    NormalizationRule,
     Operation,
     PreviewRow,
     RuleSet,
@@ -18,9 +19,11 @@ from utils.dataframe_utils import (
 
 def apply_rule(
     values: pd.Series,
-    operation: Operation,
+    rule: NormalizationRule,
 ) -> pd.Series:
     """한 규칙을 전체 문자열 열에 적용한다."""
+    operation = rule.operation
+
     if operation == "trim":
         return values.str.strip()
 
@@ -29,6 +32,17 @@ def apply_rule(
 
     if operation == "normalize_fullwidth_ascii":
         return normalize_fullwidth_ascii(values)
+
+    if operation == "replace":
+        if rule.find_text is None or rule.replace_text is None:
+            raise ValueError(
+                "문자열 치환에는 찾은 문자열과 바꿀 문자열이 필요합니다."
+            )
+        return values.str.replace(
+            rule.find_text,
+            rule.replace_text,
+            regex=False,
+        )
 
     raise ValueError(
         f"지원하지 않는 정제 규칙입니다: {operation}"
@@ -42,6 +56,7 @@ def build_rule_examples(
     examples = {
         operation: None
         for operation in get_args(Operation)
+        if operation != "replace"
     }
 
     for offset in range(0, len(source.rows), 1000):
@@ -57,7 +72,7 @@ def build_rule_examples(
             if examples[operation] is not None:
                 continue
 
-            normalized = apply_rule(values, operation)
+            normalized = apply_rule(values, NormalizationRule(operation=operation))
             changed = values.ne(normalized)
 
             if changed.any():
@@ -108,7 +123,7 @@ def build_preview(
     operation_changes: list[tuple[Operation, list[bool]]] = []
 
     for rule in rule_set.rules:
-        updated = apply_rule(current, rule.operation)
+        updated = apply_rule(current, rule)
 
         operation_changes.append(
             (

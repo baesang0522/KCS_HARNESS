@@ -8,6 +8,7 @@ Operation = Literal[
     "trim",
     "collapse_whitespace",
     "normalize_fullwidth_ascii",
+    "replace",
 ]
 CellText = Annotated[str, Field(max_length=1000)]
 ColumnIndex = Annotated[int, Field(ge=0, le=2)]
@@ -17,6 +18,22 @@ class NormalizationRule(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     operation: Operation
+    find_text: str | None = Field(default=None, min_length=1, max_length=1000)
+    replace_text: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def check_replacement(self):
+        if self.operation == "replace":
+            if self.find_text is None or self.replace_text is None:
+                raise ValueError(
+                    "문자열 치환에는 찾을 문자열과 바꿀 문자열이 필요합니다."
+                )
+        elif self.find_text is not None or self.replace_text is not None:
+            raise ValueError(
+                "찾을 문저열과 바꿀 문자열은 치환 규칙에서만 사용합니다."
+            )
+
+        return self
 
 
 class RuleSet(BaseModel):
@@ -26,6 +43,38 @@ class RuleSet(BaseModel):
         min_length=1,
         max_length=10,
     )
+
+
+class ColumnValue(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    excel_row: int = Field(ge=1, le=1048576)
+    value: str = Field(max_length=32767)
+
+
+class ColumnTransformRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    worksheet_id: str = Field(min_length=1, max_length=256)
+
+    column_index: int = Field(ge=0, le=16383)
+    rows: tuple[ColumnValue, ...] = Field(min_length=1, max_length=1000)
+    rule_set: RuleSet
+
+    @model_validator(mode="after")
+    def check_unique_rows(self):
+        row_numbers = {row.excel_row for row in self.rows}
+
+        if len(row_numbers) != len(self.rows):
+            raise ValueError("처리할 행 번호가 중복되었습니다.")
+        return self
+
+
+class ColumnTransformResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    worksheet_id: str
+    column_index: int
+    rows: tuple[ColumnValue, ...]
+    changed_count: int
 
 
 class NormalizationRow(BaseModel):

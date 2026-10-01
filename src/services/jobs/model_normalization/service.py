@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import pandas as pd
 from uuid import UUID
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -12,11 +13,13 @@ from utils.dataframe_utils import (
 from services.chat_state import WorkFlowState
 from services.errors import ConflictError, NotFoundError
 from services.jobs.model_normalization.rule_engine import (
+    apply_rule,
     build_preview,
     build_rule_examples,
 )
 from services.jobs.model_normalization.schemas import (
     CreateJobRequest, Job, NormalizationPreview, NormalizationRow, RuleSet,
+    ColumnTransformRequest, ColumnTransformResponse, ColumnValue
 )
 
 logger = logging.getLogger(__name__)
@@ -443,3 +446,48 @@ def approve_preview(
 
     job.approved_preview_id = preview_id
     return job.preview
+
+
+def transform_column(payload: ColumnTransformRequest) -> ColumnTransformResponse:
+    original = pd.Series(
+        [row.value for row in payload.rows],
+        dtype=pd.StringDtype(storage="python"),
+    )
+    current = original
+
+    for rule in payload.rule_set.rules:
+        if rule.operation == "replace":
+            find_text = rule.find_text
+            replace_text = rule.replace_text
+
+            if find_text is None or replace_text is None:
+                raise ValueError("치환할 문자열을 확인하세요.")
+
+            growth = len(replace_text) - len(find_text)
+
+            # 과도하게 긴 문자열을 만들기 전에 Excel 셀 한도를 확인
+            if growth > 0:
+                for row, value in zip(payload.rows, current):
+                    result_length = (
+                        len(value) + value.count(find_text) * growth
+                    )
+                    if result_length > 32767:
+                        raise ValueError(
+                            f"{row.excel_row}행의 치환 결과가 "
+                            "Excel 셀의 최대 길이 32,767자를 초과합니다."
+                        )
+
+        current = apply_rule(current, rule)
+
+    return ColumnTransformResponse(
+        worksheet_id=payload.worksheet_id,
+        column_index=payload.column_index,
+        rows=tuple(
+            ColumnValue(
+                excel_row=int(row.excel_row),
+                value=value,
+            )
+            for row, value in zip(payload.rows, current)
+        ),
+        changed_count=int(original.ne(current).sum()),
+    )
