@@ -1,8 +1,10 @@
 "use strict";
 
 (function () {
+    var apiBase = window.location.pathname.split("/static/excel/")[0];
+
     async function requestJson(path, options) {
-        var response = await fetch(path, options);
+        var response = await fetch(apiBase + path, options);
         var data = await response.json().catch(function () {
             return {};
         });
