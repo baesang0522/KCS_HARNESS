@@ -4,10 +4,8 @@ import logging
 import re
 from uuid import UUID
 
-from langchain_core.messages import AIMessage, HumanMessage
-
 from services.errors import ConflictError, NotFoundError
-from services.jobs.formula.schemas import (
+from services.formula.schemas import (
     CreateJobRequest, FormulaAction, FormulaApprovalRequest, FormulaPlan,
     FormulaConversationMessage, FormulaHistoryEntry, FormulaPlanningContext,
     FormulaPreview, Job, range_bounds,
@@ -176,41 +174,30 @@ async def plan_job(job_id: UUID, jobs: dict, runtime) -> dict:
     try:
         source = job.source
         response = await asyncio.wait_for(
-            runtime.formula_graph.ainvoke({
-                "messages": [HumanMessage(content=json.dumps({
-                    "instruction": source.instruction,
-                    "context": (
-                        job.planning_context.model_dump(mode="json")
-                        if job.planning_context else None
-                    ),
-                    "selection": {
-                        "worksheet_id": source.worksheet_id,
-                        "sheet_name": source.sheet_name,
-                        "address": source.address,
-                        "row_start_zero_based": source.row_start,
-                        "column_start_zero_based": source.column_start,
-                        "row_count": source.row_count,
-                        "column_count": source.column_count,
-                        "samples": [row.model_dump() for row in source.samples],
-                    },
-                    "sheet_context": (
-                        source.sheet_context.model_dump(mode="json")
-                        if source.sheet_context else None
-                    ),
-                }, ensure_ascii=False))],
-                "request_id": str(job_id),
-                "tool_history": [],
+            runtime.respond(runtime.formula_prompt, {
+                "instruction": source.instruction,
+                "context": (
+                    job.planning_context.model_dump(mode="json")
+                    if job.planning_context else None
+                ),
+                "selection": {
+                    "worksheet_id": source.worksheet_id,
+                    "sheet_name": source.sheet_name,
+                    "address": source.address,
+                    "row_start_zero_based": source.row_start,
+                    "column_start_zero_based": source.column_start,
+                    "row_count": source.row_count,
+                    "column_count": source.column_count,
+                    "samples": [row.model_dump() for row in source.samples],
+                },
+                "sheet_context": (
+                    source.sheet_context.model_dump(mode="json")
+                    if source.sheet_context else None
+                ),
             }),
             timeout=runtime.settings.llm.timeout_seconds + 10,
         )
-        last = response["messages"][-1]
-        if (
-            not isinstance(last, AIMessage)
-            or last.tool_calls
-            or not isinstance(last.content, str)
-        ):
-            raise ValueError("유효한 수식 계획이 없습니다.")
-        plan = parse_formula_plan(last.content.strip())
+        plan = parse_formula_plan(response.content.strip())
         validate_source_reference(plan, source)
         job.preview = FormulaPreview(plan=plan)
         job.approved_preview_id = None

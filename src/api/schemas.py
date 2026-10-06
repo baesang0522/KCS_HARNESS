@@ -1,12 +1,14 @@
 from uuid import UUID
 from typing import Annotated, Literal
 from pydantic import BaseModel, Field, field_validator
+from services.operations.schemas import Operation, WorkspaceContext
 
 
 class ChatRequest(BaseModel):
     conversation_id: UUID
     request_id: UUID
-    message: str = Field(min_length=1)
+    message: str = Field(min_length=1, max_length=8000)
+    workspace: WorkspaceContext | None = None
 
     @field_validator("message")
     @classmethod
@@ -28,13 +30,13 @@ class ConfirmSelectionAction(BaseModel):
     ]
 
 
-class CounterpartyPolicyAction(BaseModel):
-    type: Literal["review_counterparty_policy"]
-    instruction: str = Field(min_length=1, max_length=1000)
+class ConfigureOperationAction(BaseModel):
+    type: Literal["configure_operation"]
+    operation: Operation
 
 
 UIAction = Annotated[
-    ConfirmSelectionAction | CounterpartyPolicyAction,
+    ConfirmSelectionAction | ConfigureOperationAction,
     Field(discriminator="type"),
 ]
 

@@ -45,4 +45,5 @@ async def chat(payload: ChatRequest, request: Request):
         conversation_id=str(payload.conversation_id),
         request_id=str(payload.request_id),
         message=payload.message,
+        workspace=payload.workspace.model_dump() if payload.workspace else None,
     )

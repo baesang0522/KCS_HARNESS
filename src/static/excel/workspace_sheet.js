@@ -45,13 +45,14 @@
                 );
             }
 
-            // 기존 모델규격 기능의 데이터 행 제한을 유지한다.
+            // 읽기·복사의 행 제한. 실제 처리량은 결과 크기에도 제한을 둔다.
             if (used.rowCount > 400001) {
                 throw new Error(
                     "데이터는 최대 400,000행까지 선택할 수 있습니다."
                 );
             }
 
+            if (used.columnCount > 200) throw new Error("원본 범위는 최대 200열을 선택하세요.");
             // 실제 값이 있는 영역의 첫 행을 머리글로 사용한다.
             var headerRange = used.getRow(0);
             var sampleCount = Math.min(20, used.rowCount - 1);
@@ -101,7 +102,7 @@
 
             var sheet = selectedSheet;
             if (!table) table = sheet.tables.getItem(workspace.table_id);
-            var used = sheet.getUsedRange(true);
+            var used = table.getDataBodyRange();
             var header = table.getHeaderRowRange();
             selected.load("rowIndex,columnIndex,rowCount,columnCount");
             used.load("rowIndex,columnIndex,rowCount,columnCount");
@@ -137,6 +138,7 @@
                 });
                 result.push(Object.assign({}, known || {}, {
                     column_id: column ? column.id : null,
+                    role: known ? known.role : "reference",
                     column_index: absoluteIndex,
                     header: name,
                     description: known ? known.description : ""
@@ -157,7 +159,7 @@
         });
     }
 
-    window.normalizationSheet = {
+    window.workspaceSheet = {
         requireExcel: requireExcel,
         readSource: readSource,
         readWorkspaceTarget: readWorkspaceTarget

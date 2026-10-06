@@ -1,17 +1,15 @@
 from dataclasses import dataclass
-from collections.abc import Sequence
+import json
+from pathlib import Path
 
-from langgraph.graph.state import CompiledStateGraph
-from langchain_core.tools import BaseTool
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agents.agent import AgentNode
-from graphs.harness_graph import build_harness_graph
 from models.llama_cpp import create_model
 from models.openai import create_model as create_openai_model
 from models.codex_adapter import CodexModel
 from prompts.loader import load_agent_prompt
 from settings import Settings, load_settings
-from pathlib import Path
 
 
 PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
@@ -19,12 +17,19 @@ PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 @dataclass(frozen=True)
 class CustomsHarness:
     settings: Settings
-    chat_graph: CompiledStateGraph
-    inspection_graph: CompiledStateGraph
-    counterparty_review_graph: CompiledStateGraph
-    counterparty_policy_graph: CompiledStateGraph
-    formula_graph: CompiledStateGraph
-    request_router_graph: CompiledStateGraph
+    model: BaseChatModel | CodexModel
+    request_prompt: str
+    formula_prompt: str
+
+    async def respond(self, prompt: str, payload: dict) -> AIMessage:
+        response = await self.model.ainvoke([
+            SystemMessage(content=prompt),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+        ])
+        if (not isinstance(response, AIMessage) or response.tool_calls
+                or not isinstance(response.content, str) or not response.content.strip()):
+            raise ValueError("모델이 유효한 답변을 반환하지 않았습니다.")
+        return response
 
 
 def create_runtime() -> CustomsHarness:
@@ -53,71 +58,9 @@ def create_runtime() -> CustomsHarness:
             max_retries=settings.llm.max_retries,
         )
 
-    chat_prompt = load_agent_prompt(PROMPT_DIR / "chat.yml")
-    chat_node = AgentNode(
-        model=model,
-        tools=[],
-        system_prompt=chat_prompt.render(),
-    )
-    chat_graph = build_harness_graph(
-        agent_node=chat_node,
-        tools=[],
-    )
-
-    inspection_prompt = load_agent_prompt(PROMPT_DIR / "inspection.yml")
-    inspection_node = AgentNode(
-        model=model,
-        tools=[],
-        system_prompt=inspection_prompt.render(),
-    )
-
-    inspection_graph = build_harness_graph(
-        agent_node=inspection_node,
-        tools=[],
-    )
-
-    counterparty_prompt = load_agent_prompt(PROMPT_DIR / "counterparty_review.yml")
-    counterparty_review_graph = build_harness_graph(
-        agent_node=AgentNode(
-            model=model, tools=[], system_prompt=counterparty_prompt.render(),
-        ),
-        tools=[],
-    )
-
-    counterparty_policy_prompt = load_agent_prompt(
-        PROMPT_DIR / "counterparty_policy.yml"
-    )
-    counterparty_policy_graph = build_harness_graph(
-        agent_node=AgentNode(
-            model=model, tools=[], system_prompt=counterparty_policy_prompt.render(),
-        ),
-        tools=[],
-    )
-
-    formula_prompt = load_agent_prompt(PROMPT_DIR / "formula.yml")
-    formula_graph = build_harness_graph(
-        agent_node=AgentNode(
-            model=model, tools=[], system_prompt=formula_prompt.render(),
-        ),
-        tools=[],
-    )
-
-    router_prompt = load_agent_prompt(PROMPT_DIR / "request_router.yml")
-    request_router_graph = build_harness_graph(
-        agent_node=AgentNode(
-            model=model,
-            tools=[],
-            system_prompt=router_prompt.render(),
-        ),
-        tools=[]
-    )
-
     return CustomsHarness(
         settings=settings,
-        chat_graph=chat_graph,
-        inspection_graph=inspection_graph,
-        counterparty_review_graph=counterparty_review_graph,
-        counterparty_policy_graph=counterparty_policy_graph,
-        formula_graph=formula_graph,
-        request_router_graph=request_router_graph,
+        model=model,
+        request_prompt=load_agent_prompt(PROMPT_DIR / "request_router.yml").render(),
+        formula_prompt=load_agent_prompt(PROMPT_DIR / "formula.yml").render(),
     )

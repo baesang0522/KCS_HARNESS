@@ -9,15 +9,9 @@ class AgentPrompt(BaseModel):
 
     version: int = Field(ge=1)
     system: str = Field(min_length=1)
-    tool_rules: str = ""
 
     def render(self) -> str:
-        prompt_parts = [
-            self.system.strip(),
-            self.tool_rules.strip()
-        ]
-
-        return "\n\n".join(part for part in prompt_parts if part)
+        return self.system.strip()
 
 
 def load_agent_prompt(prompt_path: Path) -> AgentPrompt:
@@ -25,15 +19,6 @@ def load_agent_prompt(prompt_path: Path) -> AgentPrompt:
         prompt_data = yaml.safe_load(prompt_file)
 
     if not isinstance(prompt_data, dict):
-        raise ValueError("agent.yml의 최상위 값은 객체 형식이어야 합니다.")
+        raise ValueError(f"{prompt_path.name}의 최상위 값은 객체 형식이어야 합니다.")
 
     return AgentPrompt.model_validate(prompt_data)
-
-
-
-
-
-
-
-
-

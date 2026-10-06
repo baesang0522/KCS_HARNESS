@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
+  <meta name="kcs-ui-version" content="local">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>엑셀 전처리 도우미</title>
   <link rel="stylesheet" href="taskpane.css">
@@ -11,17 +12,16 @@
   <script defer src="vendor/purify.min.js"></script>
   <script defer src="markdown_renderer.js"></script>
   <script defer src="api_client.js"></script>
-  <script defer src="excel_bridge.js"></script>
-  <script defer src="normalization_sheet.js"></script>
-  <script defer src="normalization_workspace.js"></script>
-  <script defer src="normalization_columns.js"></script>
-  <script defer src="normalization_transform_sheet.js"></script>
-  <script defer src="normalization_transform_ui.js"></script>
-  <script defer src="normalization_transform.js"></script>
-  <script defer src="normalization_ui.js"></script>
-  <script defer src="normalization.js"></script>
-  <script defer src="counterparty_ui.js"></script>
-  <script defer src="counterparty.js"></script>
+  <script defer src="formula_sheet.js"></script>
+  <script defer src="workspace_sheet.js"></script>
+  <script defer src="workspace_copy.js"></script>
+  <script defer src="workspace_columns.js"></script>
+  <script defer src="workspace_ui.js"></script>
+  <script defer src="operations_sheet.js"></script>
+  <script defer src="operations_mapping.js"></script>
+  <script defer src="operations_ui.js"></script>
+  <script defer src="operations.js"></script>
+  <script defer src="workspace.js"></script>
   <script defer src="formula_ui.js"></script>
   <script defer src="formula.js"></script>
   <script defer src="taskpane.js"></script>
@@ -30,6 +30,7 @@
   <div class="app">
     <header class="topbar">
       <div class="brand"><img src="assets/mata10.png" width="28" height="28" alt=""><span>엑셀 전처리 도우미</span></div>
+      <button type="button" class="workspace-launch" id="open-workspace">작업 화면</button>
       <button type="button" class="icon-button" id="new-chat"
               aria-label="홈으로 · 새 대화" title="홈으로 · 새 대화">
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -47,140 +48,111 @@
       </section>
       <section class="suggestions" aria-labelledby="suggestion-title">
         <h2 id="suggestion-title">이런 작업을 함께할 수 있어요</h2>
-        <button class="suggestion" data-prompt="해외거래처명을 정리하고, 같은 거래처로 보이는 후보를 찾아줘."><span class="card-icon violet" aria-hidden="true">✧</span><span><strong>해외거래처 정리</strong><small>다르게 적힌 상호를 한눈에</small></span><span class="arrow" aria-hidden="true">↗</span></button>
-        <button class="suggestion" data-workflow="normalization" data-prompt="선택한 데이터의 모델규격을 정리하고, 같은 모델로 보이는 항목을 묶고 싶어. 먼저 필요한 데이터와 확인 절차를 안내해줘."><span class="card-icon blue" aria-hidden="true">▦</span><span><strong>모델·규격 살펴보기</strong><small>복잡한 표기에서 필요한 정보 찾기</small></span><span class="arrow" aria-hidden="true">↗</span></button>
+        <button class="suggestion" data-task="counterparty_cleanup"><span class="card-icon violet" aria-hidden="true">✧</span><span><strong>해외거래처 정리</strong><small>다르게 적힌 상호를 한눈에</small></span><span class="arrow" aria-hidden="true">↗</span></button>
+        <button class="suggestion" data-task="model_normalization"><span class="card-icon blue" aria-hidden="true">▦</span><span><strong>모델·규격 살펴보기</strong><small>복잡한 표기에서 필요한 정보 찾기</small></span><span class="arrow" aria-hidden="true">↗</span></button>
         <button class="suggestion" data-prompt="이 작업에 필요한 엑셀 수식을 제안해줘."><span class="card-icon teal" aria-hidden="true">ƒ</span><span><strong>수식 작성 도움받기</strong><small>하고 싶은 작업을 말로 설명하기</small></span><span class="arrow" aria-hidden="true">↗</span></button>
       </section>
-      <p class="preview-note">선택한 범위의 일부 데이터를 읽어 확인합니다.<br>원본 셀은 수정하지 않습니다.</p>
+      <p class="preview-note">필요한 열을 골라 작업 시트에서 정리합니다.<br>원본 셀은 수정하지 않습니다.</p>
       </div>
       <section id="conversation" role="log" aria-label="대화 내용" aria-live="polite" hidden></section>
-      <section class="normalization-panel" id="normalization-panel" hidden>
-        <h2 id="norm-title">선택한 데이터 확인</h2>
-        <p id="norm-instruction">머리글을 포함한 데이터 범위를 선택하세요. 가져온 범위에서 필수 열과 추가로 사용할 열을 지정합니다.</p>
-
-        <button type="button" id="norm-select" aria-describedby="norm-selection-hint">
-          선택 범위 가져오기
-        </button>
-        <p id="norm-selection-hint">범위를 바꾸려면 Excel에서 새 범위를 선택한 뒤 이 버튼을 누르세요. 새 범위를 가져오면 필수 열·추가 열·설명을 다시 지정합니다.</p>
-        <button type="button" id="norm-return-workspace" hidden>작업 시트로 이동</button>
-
-        <div id="norm-mapping" hidden>
-          <p id="norm-source"></p>
-
-          <label>
-            거래품명
-            <select id="norm-trade"></select>
-          </label>
-
-          <label>
-            신고품명
-            <select id="norm-declared"></select>
-          </label>
-
-          <label>
-            모델규격
-            <select id="norm-spec"></select>
-          </label>
-
-          <details id="norm-extra">
-            <summary>추가로 사용할 열과 설명</summary>
-            <p id="norm-extra-hint">필수 세 열은 자동으로 포함됩니다. 추가 열을 선택하고 필요한 경우 의미나 용도를 적어주세요. 설명은 1,000자까지 입력할 수 있습니다.</p>
-            <div id="norm-extra-columns"></div>
-          </details>
-
-          <details id="norm-samples"><summary>선택 데이터 보기 · 화면에는 앞 20행 표시</summary>
-            <pre id="norm-preview"></pre>
-          </details>
-
-          <p>선택한 열의 전체 행을 새 작업 시트로 복사합니다. 필터로 숨겨진 행도 포함하며, 원본 시트는 유지합니다.</p>
-          <button type="button" id="norm-create-workspace" disabled>작업 시트 만들기</button>
-
-          <button type="button" id="norm-analyze" hidden disabled>
-            이 설정으로 확인
-          </button>
+      <section class="normalization-panel" id="work-panel" hidden>
+        <h2 id="work-title">작업 데이터 준비</h2><button type="button" data-close-task>작업 카드 닫기</button>
+        <div id="work-setup">
+          <label>작업 종류 <select id="work-type"><option value="model_normalization">모델규격 정제</option><option value="counterparty_cleanup">해외거래처부호 정제</option></select></label>
+          <p>머리글을 포함한 원본 범위를 선택하세요. 필수 세 열과 필요한 추가 열을 가져옵니다.</p>
+          <button type="button" id="work-select">선택 범위 가져오기</button>
+          <button type="button" id="work-restore">저장된 작업 이어가기</button>
+          <div id="work-mapping" hidden>
+            <p id="work-source"></p>
+            <fieldset><legend>필수 열 · 서로 다른 세 열</legend><div id="work-required"></div></fieldset>
+            <details open><summary>추가로 가져올 열</summary>
+              <p id="work-extra-hint">추가 열과 설명은 선택 사항입니다. 원본 위치로 같은 이름의 열을 구분합니다.</p>
+              <div id="work-extra-columns"></div>
+            </details>
+            <p id="work-selection-summary"></p>
+            <p>계산된 값과 표시 형식을 복사합니다. 숨겨진 행도 포함하고 원본은 유지합니다.</p>
+            <button type="button" class="primary" id="work-start" disabled>작업 시작</button>
+          </div>
         </div>
-
-        <section id="norm-workspace" hidden>
-          <p id="norm-workspace-source"></p>
-          <p id="norm-workspace-target"></p>
-          <details>
-            <summary>가져온 열과 설명</summary>
-            <pre id="norm-workspace-columns"></pre>
-          </details>
-          <p>시트에서 값을 직접 수정하거나 필터·정렬할 수 있습니다. 다른 열이나 일부 행을 작업하려면 범위를 다시 선택하세요.</p>
-          <section id="norm-transform" aria-label="열 전처리와 문자열 치환">
-            <label>처리할 열 <select id="norm-transform-column"></select></label>
-            <p>현재 범위의 모든 행을 처리합니다. 필터로 숨겨진 행도 포함합니다.</p>
-            <fieldset id="norm-transform-rules">
-              <legend>전처리 · 선택한 항목을 위에서 아래로 적용</legend>
-              <label><input type="checkbox" value="normalize_fullwidth_ascii"> 전각 영문·숫자·기호 변환</label>
-              <label><input type="checkbox" value="trim"> 앞뒤 공백 제거</label>
-              <label><input type="checkbox" value="collapse_whitespace"> 연속 공백을 한 칸으로</label>
-              <label><input type="checkbox" id="norm-replace-enabled"> 마지막에 문자열 치환</label>
-              <div id="norm-replace-fields" hidden>
-                <label>찾을 문자열 <input id="norm-replace-find" type="text" maxlength="1000"></label>
-                <label>바꿀 문자열 <input id="norm-replace-value" type="text" maxlength="1000"></label>
-                <p>대소문자를 구분하여 포함된 문자열을 모두 바꿉니다. 바꿀 문자열을 비우면 삭제합니다.</p>
+        <div id="work-current" hidden>
+          <p id="work-current-summary"></p>
+          <details><summary>열 구성 보기</summary><pre id="work-column-summary"></pre></details>
+          <div class="work-actions">
+            <button type="button" id="work-target">Excel 선택 범위로 대상 변경</button>
+            <button type="button" id="work-return">작업 표 전체로 돌아가기</button>
+            <button type="button" id="work-new">새 원본으로 시작</button>
+          </div>
+          <section id="operations" aria-label="데이터 처리">
+            <div id="op-settings">
+              <label>작업 기능 <select id="op-kind"><option value="preprocess">전처리</option><option value="split">문자열 분리</option><option value="group">같은 기준의 행에 대표값 적용</option><option value="replace">문자열 치환</option><option value="map">자동 매핑</option></select></label>
+              <label id="op-single">처리할 열 <select id="op-column"></select></label>
+              <p>현재 범위의 모든 행을 처리합니다. 필터로 숨겨진 행도 포함합니다.</p>
+              <div id="op-preprocess">
+                <fieldset><legend>위에서 아래로 적용 · ↑로 순서 변경</legend><div id="op-rules">
+                  <div><label><input type="checkbox" value="normalize_fullwidth_ascii"> 전각 변환</label><button type="button" data-move aria-label="전각 변환 순서 올리기">↑</button></div>
+                  <div><label><input type="checkbox" value="trim"> 앞뒤 공백 제거</label><button type="button" data-move aria-label="앞뒤 공백 제거 순서 올리기">↑</button></div>
+                  <div><label><input type="checkbox" value="collapse_whitespace"> 연속 공백 정리</label><button type="button" data-move aria-label="연속 공백 정리 순서 올리기">↑</button></div>
+                  <div><label><input type="checkbox" value="uppercase"> 대문자 통일</label><button type="button" data-move aria-label="대문자 통일 순서 올리기">↑</button></div>
+                  <div><label><input type="checkbox" value="lowercase"> 소문자 통일</label><button type="button" data-move aria-label="소문자 통일 순서 올리기">↑</button></div>
+                  <div><label><input type="checkbox" value="remove_words"> 단어·기호 제거</label><button type="button" data-move aria-label="단어 제거 순서 올리기">↑</button></div>
+                </div></fieldset>
+                <label>제거할 단어·구절·기호 (한 줄에 하나)<textarea id="op-words" rows="2" maxlength="10000"></textarea></label>
+                <p>대소문자를 구분합니다. 단어는 완전히 일치할 때, 기호는 포함된 위치에서 제거합니다.</p>
               </div>
-            </fieldset>
-            <button type="button" id="norm-transform-preview">변경 내용 확인</button>
-            <button type="button" id="norm-transform-cancel" hidden>처리 취소</button>
-            <section id="norm-transform-result" hidden>
-              <p id="norm-transform-summary"></p>
-              <details><summary>변경 예시 보기 · 최대 10행</summary><pre id="norm-transform-examples"></pre></details>
-              <label>결과 열 이름 <input type="text" id="norm-transform-name" maxlength="240"></label>
-              <label>이 열을 기준으로 <select id="norm-transform-anchor"></select></label>
-              <label>결과 위치
-                <select id="norm-transform-side"><option value="after">바로 뒤에 새 열</option><option value="before">바로 앞에 새 열</option></select>
-              </label>
-              <button type="button" id="norm-transform-pick">Excel에서 선택한 열을 기준으로</button>
-              <p>작업 표 안에 새 결과 열을 만듭니다. 선택 범위 밖의 행은 빈칸으로 남습니다.</p>
-              <button type="button" id="norm-transform-apply">확인한 결과를 새 열로 만들기</button>
+              <div id="op-split" hidden>
+                <label>가져올 부분 <select id="op-part"><option value="all">모든 단어</option><option value="last">마지막 단어만 (두 단어 이상일 때)</option></select></label>
+                <label>분리 기준 <select id="op-delimiter-mode"><option value="whitespace">공백 (연속 공백은 하나로)</option><option value="custom">직접 입력한 구분자</option></select></label>
+                <label>구분자 <input type="text" id="op-delimiter" maxlength="100"></label>
+                <p>행마다 필요한 열 수를 계산합니다. 부족한 칸은 빈칸으로 남깁니다. 최대 100개 결과 열을 지원합니다.</p>
+              </div>
+              <div id="op-group" hidden>
+                <label>같은 행으로 판단할 기준 열 (복수 선택)<select id="op-keys" multiple size="5"></select></label>
+                <label>값을 바꿀 열 <select id="op-value-column"></select></label>
+                <label>대표값을 적어 둔 Excel 행 번호 <input id="op-source-row" type="number" min="1" max="1048576"></label>
+                <label>적용할 대표값 (비우면 해당 행의 셀 값 사용)<input id="op-group-value" type="text" maxlength="32767"></label>
+                <p>기준 행과 선택한 기준 열의 값이 모두 같은 행에 대표값을 적용합니다. 앞뒤·연속 공백과 대소문자를 정리해 비교합니다. 해당하지 않는 행은 기존 값을 유지합니다.</p>
+                <p>Excel에서 값을 수정한 뒤 행 번호를 지정하세요. 변경 내용 확인을 누를 때 현재 셀 값을 다시 읽습니다. 결과는 새 열에 작성합니다.</p>
+              </div>
+              <div id="op-replace" hidden>
+                <label>찾을 문자열 <input id="op-find" type="text" maxlength="32767"></label>
+                <label>바꿀 문자열 <input id="op-replacement" type="text" maxlength="32767"></label>
+                <p>대소문자를 구분해 포함된 모든 문자열을 치환합니다. 바꿀 문자열을 비우면 삭제합니다.</p>
+              </div>
+              <div id="op-map" hidden>
+                <p>앞뒤·연속 공백과 대소문자를 정리한 뒤 같은 값을 한 그룹으로 봅니다. 대표값을 지정하면 해당 그룹의 모든 행에 적용합니다. 지정하지 않은 값은 유지합니다.</p>
+                <button type="button" id="op-load-values">현재 데이터에서 값 목록 가져오기</button>
+                <label>실제 값 검색 <input id="op-value-search" type="text"></label>
+                <label>대표값으로 바꿀 그룹 (복수 선택)<select id="op-source-values" multiple size="6"></select></label>
+                <p id="op-value-count"></p>
+                <label>대표값 <input id="op-representative" type="text" maxlength="32767"></label>
+                <button type="button" id="op-add-mapping">선택한 그룹에 대표값 지정</button>
+                <div id="op-mappings"></div>
+              </div>
+            </div>
+            <button type="button" id="op-preview">변경 내용 확인</button>
+            <button type="button" id="op-cancel" hidden>처리 취소</button>
+            <section id="op-result" hidden>
+              <p id="op-summary"></p>
+              <label>결과 열 이름 <input type="text" id="op-name" maxlength="200"></label>
+              <label>기준 열 <select id="op-anchor"></select></label>
+              <label>결과 위치 <select id="op-side"><option value="after">바로 뒤에 새 열</option><option value="before">바로 앞에 새 열</option></select></label>
+              <p>기존 열을 유지하고 새 결과 열을 만듭니다. 처리 범위 밖의 행은 빈칸으로 남습니다.</p>
+              <button type="button" class="primary" id="op-apply" disabled>확인한 결과를 새 열로 만들기</button>
+              <button type="button" id="op-edit">설정 다시 보기</button>
+            </section>
+            <button type="button" id="op-finalize">현재 대상 열의 최종 결과 확인</button>
+            <section id="op-final-review" hidden aria-label="최종 결과 확인">
+              <p id="op-final-summary"></p>
+              <p>현재 값을 최종 결과로 채택합니다. 원본은 유지되며 후속 작업도 계속할 수 있습니다.</p>
+              <button type="button" class="primary" id="op-confirm-final">이 결과로 확정</button>
+              <button type="button" id="op-cancel-final">돌아가기</button>
             </section>
           </section>
-        </section>
-
-        <button type="button" id="norm-refresh" hidden disabled>
-          작업 상태 조회
-        </button>
-
-        <p id="norm-status" role="status"></p>
-
-      </section>
-      <section class="normalization-panel" id="counterparty-panel" hidden>
-        <h2>해외거래처 입력 확인</h2>
-        <p>머리글을 포함한 부호·국가·상호 세 열을 선택하세요. 같은 국가코드끼리만 그룹핑합니다.</p>
-        <button type="button" id="party-select">선택 범위 가져오기</button>
-        <div id="party-mapping" hidden>
-          <p id="party-source"></p>
-          <label>해외거래처부호 <select id="party-code"></select></label>
-          <label>국가코드 <select id="party-country"></select></label>
-          <label>상호명 <select id="party-name"></select></label>
-          <details><summary>표본 펼쳐보기</summary><pre id="party-preview"></pre></details>
-          <section class="party-policy">
-            <h3>후보 비교 기준</h3>
-            <pre id="party-policy-current"></pre>
-            <label>원하는 기준을 자연어로 적어주세요
-              <textarea id="party-policy-request" rows="2" maxlength="1000" placeholder="예: CO와 LTD는 빼고, 유사도 85% 이상을 후보로 보여줘"></textarea>
-            </label>
-            <button type="button" id="party-policy-suggest">LLM으로 기준 추천·해석</button>
-            <div id="party-policy-draft" hidden>
-              <pre id="party-policy-draft-text"></pre>
-              <div id="party-policy-draft-reason"
-                   class="model-explanation"></div>
-              <button type="button" id="party-policy-apply">이 기준으로 후보 찾기</button>
-            </div>
-          </section>
-          <button type="button" id="party-create">현재 기준으로 후보 찾기</button>
         </div>
-        <p id="party-status" role="status"></p>
-        <div id="party-candidates" aria-label="해외거래처 검토 후보 목록" hidden></div>
-        <button type="button" id="party-approval-preview" disabled>승인 내용 미리보기</button>
-        <pre id="party-approval-result" hidden></pre>
-        <button type="button" id="party-export" disabled>전체 정제 결과를 새 시트에 생성</button>
+        <p id="work-status" role="status" aria-live="polite"></p>
       </section>
       <section class="normalization-panel" id="formula-panel" hidden>
-        <h2>수식 작업 확인</h2>
+        <h2>수식 작업 확인</h2><button type="button" data-close-task>작업 카드 닫기</button>
         <p id="formula-request"></p>
         <div id="formula-ranges" class="formula-ranges">
           <p class="formula-range-row"><span>원본: <strong id="formula-source-address">선택 필요</strong></span><button type="button" class="range-change" id="formula-source-change">변경</button></p>

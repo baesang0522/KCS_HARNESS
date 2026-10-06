@@ -3,8 +3,8 @@
 (function () {
     // 선택한 원본 열을 Excel 안에서 복사한다. 전체 셀을 서버로 보내지 않는다.
     async function create(source, sheetName, onProgress) {
-        window.normalizationSheet.requireExcel("1.9");
-        var roles = ["trade_name", "declared_name", "model_spec"];
+        window.workspaceSheet.requireExcel("1.9");
+        var roles = source.roles;
         var required = roles.map(function (role) {
             return source.mapping && source.mapping[role];
         });
@@ -18,7 +18,7 @@
             throw new Error("필수 열과 추가 열을 다시 확인하세요.");
         }
         if (!Number.isInteger(source.row_count) || source.row_count < 2 ||
-            source.row_count > 400001 || indexes.length >= 16384) {
+            source.row_count > 400001 || indexes.length > 100) {
             throw new Error("작업 시트에 복사할 행·열 개수를 확인하세요.");
         }
 
@@ -26,7 +26,7 @@
             var sheets = context.workbook.worksheets;
             var original = sheets.getItem(source.worksheet_id);
             var existing = sheets.getItemOrNullObject(sheetName);
-            var settingKey = "kcs.modelWorkspace." + sheetName;
+            var settingKey = "kcs.workspace." + sheetName;
             var saved = context.workbook.settings.getItemOrNullObject(settingKey);
             var headers = original.getRangeByIndexes(
                 source.row_start, source.column_start, 1, source.column_count
@@ -113,6 +113,7 @@
                     };
                 });
                 var workspace = {
+                    task_type: source.task_type,
                     worksheet_id: sheet.id,
                     sheet_name: sheet.name,
                     table_id: table.id,
@@ -132,6 +133,7 @@
                 };
                 // 열 설명을 통합문서 설정에 함께 보관한다. LLM 호출은 하지 않는다.
                 context.workbook.settings.add(settingKey, workspace);
+                context.workbook.settings.add("kcs.workspace.current", workspace);
                 sheet.getRange("A:A").columnHidden = true;
                 sheet.activate();
                 data.select();
@@ -146,5 +148,5 @@
         });
     }
 
-    window.normalizationWorkspace = {create: create};
+    window.workspaceCopy = {create: create};
 })();

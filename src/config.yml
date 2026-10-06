@@ -1,19 +1,9 @@
-workspace:
-  root_path: "."
-
-agent:
-  max_iterations: 5
-  verbose: true
-
 environments:
   external:
     llm:
       provider: codex_cli
       model: "gpt-5.6-terra"
       timeout_seconds: 120
-    storage:
-      provider: memory
-
   external-sj:
     llm:
       provider: openai_compatible
@@ -24,9 +14,6 @@ environments:
       timeout_seconds: 120
       max_tokens: 2048
       max_retries: 2
-    storage:
-      provider: memory
-
   internal:
     llm:
       provider: openai_compatible
@@ -37,13 +24,3 @@ environments:
       timeout_seconds: 120
       max_tokens: 2048
       max_retries: 2
-    storage:
-#      provider: "postgres"
-#      url_env: "KCS_DATABASE_URL"
-       provider: memory
-
-mcp:
-  server_url: ""
-  timeout_seconds: 30
-
-
