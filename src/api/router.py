@@ -3,12 +3,16 @@ from fastapi.responses import JSONResponse
 
 from api.chat import router as chat_router
 from api.jobs import router as jobs_router
+from api.operations import router as operations_router
+from api.taskpane import router as taskpane_router
 from repositories.conversation_repository import ConversationNotFound
 from services.errors import ConflictError, ModelProcessingError, NotFoundError
 
 router = APIRouter()
 router.include_router(chat_router)
 router.include_router(jobs_router)
+router.include_router(operations_router)
+router.include_router(taskpane_router)
 
 
 async def service_error_response(request: Request, error: Exception):

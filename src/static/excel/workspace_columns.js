@@ -2,8 +2,7 @@
 
 (function () {
     // 열 선택과 설명 입력만 관리한다. 실제 데이터 읽기·쓰기는 별도다.
-    window.createNormalizationColumns = function (selects, container) {
-        var roles = ["거래품명", "신고품명", "모델규격"];
+    window.createWorkspaceColumns = function (selects, container, roles) {
         var source = null;
         var extras = new Map();
         var controls = [];
@@ -74,9 +73,9 @@
                 }
                 var entry = extras.get(index);
                 var card = document.createElement("div");
-                card.className = "norm-extra-column";
+                card.className = "work-extra-column";
                 var label = document.createElement("label");
-                label.className = "norm-extra-choice";
+                label.className = "work-extra-choice";
                 var checkbox = document.createElement("input");
                 checkbox.type = "checkbox";
                 checkbox.checked = entry.selected;
@@ -88,16 +87,16 @@
                 details.hidden = !entry.selected;
                 var descriptionLabel = document.createElement("label");
                 var description = document.createElement("textarea");
-                description.id = "norm-extra-description-" + index;
+                description.id = "work-extra-description-" + index;
                 descriptionLabel.htmlFor = description.id;
                 descriptionLabel.textContent = "열 설명 (선택)";
                 description.rows = 2;
                 description.maxLength = 1000;
-                description.className = "norm-extra-description";
+                description.className = "work-extra-description";
                 description.placeholder =
                     "예: ERP에 등록된 모델명 / USD 기준의 개당 단가";
                 description.value = entry.description;
-                description.setAttribute("aria-describedby", "norm-extra-hint");
+                description.setAttribute("aria-describedby", "work-extra-hint");
                 details.appendChild(descriptionLabel);
                 details.appendChild(description);
                 card.appendChild(details);
@@ -146,7 +145,7 @@
                     option.value = String(index);
                     option.textContent = columnLabel(index);
                     select.appendChild(option);
-                    if (header.trim() === roles[roleIndex]) matches.push(index);
+                    if (roles[roleIndex].labels.indexOf(header.replace(/\s+/g, "")) >= 0) matches.push(index);
                 });
                 // 중복 머리글이나 이름이 다른 열은 사용자가 직접 지정한다.
                 select.value = matches.length === 1 ? String(matches[0]) : "";

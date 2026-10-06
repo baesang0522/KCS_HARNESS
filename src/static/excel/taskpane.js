@@ -3,8 +3,7 @@
 (function () {
     // 채팅 입력·대화 세션과 작업 화면을 연결한다.
     var api = window.apiClient;
-    var normalization = null;
-    var counterparty = null;
+    var workspace = null;
     var formula = null;
     var connection = document.getElementById('connection');
     var message = document.getElementById('message');
@@ -15,6 +14,7 @@
     var diagnostic = document.getElementById('diagnostic');
     var ready = false;
     var composing = false;
+    var build = (document.querySelector('meta[name="kcs-ui-version"]') || {}).content || "확인 필요";
     diagnostic.textContent = 'Office 초기화 대기 · ' + navigator.userAgent;
     if (typeof Office !== 'undefined') {
         Office.onReady(function (info) {
@@ -23,7 +23,7 @@
             if (ready) {
                 connection.classList.add('connected');
             }
-            diagnostic.textContent = 'Host: ' + info.host + ' / Platform: ' + info.platform + '\n' + navigator.userAgent;
+            diagnostic.textContent = '화면 버전: ' + build + '\nHost: ' + info.host + ' / Platform: ' + info.platform + '\n' + navigator.userAgent;
         });
     }
     window.setTimeout(function () {
@@ -57,6 +57,17 @@
         conversation.hidden = false;
     }
 
+    function closeTaskCards() {
+        if (workspace) workspace.dismiss();
+        if (formula) formula.dismiss();
+    }
+
+    function completeTask(text) {
+        closeTaskCards();
+        enterConversation();
+        appendMessage('assistant', text);
+    }
+
     var pendingBubble = null;
     var sending = false;
     var conversationId = null;
@@ -78,12 +89,13 @@
         sending = value;
         document.querySelector('.send').disabled = value;
         document.getElementById('new-chat').disabled = value;
+        document.getElementById('open-workspace').disabled = value;
+        document.querySelectorAll('[data-close-task]').forEach(function (button) { button.disabled = value; });
         message.readOnly = value;
-        document.querySelectorAll('[data-prompt]').forEach(function (button) {
+        document.querySelectorAll('[data-prompt], [data-task]').forEach(function (button) {
             button.disabled = value;
         });
-        if (normalization) normalization.setBusy(value);
-        if (counterparty) counterparty.setBusy(value);
+        if (workspace) workspace.setBusy(value);
         if (formula) formula.setBusy(value);
     }
 
@@ -98,8 +110,7 @@
     }
 
     function renderMessages(messages) {
-        normalization.reset();
-        counterparty.reset();
+        workspace.reset();
         formula.reset();
         pendingBubble = null;
         conversation.textContent = '';
@@ -168,40 +179,19 @@
     }
 
     async function handleUIAction(action, instruction) {
+        closeTaskCards();
         if (!action) return;
 
-        if (action.type === "review_counterparty_policy") {
-            counterparty.openPolicy(action.instruction);
+        if (action.type === "configure_operation") {
+            await workspace.configure(action.operation);
             return;
         }
-
-        if (action.type !== "confirm_selection") {
-            throw new Error("지원하지 않는 화면 요청입니다.");
-        }
-
-        if (action.task_type === "model_normalization") {
-            normalization.open();
-            return;
-        }
-
-        if (action.task_type === "counterparty_cleanup") {
-            counterparty.openAndSelect();
-            return;
-        }
-
+        if (action.type !== "confirm_selection") throw new Error("지원하지 않는 화면 요청입니다.");
         if (action.task_type === "formula") {
             formula.openAndSelect(instruction);
-            return;
+        } else {
+            await workspace.open(action.task_type);
         }
-
-        // 다음 단계에서 작업별 공통 확인 화면으로 교체한다.
-        var name = action.task_type === "counterparty_cleanup"
-            ? "거래처 정리"
-            : "수식 제안";
-
-        notice.textContent =
-            name + " 요청으로 확인했습니다. " +
-            "이 작업의 범위 확인 화면은 다음 단계에서 연결합니다.";
     }
 
     async function sendMessage() {
@@ -224,6 +214,7 @@
 
         setBusy(true);
         enterConversation();
+        closeTaskCards();
         if (!pendingBubble) pendingBubble = appendMessage('user', value);
         message.value = '';
         notice.textContent = '답변을 생성하고 있습니다…';
@@ -237,7 +228,8 @@
                 pendingRequest = {
                     conversation_id: conversationId,
                     request_id: api.newRequestId(),
-                    message: value
+                    message: value,
+                    workspace: await workspace.context()
                 };
                 saveSession();
             }
@@ -268,6 +260,9 @@
             return true;
 
         } catch (error) {
+            // 422는 모델 실행 전 입력 검증 실패. 오래된 작업 문맥으로 재시도하지 않는다.
+            if (error.status === 422) { pendingRequest = null; pendingBubble = null; saveSession(); }
+            closeTaskCards();
             notice.textContent = error.message;
             message.value = value;
 
@@ -298,9 +293,11 @@
         }
     );
 
-    document.querySelectorAll('[data-prompt]').forEach(function (button) {
+    document.querySelectorAll('[data-prompt], [data-task]').forEach(function (button) {
         button.addEventListener('click', async function () {
             if (sending) return;
+            var task = button.getAttribute('data-task');
+            if (task) { closeTaskCards(); await workspace.open(task); return; }
             message.value = button.getAttribute('data-prompt') || '';
             await sendMessage();
         });
@@ -325,33 +322,16 @@
         }
     });
 
-    normalization = window.createNormalizationController({
-        ui: window.createNormalizationUI({
-            conversation: conversation,
-            scrollArea: scrollArea,
-            enterConversation: enterConversation,
-            appendMessage: appendMessage
-        }),
-        api: api,
-        excel: window.excelBridge,
-        isReady: function () { return ready; },
-        isBusy: function () { return sending; },
-        setBusy: setBusy,
-        getConversationId: function () { return conversationId; }
+    document.getElementById("open-workspace").addEventListener("click", async function () {
+        if (!sending) { closeTaskCards(); await workspace.open(); }
     });
-    counterparty = window.createCounterpartyController({
-        ui: window.createCounterpartyUI({
-            conversation: conversation,
-            scrollArea: scrollArea,
-            enterConversation: enterConversation,
-            appendMessage: appendMessage
-        }),
-        api: api,
-        excel: window.excelBridge,
-        isReady: function () { return ready; },
-        isBusy: function () { return sending; },
-        setBusy: setBusy,
-        getConversationId: function () { return conversationId; }
+    document.querySelectorAll('[data-close-task]').forEach(function (button) {
+        button.addEventListener('click', function () { if (!sending) closeTaskCards(); });
+    });
+
+    workspace = window.createWorkspaceController({
+        api: api, enterConversation: enterConversation, complete: completeTask,
+        isBusy: function () { return sending; }, setBusy: setBusy
     });
     formula = window.createFormulaController({
         ui: window.createFormulaUI({
@@ -361,7 +341,11 @@
             appendMessage: appendMessage
         }),
         api: api,
-        excel: window.excelBridge,
+        excel: window.formulaSheet,
+        getTarget: workspace.formulaTarget,
+        prepareOutput: workspace.prepareFormulaOutput,
+        onResult: workspace.formulaResult,
+        complete: completeTask,
         isReady: function () { return ready; },
         isBusy: function () { return sending; },
         setBusy: setBusy,

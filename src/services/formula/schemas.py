@@ -16,31 +16,6 @@ BLOCKED_FORMULA = re.compile(
 )
 EMPTY_SINGLE_TEXT = re.compile(r"(?<![A-Za-z0-9_])''(?=$|[,;)])")
 SINGLE_QUOTED_TEXT = re.compile(r"'([^']+)'(?=\s*[,;)])")
-LOOKUP_FUNCTION = re.compile(
-    r"\b(?:XLOOKUP|VLOOKUP|HLOOKUP|LOOKUP|INDEX|MATCH)\s*\(",
-    re.IGNORECASE,
-)
-CELL_RANGE_REFERENCE = re.compile(
-    r"(?<![A-Z0-9_])\$?([A-Z]{1,3})\$?([1-9]\d*):"
-    r"\$?([A-Z]{1,3})\$?([1-9]\d*)",
-    re.IGNORECASE,
-)
-EXCEL_TEXT = re.compile(r'("(?:[^"]|"")*")')
-
-
-def _absolute_lookup_ranges(formula: str) -> str:
-    if not LOOKUP_FUNCTION.search(formula):
-        return formula
-    parts = EXCEL_TEXT.split(formula)
-    for index in range(0, len(parts), 2):
-        parts[index] = CELL_RANGE_REFERENCE.sub(
-            lambda match: (
-                f"${match.group(1).upper()}${match.group(2)}:"
-                f"${match.group(3).upper()}${match.group(4)}"
-            ),
-            parts[index],
-        )
-    return "".join(parts)
 
 
 def _cell_parts(address: str) -> tuple[int, int]:
@@ -159,7 +134,8 @@ class FormulaAction(BaseModel):
         # for an empty literal while leaving escaped apostrophes in sheet names alone.
         value = EMPTY_SINGLE_TEXT.sub('""', value)
         value = SINGLE_QUOTED_TEXT.sub(r'"\1"', value)
-        return _absolute_lookup_ranges(value)
+        # Preserve row-relative ranges as well as intentionally fixed lookup tables.
+        return value
 
     @model_validator(mode="after")
     def validate_shape(self):

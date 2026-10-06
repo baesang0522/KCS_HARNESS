@@ -8,13 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field
 CONFIG_PATH = Path(__file__).with_name("config.yml")
 
 
-class StorageSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    provider: Literal["memory", "postgres"]
-    url_env: str = "KCS_DATABASE_URL"
-
-
 class LLMSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -29,34 +22,11 @@ class LLMSettings(BaseModel):
     max_retries: int = Field(default=2, ge=0)
 
 
-class MCPSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    server_url: str = ""
-    timeout_seconds: float = Field(default=30, gt=0)
-
-
-class AgentSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    max_iterations: int = Field(default=5, gt=0)
-    verbose: bool = True
-
-
-class WorkspaceSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    root_path: str = "."
-
-
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     environment: Literal["external", "external-sj", "internal"]
     llm: LLMSettings
-    storage: StorageSettings
-
-    mcp: MCPSettings = Field(default_factory=MCPSettings)
-    agent: AgentSettings = Field(default_factory=AgentSettings)
-    workspace: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
 
 
 def load_settings() -> Settings:
@@ -75,7 +45,7 @@ def load_settings() -> Settings:
             "config.yml의 최상위 값은 객체 형식이어야 합니다."
         )
 
-    allowed_keys = {"workspace", "mcp", "agent", "environments"}
+    allowed_keys = {"environments"}
     unknown_keys = set(config_data) - allowed_keys
     if unknown_keys:
         raise ValueError(
@@ -92,19 +62,13 @@ def load_settings() -> Settings:
             f"environments.{environment} 설정이 필요합니다."
         )
 
-    if set(selected) != {"llm", "storage"}:
+    if set(selected) != {"llm"}:
         raise ValueError(
             f"environments.{environment}에는 "
-            "llm과 storage를 지정해야 합니다."
+            "llm만 지정해야 합니다. 저장소는 API 메모리를 사용합니다."
         )
 
-    merged = {
-        key: value
-        for key, value in config_data.items()
-        if key != "environments"
-    }
-    merged.update(selected)
-    merged["environment"] = environment
+    merged = {**selected, "environment": environment}
 
     # Allow secrets and deployment-specific values to be supplied as ${ENV_VAR}.
     llm = merged.get("llm")

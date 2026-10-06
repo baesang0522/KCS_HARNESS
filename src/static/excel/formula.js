@@ -11,6 +11,9 @@
         var preview = null;
         var targetSnapshot = null;
         var applied = false;
+        var useWorkspace = true;
+        var writeAttempted = false;
+        var startTimer = null;
 
         async function useTarget(target) {
             var revised = JSON.parse(JSON.stringify(preview));
@@ -35,7 +38,7 @@
                 if (!options.isReady()) {
                     throw new Error("엑셀 안에서 추가 기능을 열어주세요.");
                 }
-                selection = await excel.readFormulaContext();
+                selection = await excel.readFormulaContext(useWorkspace && options.getTarget ? await options.getTarget() : null);
                 var payload = Object.assign({}, selection, {
                     conversation_id: options.getConversationId(),
                     job_id: api.newRequestId(),
@@ -50,7 +53,7 @@
                     method: "POST"
                 });
                 if (job.status === "NEEDS_INPUT") {
-                    ui.setStatus(job.clarification || "작업에 필요한 정보를 알려주세요.");
+                    options.complete(job.clarification || "작업에 필요한 정보를 알려주세요.");
                     return;
                 }
                 if (job.status !== "PREVIEW_READY" || !job.preview) {
@@ -60,7 +63,7 @@
                 await useTarget(await excel.prepareFormulaPreview(preview, selection));
             } catch (error) {
                 if (!targetSnapshot) preview = null;
-                ui.setStatus(error.message);
+                options.complete(error.message);
             } finally {
                 options.setBusy(false);
             }
@@ -82,12 +85,13 @@
         function selectSource() {
             if (options.isBusy() || applied) return;
             selection = job = preview = targetSnapshot = null;
+            useWorkspace = false;
             ui.reset();
             return selectAndPlan();
         }
 
         async function approveAndApply() {
-            if (!preview || !targetSnapshot || applied || options.isBusy()) return;
+            if (!preview || !targetSnapshot || applied || writeAttempted || options.isBusy()) return;
             options.setBusy(true);
             try {
                 var approved = await api.requestJson(
@@ -106,16 +110,21 @@
                 if (approved.preview_id !== preview.preview_id) {
                     throw new Error("확인한 계획과 승인된 계획이 다릅니다.");
                 }
+                await excel.validateFormulaPreview(approved, selection);
+                writeAttempted = true;
+                if (options.prepareOutput) await options.prepareOutput(approved, selection);
                 var result = await excel.applyFormulaPreview(approved, selection);
+                applied = true;
+                ui.setApplied(result);
+                if (options.onResult) await options.onResult(result, selection);
                 await api.requestJson(
                     "/jobs/" + job.job_id + "/previews/" +
                     preview.preview_id + "/complete",
                     {method: "POST"}
                 );
-                applied = true;
-                ui.setApplied(result);
+                options.complete(result.address + " · " + result.row_count + "행에 수식을 적용했습니다.");
             } catch (error) {
-                ui.setStatus("수식 적용 실패: " + error.message);
+                options.complete((applied ? "수식은 작성됐지만 완료 정보 처리에 실패했습니다. 다시 쓰지 마세요. " : "수식 적용 실패: ") + error.message);
             } finally {
                 options.setBusy(false);
             }
@@ -123,23 +132,29 @@
 
         ui.bind({source: selectSource, target: selectTarget, apply: approveAndApply});
         return {
+            dismiss: function () { window.clearTimeout(startTimer); ui.reset(); },
             openAndSelect: function (value) {
                 instruction = value;
                 selection = job = preview = targetSnapshot = null;
                 applied = false;
+                writeAttempted = false;
+                useWorkspace = true;
                 ui.reset();
                 ui.open();
                 ui.setStatus("Excel에서 선택한 범위를 가져옵니다…");
-                window.setTimeout(selectAndPlan, 0);
+                startTimer = window.setTimeout(selectAndPlan, 0);
             },
             reset: function () {
+                window.clearTimeout(startTimer);
                 instruction = "";
                 selection = job = preview = targetSnapshot = null;
                 applied = false;
+                writeAttempted = false;
+                useWorkspace = true;
                 ui.reset();
             },
             setBusy: function (busy) {
-                ui.setBusy(busy, Boolean(preview), applied);
+                ui.setBusy(busy, Boolean(preview), applied || writeAttempted);
             }
         };
     };

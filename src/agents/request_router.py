@@ -1,114 +1,46 @@
-import json
 from typing import Literal
 
-from langchain_core.messages import AIMessage, HumanMessage
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from models.llama_cpp import get_reasoning_content
+from services.operations.schemas import Operation
+from services.chat_state import TaskType
 
 
 class RequestDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    intent: Literal["general", "start_task", "clarify", "task_followup", "operation"]
+    task_type: TaskType | None = None
+    operation: Operation | None = None
+    answer: str = Field(min_length=1, max_length=8000)
 
-    intent: Literal["general", "start_task", "clarify", "task_followup"]
-    task_type: Literal["model_normalization", "counterparty_cleanup", "formula"] | None = None
-
-    answer: str = Field(min_length=1, max_length=2000)
-    policy_change: bool = False
-
-    @field_validator("task_type", mode="before")
-    @classmethod
-    def normalize_null_task_type(cls, value):
-        if isinstance(value, str) and value.strip().lower() in {"null", "none"}:
-            return None
-        return value
+    @model_validator(mode="after")
+    def validate_decision(self):
+        if not self.answer.strip():
+            raise ValueError("답변이 비어 있습니다.")
+        if (self.intent == "start_task") != (self.task_type is not None):
+            raise ValueError("작업 시작에는 작업 종류가 필요합니다.")
+        if (self.intent == "operation") != (self.operation is not None):
+            raise ValueError("연산 요청에는 연산 설정이 필요합니다.")
+        return self
 
 
-async def route_request(
-    runtime,
-    messages,
-    request_id: str,
-    *,
-    task_context: dict,
-):
-    # 분류 단계에는 전체 표본 대신 작업 상태와 분석 요약만 전달한다.
-    active_job = task_context.get("active_job")
-    routing_context = {
-        "pending_intent": task_context.get("pending_intent"),
-        "task_type": task_context.get("task_type"),
-        "phase": task_context.get("phase"),
-        "job_missing": task_context.get("job_missing", False),
-        "active_job": None,
-    }
-
-    if active_job is not None:
-        analysis = active_job.get("analysis", "")
-
-        routing_context["active_job"] = {
-            "job_id": active_job["job_id"],
-            "task_type": active_job["task_type"],
-            "status": active_job["status"],
-            "address": active_job["address"],
-            "analysis": analysis[:3000],
-            "plan": active_job.get("plan"),
-            "analysis_truncated": (
-                active_job.get("analysis_truncated", False)
-                or len(analysis) > 3000
-            ),
-        }
-
-    result = await runtime.request_router_graph.ainvoke({
-        "messages": [
-            HumanMessage(content=json.dumps(
-                {
-                    "conversation": [
-                        {
-                            "role": message.type,
-                            "content": message.content,
-                        }
-                        for message in messages
-                    ],
-                    "task_context": routing_context,
-                },
-                ensure_ascii=False,
-            ))
-        ],
-        "request_id": request_id,
-        "tool_history": [],
+async def route_request(runtime, messages, *, task_context: dict):
+    response = await runtime.respond(runtime.request_prompt, {
+        "conversation": [{"role": message.type, "content": message.content} for message in messages],
+        "task_context": task_context,
     })
+    decision = RequestDecision.model_validate_json(response.content.strip())
+    workspace = task_context.get("workspace")
+    if decision.operation:
+        if not workspace:
+            raise ValueError("먼저 필수 세 열을 지정해 작업을 시작하세요.")
 
-    output_messages = result.get("messages", [])
+        columns = {column["column_id"] for column in workspace["columns"]}
+        if not set(decision.operation.input_column_ids) <= columns:
+            raise ValueError("현재 작업 시트에 없는 열을 요청했습니다.")
 
-    if not output_messages:
-        raise ValueError("요청 분류 응답이 없습니다.")
-
-    last = output_messages[-1]
-
-    if (
-        not isinstance(last, AIMessage)
-        or last.tool_calls
-        or not isinstance(last.content, str)
-    ):
-        raise ValueError("유효한 요청 분류 응답이 아닙니다.")
-
-    decision = RequestDecision.model_validate_json(
-        last.content.strip()
-    )
-
-    if decision.intent == "start_task":
-        if decision.task_type is None:
-            raise ValueError("작업 요청에는 task_type이 필요합니다.")
-
-    elif decision.task_type is not None:
-        raise ValueError(
-            "작업 시작 외의 응답에는 task_type을 지정하지 않습니다."
-        )
-
-    if decision.intent == "task_followup" and active_job is None:
+    if decision.intent == "task_followup" and not (workspace or task_context.get("active_job")):
         raise ValueError("후속 질문을 연결할 현재 작업이 없습니다.")
-    if decision.policy_change and (
-        decision.intent != "task_followup"
-        or not active_job
-        or active_job["task_type"] != "counterparty_cleanup"
-    ):
-        raise ValueError("해외거래처 후속 요청에서만 정제 기준을 변경할 수 있습니다.")
-
-    return decision
+    reasoning = get_reasoning_content(response)
+    return decision, [reasoning] if reasoning else []
