@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
+from agents.request_graph import run_request_graph
 from models.llama_cpp import get_reasoning_content
 from services.operations.schemas import Operation
 from services.chat_state import TaskType
@@ -34,24 +35,54 @@ class RequestDecision(BaseModel):
 
 
 async def route_request(runtime, messages, *, task_context: dict):
-    response = await runtime.respond(runtime.request_prompt, {
-        "conversation": [{"role": message.type, "content": message.content} for message in messages],
-        "task_context": task_context,
-    })
     workspace = task_context.get("workspace")
-    decision = RequestDecision.model_validate_json(
-        response.content.strip(),
-        context={"workspace_task_type": workspace.get("task_type") if workspace else None},
-    )
+    validation_context = {
+        "workspace_task_type": (
+            workspace.get("task_type") if workspace else None
+        ),
+    }
+
+    if runtime.settings.llm.provider == "codex_cli":
+        response = await runtime.respond(runtime.request_prompt, {
+            "conversation": [
+                {"role": message.type, "content": message.content}
+                for message in messages
+            ],
+            "task_context": task_context,
+        })
+        decision = RequestDecision.model_validate_json(
+            response.content.strip(),
+            context=validation_context,
+        )
+        reasoning = get_reasoning_content(response)
+        reasons = [reasoning] if reasoning else []
+
+    else:
+        result = await run_request_graph(
+            runtime,
+            messages,
+            task_context,
+        )
+        decision = RequestDecision.model_validate(
+            result,
+            context=validation_context,
+        )
+        reasons = []
+
     if decision.operation:
         if not workspace:
             raise ValueError("먼저 필수 세 열을 지정해 작업을 시작하세요.")
 
-        columns = {column["column_id"] for column in workspace["columns"]}
+        columns = {
+            column["column_id"]
+            for column in workspace["columns"]
+        }
         if not set(decision.operation.input_column_ids) <= columns:
             raise ValueError("현재 작업 시트에 없는 열을 요청했습니다.")
 
-    if decision.intent == "task_followup" and not (workspace or task_context.get("active_job")):
+    if decision.intent == "task_followup" and not (
+        workspace or task_context.get("active_job")
+    ):
         raise ValueError("후속 질문을 연결할 현재 작업이 없습니다.")
-    reasoning = get_reasoning_content(response)
-    return decision, [reasoning] if reasoning else []
+
+    return decision, reasons

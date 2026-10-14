@@ -6,7 +6,6 @@ from pathlib import Path
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from models.llama_cpp import create_model
 from models.openai import create_model as create_openai_model
 from models.codex_adapter import CodexModel
 from prompts.loader import load_agent_prompt
@@ -21,6 +20,7 @@ class CustomsHarness:
     model: BaseChatModel | CodexModel
     request_prompt: str
     formula_prompt: str
+    tools_prompt: str
 
     async def respond(self, prompt: str, payload: dict) -> AIMessage:
         response = await self.model.ainvoke([
@@ -50,13 +50,7 @@ def create_runtime() -> CustomsHarness:
         )
 
     else:
-        model_factory = (
-            create_openai_model
-            if settings.environment == "external-sj"
-            else create_model
-        )
-
-        model = model_factory(
+        model = create_openai_model(
             base_url=settings.llm.base_url,
             model=settings.llm.model,
             api_key=settings.llm.api_key,
@@ -71,4 +65,5 @@ def create_runtime() -> CustomsHarness:
         model=model,
         request_prompt=load_agent_prompt(PROMPT_DIR / "request_router.yml").render(),
         formula_prompt=load_agent_prompt(PROMPT_DIR / "formula.yml").render(),
+        tools_prompt=load_agent_prompt(PROMPT_DIR / "request_tools.yml").render(),
     )
