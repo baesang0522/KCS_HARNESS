@@ -12,7 +12,7 @@ def build_request_tools(task_context: dict):
 
         operation = Operation.model_validate(settings)
         known_ids = {
-            column["colum_id"]
+            column["column_id"]
             for column in workspace["columns"]
         }
         if not set(operation.input_column_ids) <= known_ids:
@@ -37,6 +37,19 @@ def build_request_tools(task_context: dict):
         if len(ids) != 1:
             raise ValueError("처리할 열 하나를 지정해 주세요")
         return ids[0]
+
+    @tool
+    def answer_question(answer: str) -> dict:
+        """일반 질문이나 사용법만 설명한다. 작업 설정, 실행 요청에는 사용하지 않는다."""
+        answer = answer.strip()
+        if not answer or len(answer) > 8000:
+            raise ValueError("답변은 1~8,000자로 작성하세요.")
+        return {
+            "intent": "general",
+            "task_type": None,
+            "operation": None,
+            "answer": answer,
+        }
 
     @tool
     def ask_user(question: str) -> dict:
@@ -144,7 +157,7 @@ def build_request_tools(task_context: dict):
             representative=representative,
         )
 
-    tools = [ask_user, start_task]
+    tools = [answer_question, ask_user, start_task]
     if workspace:
         tools.extend([
             remove_words,

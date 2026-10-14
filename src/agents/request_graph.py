@@ -35,7 +35,7 @@ async def run_request_graph(runtime, messages, task_context: dict) -> dict:
     tools_by_name = {item.name: item for item in tools}
     model = runtime.model.bind_tools(
         tools,
-        tool_choice="auto",
+        tool_choice="required",
         parallel_tool_calls=False,
     )
 
@@ -56,19 +56,12 @@ async def run_request_graph(runtime, messages, task_context: dict) -> dict:
         if reply.tool_calls:
             return {"messages": [reply]}
 
-        if not isinstance(reply.content, str) or not reply.content.strip():
-            raise ValueError("모델 답변이 비어 있습니다.")
-
-        if len(reply.content) > 80000:
-            raise ValueError("모델 답변이 너무 깁니다.")
-
         return {
-            "decision": {
-                "intent": "general",
-                "task_type": None,
-                "operation": None,
-                "answer": reply.content.strip(),
-            },
+            "decision": clarification(
+                "도구 호출이 없어 작업 설정을 확인할 수 없습니다. "
+                "아직 셀은 수정하지 않았습니다. "
+                "요청을 다시 보내거나 작업 카드에서 직접 설정해 주세요."
+            ),
         }
 
     async def run_tool(state: RequestState):
