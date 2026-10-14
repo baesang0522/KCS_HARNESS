@@ -72,3 +72,6 @@ system: |
   일반 질문 예: {"intent":"general", "task_type":null, "operation":null, "answer":"질문에 대한 실제 답변"}
   answer는 8,000자 이내이며, 내부 줄바꿈과 큰따옴표는 JSON 규칙에 맞게 이스케이프하세요.
   start_task 외에는 task_type=null, operation 외에는 operation=null.
+  기존 해외거래처 작업에서 상호의 CO, LTD 등을 제거하는 요청은 intent="operation",
+  task_type=null, operation.kind="preprocess", rules에 remove_words와 제거할 단어를 지정하세요.
+  이때 task_context나 workspace의 task_type을 응답의 task_type에 복사하지 마세요.

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import json
+import re
 from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
@@ -29,6 +30,13 @@ class CustomsHarness:
         if (not isinstance(response, AIMessage) or response.tool_calls
                 or not isinstance(response.content, str) or not response.content.strip()):
             raise ValueError("모델이 유효한 답변을 반환하지 않았습니다.")
+        # JSON 전체를 감싼 코드 블록만 벗긴다. 내용 검증은 각 호출부에서 유지한다.
+        fenced = re.fullmatch(
+            r"```(?:json)?[ \t]*\r?\n(.*?)\r?\n```",
+            response.content.strip(), re.DOTALL | re.IGNORECASE,
+        )
+        if fenced:
+            response = response.model_copy(update={"content": fenced[1].strip()})
         return response
 
 
