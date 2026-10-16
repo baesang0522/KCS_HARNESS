@@ -182,6 +182,10 @@
         closeTaskCards();
         if (!action) return;
 
+        if (action.type === "configure_similarity") {
+            await workspace.configureSimilarity(action.similarity);
+            return;
+        }
         if (action.type === "configure_operation") {
             await workspace.configure(action.operation);
             return;

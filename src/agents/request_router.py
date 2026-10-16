@@ -6,13 +6,15 @@ from agents.request_graph import run_request_graph
 from models.llama_cpp import get_reasoning_content
 from services.operations.schemas import Operation
 from services.chat_state import TaskType
+from services.similarity import SimilaritySelection
 
 
 class RequestDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    intent: Literal["general", "start_task", "clarify", "task_followup", "operation"]
+    intent: Literal["general", "start_task", "clarify", "task_followup", "operation", "similarity"]
     task_type: TaskType | None = None
     operation: Operation | None = None
+    similarity: SimilaritySelection | None = None
     answer: str = Field(min_length=1, max_length=8000)
 
     @model_validator(mode="after")
@@ -31,6 +33,10 @@ class RequestDecision(BaseModel):
             raise ValueError("연산 요청에는 연산 설정이 필요합니다.")
         if self.intent != "operation" and self.operation is not None:
             raise ValueError("연산 요청 외에는 operation을 null로 반환해야 합니다.")
+        if self.intent == "similarity" and self.similarity is None:
+            raise ValueError("유사도 요청에는 검사 설정이 필요합니다.")
+        if self.intent != "similarity" and self.similarity is not None:
+            raise ValueError("유사도 요청 외에는 similarity를 null로 반환해야 합니다.")
         return self
 
 
@@ -79,6 +85,9 @@ async def route_request(runtime, messages, *, task_context: dict):
         }
         if not set(decision.operation.input_column_ids) <= columns:
             raise ValueError("현재 작업 시트에 없는 열을 요청했습니다.")
+
+    if decision.similarity:
+        decision.similarity.check_workspace(workspace)
 
     if decision.intent == "task_followup" and not (
         workspace or task_context.get("active_job")

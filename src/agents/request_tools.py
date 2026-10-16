@@ -1,6 +1,7 @@
 from typing import Literal
 from langchain_core.tools import tool
 from services.operations.schemas import Mapping, Operation, Rule
+from services.similarity import SimilaritySelection
 
 
 def build_request_tools(task_context: dict):
@@ -157,6 +158,26 @@ def build_request_tools(task_context: dict):
             representative=representative,
         )
 
+    @tool
+    def inspect_similarity(
+            column_id: str | None = None,
+            group_column_id: str | None = None,
+    ) -> dict:
+        """정제한 한 열의 유사도 비교 카드를 연다. 알고리즘은 사용자가 카드에서 선택한다.
+         group_column_id는 요청한 경우에만 같은 값끼리 비교할 조건 열이다. 계산이나 셀 수정은 하지 않는다."""
+        settings = SimilaritySelection(
+            column_id=target(column_id), group_column_id=group_column_id,
+        )
+        settings.check_workspace(workspace)
+        return {
+            "intent": "similarity",
+            "task_type": None,
+            "operation": None,
+            "similarity": settings.model_dump(),
+            "answer": "어떤 방식으로 유사도를 비교할까요? 카드의 설명과 샘플을 보고 알고릐즘을 선택해 주세요. "
+                      "아직 계산하거나 셀을 변경하지 않았습니다."
+        }
+
     tools = [answer_question, ask_user, start_task]
     if workspace:
         tools.extend([
@@ -166,7 +187,9 @@ def build_request_tools(task_context: dict):
             split_text,
             map_values,
             group_values,
+            inspect_similarity,
         ])
+
     return tools
 
 
