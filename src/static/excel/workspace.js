@@ -26,6 +26,15 @@
             },
             finalized: async function (ids, count) { finalized = {column_ids: ids, row_count: count, at: new Date().toISOString()}; await save(); }
         });
+        var similarity = window.createSimilarityController({
+            api: options.api, isBusy: options.isBusy, setBusy: options.setBusy,
+            status: ui.status, complete: options.complete,
+            getInput: async function () {
+                if (!workspace || !target) throw new Error("먼저 작업 시트를 준비하세요.");
+                await refresh();
+                return {workspace: workspace, target: target};
+            }
+        });
         async function save() {
             if (!workspace) return;
             await Excel.run(async function (context) {
@@ -69,6 +78,7 @@
             return lostTarget;
         }
         function display(preferred, resetMode) {
+            similarity.reset();
             var ids = (preferred || lastResults).filter(function (id) { return workspace.columns.some(function (c) { return String(c.column_id) === String(id); }); });
             if (!ids.length) {
                 var role = workspace.task_type === "model_normalization" ? "model_spec" : "company_name";
@@ -146,6 +156,7 @@
             finally { options.setBusy(false); }
         }
         function newSource() {
+            similarity.reset();
             source = null; ready = false; creationName = null;
             workspace = target = null; lastResults = []; lastFormula = null; finalized = null;
             operations.reset(); ui.setup();
@@ -165,9 +176,9 @@
         });
         return {
             open: open,
-            dismiss: function () { operations.invalidate(); ui.hide(); },
-            reset: function () { source = workspace = target = null; lastResults = []; lastFormula = null; ready = false; finalized = null; operations.reset(); ui.reset(); },
-            setBusy: function (busy) { ui.busy(busy, ready); operations.busy(busy); },
+            dismiss: function () { operations.invalidate(); similarity.reset(); ui.hide(); },
+            reset: function () { similarity.reset(); source = workspace = target = null; lastResults = []; lastFormula = null; ready = false; finalized = null; operations.reset(); ui.reset(); },
+            setBusy: function (busy) { ui.busy(busy, ready); operations.busy(busy); similarity.busy(); },
             context: async function () {
                 if (!workspace) return null;
                 await refresh();
@@ -180,6 +191,12 @@
                     sample_rows: sampleRows.map(function (row) { return {excel_row: row.excel_row,
                         values: row.values.map(function (v) { return v.slice(0, 1000); }),
                         truncated: row.values.some(function (v) { return v.length > 1000; })}; })};
+            },
+            configureSimilarity: async function (settings) {
+                if (!workspace) throw new Error("먼저 필수 세 열을 지정해 작업을 시작하세요.");
+                await refresh(); ui.open(workspace.task_type); display([settings.column_id]);
+                similarity.show(workspace, target, settings);
+                ui.status("검사 대상을 확인하고 실행하세요. 결과는 새 시트에 작성합니다.");
             },
             configure: async function (operation) {
                 if (!workspace) throw new Error("먼저 필수 세 열을 지정해 작업을 시작하세요.");

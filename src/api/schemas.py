@@ -2,6 +2,7 @@ from uuid import UUID
 from typing import Annotated, Literal
 from pydantic import BaseModel, Field, field_validator
 from services.operations.schemas import Operation, WorkspaceContext
+from services.similarity import SimilaritySelection
 
 
 class ChatRequest(BaseModel):
@@ -35,8 +36,13 @@ class ConfigureOperationAction(BaseModel):
     operation: Operation
 
 
+class ConfigureSimilarityAction(BaseModel):
+    type: Literal["configure_similarity"]
+    similarity: SimilaritySelection
+
+
 UIAction = Annotated[
-    ConfirmSelectionAction | ConfigureOperationAction,
+    ConfirmSelectionAction | ConfigureOperationAction | ConfigureSimilarityAction,
     Field(discriminator="type"),
 ]
 
