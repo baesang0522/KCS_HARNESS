@@ -70,7 +70,9 @@ def build_request_tools(task_context: dict):
                 "model_normalization", "counterparty_cleanup", "formula"
             ],
     ) -> dict:
-        """새 업무를 시작하거나 수식을 요청한다. 기존 정제 작업에는 사용하지 않는다."""
+        """새 업무를 시작하거나 수식을 요청한다. 기존 정제 작업에는 사용하지 않는다.
+        현재 작업 시트가 있어도 사용자가 업무 전환을 명시하면 사용한다.
+        같은 업무 안의 전처리, 치환, 분리 요청에는 사용하지 않는다."""
         return {
             "intent": "start_task",
             "task_type": task_type,

@@ -56,6 +56,13 @@ async def run_request_graph(runtime, messages, task_context: dict) -> dict:
         if reply.tool_calls:
             return {"messages": [reply]}
 
+        print(
+            "모델 tool 호출 누락: content=%r additional_kwargs=%r metadata=%r",
+            reply.content,
+            reply.additional_kwargs,
+            reply.metadata,
+        )
+
         return {
             "decision": clarification(
                 "도구 호출이 없어 작업 설정을 확인할 수 없습니다. "
