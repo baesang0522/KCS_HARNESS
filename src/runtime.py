@@ -21,6 +21,8 @@ class CustomsHarness:
     request_prompt: str
     formula_prompt: str
     tools_prompt: str
+    recommendation_prompt: str
+    advice_model: BaseChatModel | CodexModel | None = None
 
     async def respond(self, prompt: str, payload: dict) -> AIMessage:
         response = await self.model.ainvoke([
@@ -42,28 +44,55 @@ class CustomsHarness:
 
 def create_runtime() -> CustomsHarness:
     settings = load_settings()
+    llm = settings.llm
 
     if settings.llm.provider == "codex_cli":
         model = CodexModel(
             model=settings.llm.model,
             timeout_seconds=settings.llm.timeout_seconds,
         )
-
+        advice_model = model
     else:
+        common = {
+            "base_url": llm.base_url,
+            "model": llm.model,
+            "api_key": llm.api_key,
+            "temperature": llm.temperature,
+            "max_retries": llm.max_retries,
+        }
+
+        normal_extra = None
+        advice_extra = None
+
+        if settings.environment == "internal":
+            normal_extra = {
+                "reasoning_format": "deepseek",
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+            advice_extra = {
+                "reasoning_format": "deepseek",
+                "chat_template_kwargs": {"enable_thinking": True},
+            }
+
         model = create_openai_model(
-            base_url=settings.llm.base_url,
-            model=settings.llm.model,
-            api_key=settings.llm.api_key,
-            temperature=settings.llm.temperature,
-            timeout_seconds=settings.llm.timeout_seconds,
-            max_tokens=settings.llm.max_tokens,
-            max_retries=settings.llm.max_retries,
+            **common,
+            timeout_seconds=llm.timeout_seconds,
+            max_tokens=llm.max_tokens,
+            extra_body=normal_extra,
+        )
+        advice_model = create_openai_model(
+            **common,
+            timeout_seconds=300,
+            max_tokens=8192,
+            extra_body=advice_extra,
         )
 
     return CustomsHarness(
         settings=settings,
         model=model,
+        advice_model=advice_model,
         request_prompt=load_agent_prompt(PROMPT_DIR / "request_router.yml").render(),
         formula_prompt=load_agent_prompt(PROMPT_DIR / "formula.yml").render(),
         tools_prompt=load_agent_prompt(PROMPT_DIR / "request_tools.yml").render(),
+        recommendation_prompt=load_agent_prompt(PROMPT_DIR / "recommendation.yml").render(),
     )

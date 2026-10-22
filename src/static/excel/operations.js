@@ -65,6 +65,37 @@
             } catch (error) { complete(error.message); }
             finally { processing = false; abort = null; options.setBusy(false); }
         }
+        function resultDescription(data, index) {
+            var operation = data.operation;
+            var sourceIndex = operation.kind === "group" ? data.snapshot.columns.length - 1 : 0;
+            var source = data.snapshot.columns[sourceIndex];
+            var previous = workspace.columns.find(function (column) {
+                return String(column.column_id) === String(source.column_id);
+            });
+            var labels = {trim: "앞뒤 공백 제거", collapse_whitespace: "연속 공백 정리",
+                normalize_fullwidth_ascii: "전각 ASCII 변환", uppercase: "대문자 통일",
+                lowercase: "소문자 통일", remove_words: "지정 문자열 제거"};
+            var action = "";
+            if (operation.kind === "preprocess") {
+                action = operation.rules.map(function (rule) {
+                    return labels[rule.operation] + (rule.operation === "remove_words" ? " " + JSON.stringify(rule.words) : "");
+                }).join(" → ");
+            } else if (operation.kind === "split") {
+                action = (operation.delimiter === null ? "공백" : JSON.stringify(operation.delimiter)) +
+                    " 기준 분리 / " + (operation.part === "last" ? "마지막 단어" : (index + 1) + "번째 조각");
+            } else if (operation.kind === "replace") {
+                action = "문자열 치환 " + JSON.stringify(operation.find) + " → " + JSON.stringify(operation.replacement);
+            } else if (operation.kind === "map") {
+                action = "공백·대소문자 정리 기준 매핑 " + operation.mappings.length + "개 적용";
+            } else if (operation.kind === "group") {
+                action = "기준 열 " + data.snapshot.columns.slice(0, -1).map(function (column) { return column.header; }).join(", ") +
+                    "의 공백·대소문자 정리 후 같은 값에 대표값 적용 / 기준 행 " + operation.source_row;
+            }
+            function short(value, max) { return value.length > max ? value.slice(0, max - 1) + "…" : value; }
+            return "생성 원본: " + short(source.header, 180) +
+                " / 생성 시 처리: " + short(action, 450) +
+                " / 원본 설명: " + short(previous && previous.description || "미입력", 250);
+        }
         async function apply() {
             if (options.isBusy() || !preview) return;
             var data = preview;
@@ -74,6 +105,9 @@
                 // 쓰기 시작 후 같은 미리보기를 재사용하지 않는다.
                 invalidate();
                 var result = await sheet.write(data.snapshot, data.values, names, output, progress);
+                result.columns.forEach(function (column, index) {
+                    column.description = resultDescription(data, index);
+                });
                 await options.result(result);
                 complete(result.row_count.toLocaleString() + "행의 결과를 작성했습니다. 새 결과 열에서 이어서 작업할 수 있습니다.");
             } catch (error) { complete(error.message); }

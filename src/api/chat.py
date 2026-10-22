@@ -5,6 +5,8 @@ from fastapi import APIRouter, HTTPException, Request
 from api.schemas import ChatRequest, ChatResponse
 from repositories.conversation_repository import to_messages
 from services.chat import process_chat, workflow_snapshot
+from services.recommendation.schemas import AdviceRequest
+from services.recommendation.service import process_recommendation
 
 router = APIRouter()
 
@@ -46,4 +48,13 @@ async def chat(payload: ChatRequest, request: Request):
         request_id=str(payload.request_id),
         message=payload.message,
         workspace=payload.workspace.model_dump() if payload.workspace else None,
+    )
+
+
+@router.post("/chat/recommendation", response_model=ChatResponse)
+async def recommendation(payload: AdviceRequest, request: Request):
+    return await process_recommendation(
+        runtime=request.app.state.runtime,
+        repository=request.app.state.conversations,
+        payload=payload,
     )

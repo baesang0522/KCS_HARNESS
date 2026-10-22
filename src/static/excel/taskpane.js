@@ -244,6 +244,26 @@
                 body: JSON.stringify(pendingRequest)
             });
 
+            if (reply.ui_action && reply.ui_action.type === "analyze_data") {
+                notice.textContent = "전체 데이터를 읽고 있습니다…";
+                var data = await workspace.readRecommendation(
+                    reply.ui_action.column_ids,
+                    pendingRequest.workspace,
+                    function (label, done, total) {
+                        notice.textContent = label + " · " + done + "/" + total + "행";
+                    }
+                );
+                notice.textContent = "전체 원문과 열 설명을 검토하고 있습니다. 데이터가 많으면 시간이 걸립니다.";
+                reply = await api.requestJson('/chat/recommendation', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(Object.assign({}, data, {
+                        conversation_id: pendingRequest.conversation_id,
+                        request_id: pendingRequest.request_id
+                    }))
+                });
+            }
+
             pendingRequest = null;
             saveSession();
             message.value = '';

@@ -7,15 +7,17 @@ from models.llama_cpp import get_reasoning_content
 from services.operations.schemas import Operation
 from services.chat_state import TaskType
 from services.similarity import SimilaritySelection
+from services.recommendation.service import resolve_columns
 
 
 class RequestDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    intent: Literal["general", "start_task", "clarify", "task_followup", "operation", "similarity"]
+    intent: Literal["general", "start_task", "clarify", "task_followup", "operation", "similarity", "recommendation"]
     task_type: TaskType | None = None
     operation: Operation | None = None
     similarity: SimilaritySelection | None = None
     answer: str = Field(min_length=1, max_length=8000)
+    analysis_column_ids: list[str] | None = Field(default=None, max_length=200)
 
     @model_validator(mode="after")
     def validate_decision(self, info: ValidationInfo):
@@ -37,6 +39,10 @@ class RequestDecision(BaseModel):
             raise ValueError("유사도 요청에는 검사 설정이 필요합니다.")
         if self.intent != "similarity" and self.similarity is not None:
             raise ValueError("유사도 요청 외에는 similarity를 null로 반환해야 합니다.")
+        if self.intent == "recommendation" and len(self.answer) > 6000:
+            raise ValueError("추천 설명은 6,000자 이내로 작성하세요.")
+        if self.intent != "recommendation"and self.analysis_column_ids is not None:
+            raise ValueError("조언 요청 외에는 analysis_column_ids를 지정할 수 없습니다.")
         return self
 
 
@@ -93,5 +99,18 @@ async def route_request(runtime, messages, *, task_context: dict):
         workspace or task_context.get("active_job")
     ):
         raise ValueError("후속 질문을 연결할 현재 작업이 없습니다.")
+
+    if decision.intent == "recommendation":
+        if not workspace:
+            return RequestDecision(
+                intent="clarify",
+                answer="먼저 분석할 작업 시트를 준비해 주세요.",
+            ), reasons
+
+        ids = resolve_columns(workspace, decision.analysis_column_ids)
+        decision = decision.model_copy(update={
+            "analysis_column_ids": ids,
+            "answer": "대상 열의 전체 데이터를 읽어 조언을 준비하겠습니다.",
+        })
 
     return decision, reasons
