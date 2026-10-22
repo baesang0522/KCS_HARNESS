@@ -57,10 +57,10 @@ async def run_request_graph(runtime, messages, task_context: dict) -> dict:
             return {"messages": [reply]}
 
         print(
-            "모델 tool 호출 누락: content=%r additional_kwargs=%r metadata=%r",
-            reply.content,
-            reply.additional_kwargs,
-            reply.metadata,
+            f"모델 tool 호출 누락: "
+            f"content={reply.content!r} "
+            f"additional_kwargs={reply.additional_kwargs!r} "
+            f"response_metatdata={reply.response_metadata!r} "
         )
 
         return {

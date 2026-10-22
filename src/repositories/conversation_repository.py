@@ -25,6 +25,7 @@ class MemoryConversation:
     turns: list[StoredTurn] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     workflow: WorkFlowState = field(default_factory=WorkFlowState)
+    recommendation_hashes: dict[str, str] = field(default_factory=dict)
 
     async def save_turn(self, turn: StoredTurn) -> None:
         self.turns.append(turn)

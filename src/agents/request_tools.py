@@ -2,6 +2,7 @@ from typing import Literal
 from langchain_core.tools import tool
 from services.operations.schemas import Mapping, Operation, Rule
 from services.similarity import SimilaritySelection
+from services.recommendation.service import resolve_columns
 
 
 def build_request_tools(task_context: dict):
@@ -180,6 +181,22 @@ def build_request_tools(task_context: dict):
                       "아직 계산하거나 셀을 변경하지 않았습니다."
         }
 
+    @tool
+    def recommend_preprocessing(
+            column_ids: list[str] | None = None,
+    ) -> dict:
+        """전체 데이터 분석과 전처리 조언을 요청한다."""
+        ids = resolve_columns(workspace, column_ids)
+
+        return {
+            "intent": "recommendation",
+            "task_type": None,
+            "operation": None,
+            "similarity": None,
+            "analysis_column_ids": ids,
+            "answer": "대상 열의 전체 데이터를 읽어 조언을 준비하겠습니다.",
+        }
+
     tools = [answer_question, ask_user, start_task]
     if workspace:
         tools.extend([
@@ -190,6 +207,7 @@ def build_request_tools(task_context: dict):
             map_values,
             group_values,
             inspect_similarity,
+            recommend_preprocessing,
         ])
 
     return tools

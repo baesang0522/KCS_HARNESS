@@ -192,6 +192,40 @@
                         values: row.values.map(function (v) { return v.slice(0, 1000); }),
                         truncated: row.values.some(function (v) { return v.length > 1000; })}; })};
             },
+            readRecommendation: async function (columnIds, expected, progress) {
+                if (!workspace || !expected) throw new Error("먼저 작업 시트를 준비하세요.");
+                await refresh();
+                if (workspace.worksheet_id !== expected.worksheet_id ||
+                    String(workspace.table_id) !== String(expected.table_id)) {
+                    throw new Error("작업 표가 바뀌었습니다. 새 조언 요청을 보내세요.");
+                }
+                if (!Array.isArray(columnIds) || !columnIds.length || columnIds.length > 200 ||
+                    columnIds.some(function (id) { return typeof id !== "string"; }) ||
+                    new Set(columnIds).size !== columnIds.length) {
+                    throw new Error("분석 대상 열이 올바르지 않습니다.");
+                }
+                columnIds.forEach(function (id) {
+                    var current = workspace.columns.find(function (column) { return String(column.column_id) === id; });
+                    var original = expected.columns.find(function (column) { return String(column.column_id) === id; });
+                    if (!current || !original || current.header !== original.header || current.role !== original.role ||
+                        (current.description || "") !== (original.description || "")) {
+                        throw new Error("분석 대상 열이나 설명이 바뀌었습니다. 새 조언 요청을 보내세요.");
+                    }
+                });
+                var full = await Excel.run(async function (context) {
+                    var info = await window.operationsSheet.layout(context, workspace);
+                    return {row_start: info.body.rowIndex, row_count: info.body.rowCount, stamp: info.stamp};
+                });
+                var snapshot = await window.operationsSheet.read(workspace, full, columnIds, progress, function () {});
+                if (snapshot.stamp !== full.stamp || snapshot.rows.length !== full.row_count) {
+                    throw new Error("읽는 동안 작업 표가 바뀌었습니다. 다시 요청하세요.");
+                }
+                return {
+                    worksheet_id: workspace.worksheet_id, table_id: String(workspace.table_id),
+                    row_start: full.row_start, row_count: full.row_count, column_ids: columnIds,
+                    rows: snapshot.rows.map(function (row) { return {excel_row: row.excel_row, values: row.values}; })
+                };
+            },
             configureSimilarity: async function (settings) {
                 if (!workspace) throw new Error("먼저 필수 세 열을 지정해 작업을 시작하세요.");
                 await refresh(); ui.open(workspace.task_type); display([settings.column_id]);

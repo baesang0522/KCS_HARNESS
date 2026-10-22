@@ -62,6 +62,8 @@ async def process_chat(*, runtime, repository, jobs: dict, conversation_id: str,
                 action = {"type": "configure_operation", "operation": decision.operation.model_dump()}
             elif decision.intent == "similarity":
                 action = {"type": "configure_similarity", "similarity": decision.similarity.model_dump()}
+            elif decision.intent == "recommendation":
+                action = {"type": "analyze_data", "column_ids": decision.analysis_column_ids}
         except Exception as error:
             logger.exception("채팅 처리 실패: conversation_id=%s", conversation_id)
             raise ModelProcessingError("요청을 해석하지 못했습니다. 대상과 조건을 구체적으로 알려주세요.") from error
