@@ -17,6 +17,10 @@
         })) {
             throw new Error("필수 열과 추가 열을 다시 확인하세요.");
         }
+        if (!Array.isArray(source.column_indexes) || source.column_indexes.length !== source.column_count ||
+            new Set(source.column_indexes).size !== source.column_count || source.column_indexes.some(function (index) {
+                return !Number.isInteger(index) || index < 0 || index >= 16384;
+            })) throw new Error("원본 열 위치를 확인할 수 없습니다. 범위를 다시 가져오세요.");
         if (!Number.isInteger(source.row_count) || source.row_count < 2 ||
             source.row_count > 400001 || indexes.length > 100) {
             throw new Error("작업 시트에 복사할 행·열 개수를 확인하세요.");
@@ -28,12 +32,12 @@
             var existing = sheets.getItemOrNullObject(sheetName);
             var settingKey = "kcs.workspace." + sheetName;
             var saved = context.workbook.settings.getItemOrNullObject(settingKey);
-            var headers = original.getRangeByIndexes(
-                source.row_start, source.column_start, 1, source.column_count
-            );
+            var headers = indexes.map(function (index) {
+                var range = original.getRangeByIndexes(source.row_start, source.column_indexes[index], 1, 1);
+                range.load("text"); return range;
+            });
             existing.load("id");
             saved.load("value");
-            headers.load("text");
             original.load("name");
             await context.sync();
             if (!existing.isNullObject) {
@@ -45,8 +49,8 @@
                 }
                 throw new Error(sheetName + " 시트가 이미 있습니다. 부분 복사 결과를 확인하세요.");
             }
-            if (indexes.some(function (index) {
-                return headers.text[0][index] !== source.headers[index];
+            if (indexes.some(function (index, position) {
+                return headers[position].text[0][0] !== source.headers[index];
             })) {
                 throw new Error("원본 열 구성이 바뀌었습니다. 범위를 다시 가져오세요.");
             }
@@ -71,7 +75,7 @@
                     indexes.forEach(function (index, outputIndex) {
                         var input = original.getRangeByIndexes(
                             source.row_start + 1 + offset,
-                            source.column_start + index, count, 1
+                            source.column_indexes[index], count, 1
                         );
                         var output = sheet.getRangeByIndexes(offset + 1, outputIndex + 1, count, 1);
                         output.copyFrom(input, "Formats");
@@ -104,7 +108,7 @@
                         column_index: column.index,
                         header: column.name,
                         source_index: index,
-                        source_column_index: source.column_start + index,
+                        source_column_index: source.column_indexes[index],
                         source_header: source.headers[index],
                         role: roles.find(function (role) {
                             return source.mapping[role] === index;

@@ -128,7 +128,7 @@
                 var next = await window.workspaceSheet.readWorkspaceTarget(workspace, activate);
                 if (!next) throw new Error("현재 작업 시트의 열을 선택하세요. 다른 원본은 새 작업으로 시작할 수 있습니다.");
                 target = next; lastFormula = null;
-                display(next.columns.map(function (c) { return String(c.column_id); }).slice(0, 1));
+                display(next.columns.map(function (c) { return String(c.column_id); }));
                 await save(); ui.status("현재 작업 대상을 변경했습니다. 기존 결과와 직접 수정한 값은 유지됩니다.");
             } catch (error) { ui.status(error.message); }
             finally { options.setBusy(false); }

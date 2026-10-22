@@ -20,7 +20,7 @@
         }
 
         function columnLabel(index) {
-            return columnName(source.column_start + index) + "열 · " +
+            return columnName(source.column_indexes[index]) + "열 · " +
                 (source.headers[index] || "(머리글 없음)");
         }
 
@@ -38,7 +38,7 @@
                 if (entry && entry.selected && !required.has(index)) {
                     result.push({
                         source_index: index,
-                        column_index: source.column_start + index,
+                        column_index: source.column_indexes[index],
                         header: header,
                         description: entry.description.trim()
                     });
