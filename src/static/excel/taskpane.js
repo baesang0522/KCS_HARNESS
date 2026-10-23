@@ -41,7 +41,8 @@
         body.className = 'message-body';
 
         if (role === 'assistant') {
-            window.markdownRenderer.render(body, text);
+            try { window.markdownRenderer.render(body, text); }
+            catch (_) { body.textContent = text; }
         } else {
             body.textContent = text;
         }
@@ -169,7 +170,7 @@
                 message.value = pendingRequest.message;
                 notice.textContent =
                     '완료 여부를 확인하지 못한 요청이 있습니다. ' +
-                    '같은 내용으로 전송하면 기존 요청을 확인합니다.';
+                    '같은 내용으로 다시 보내거나 다른 질문을 입력할 수 있습니다.';
             }
         } catch (error) {
             notice.textContent = error.message;
@@ -208,12 +209,11 @@
             return;
         }
 
-        // 응답을 못 받은 요청을 새 요청으로 조용히 바꾸지 않는다.
+        // 같은 질문은 기존 ID로 재시도하고, 다른 질문은 새 ID로 진행한다.
         if (pendingRequest && pendingRequest.message !== value) {
-            notice.textContent =
-                '미확인 요청을 먼저 같은 내용으로 다시 보내거나 ' +
-                '새 대화를 시작해 주세요.';
-            return;
+            pendingRequest = null;
+            pendingBubble = null;
+            saveSession();
         }
 
         setBusy(true);
@@ -286,8 +286,10 @@
         } catch (error) {
             // 422는 모델 실행 전 입력 검증 실패. 오래된 작업 문맥으로 재시도하지 않는다.
             if (error.status === 422) { pendingRequest = null; pendingBubble = null; saveSession(); }
+            if (!pendingRequest) pendingBubble = null;
             closeTaskCards();
-            notice.textContent = error.message;
+            appendMessage('assistant', '요청을 완료하지 못했습니다.\n\n' + error.message);
+            notice.textContent = '같은 내용으로 다시 보내거나 다른 질문을 입력할 수 있습니다.';
             message.value = value;
 
         } finally {

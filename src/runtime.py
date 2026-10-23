@@ -7,6 +7,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from models.openai import create_model as create_openai_model
+from models.llama_cpp import create_model as create_internal_model
 from models.codex_adapter import CodexModel
 from prompts.loader import load_agent_prompt
 from settings import Settings, load_settings
@@ -74,16 +75,18 @@ def create_runtime() -> CustomsHarness:
                 "chat_template_kwargs": {"enable_thinking": True},
             }
 
-        model = create_openai_model(
+        # 내부 서버는 max_tokens와 reasoning_content를 사용하는 기존 어댑터로 연결한다.
+        create_model = create_internal_model if settings.environment == "internal" else create_openai_model
+        model = create_model(
             **common,
             timeout_seconds=llm.timeout_seconds,
             max_tokens=llm.max_tokens,
             extra_body=normal_extra,
         )
-        advice_model = create_openai_model(
+        advice_model = create_model(
             **common,
             timeout_seconds=300,
-            max_tokens=8192,
+            max_tokens=llm.advice_max_tokens,
             extra_body=advice_extra,
         )
 

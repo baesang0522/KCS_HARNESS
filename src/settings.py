@@ -19,6 +19,7 @@ class LLMSettings(BaseModel):
     temperature:float = Field(default=0.1, ge=0, le=2)
     timeout_seconds: float = Field(default=120, gt=0)
     max_tokens: int = Field(default=2048, gt=0)
+    advice_max_tokens: int = Field(default=8192, gt=0)
     max_retries: int = Field(default=2, ge=0)
 
 

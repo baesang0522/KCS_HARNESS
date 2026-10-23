@@ -1,14 +1,17 @@
 import json
+import logging
 import re
 import unicodedata
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from pydantic import ValidationError
 
 from services.recommendation.schemas import AdviceRequest, CheckedFinding, ComparisonPlan, Review
 
 
 # shortcut: 입력 예산은 바이트 기준, 서버 tokenizer 연결 시 실제 토큰 기준으로 교체.
 INPUT_BYTES = 24000
+logger = logging.getLogger(__name__)
 
 
 def dumps(value) -> str:
@@ -63,50 +66,71 @@ def batches(items, limit: int, *, overlap: bool = False):
 
 
 async def ask(model, prompt: str, stage: str, payload: dict, schema):
-    content = dumps({
+    request_payload = {
         **payload,
         "stage": stage,
         "response_schema": schema.model_json_schema(),
-    })
+    }
+    for attempt in range(2):
+        content = dumps(request_payload)
 
-    if len(prompt.encode("utf-8")) + len(content.encode("utf-8")) > INPUT_BYTES:
-        raise ValueError(
-            "분석 입력 예산을 초과했습니다. 원문은 생략하지 않았습니다."
+        if len(prompt.encode("utf-8")) + len(content.encode("utf-8")) > INPUT_BYTES:
+            raise ValueError(
+                "분석 입력 예산을 초과했습니다. 원문은 생략하지 않았습니다."
+            )
+
+        reply = await model.ainvoke([
+            SystemMessage(content=prompt),
+            HumanMessage(content=content),
+        ])
+
+        if not isinstance(reply, AIMessage):
+            raise ValueError("분석 모델 응답 형식이 올바르지 않습니다.")
+
+        reason = reply.response_metadata.get("finish_reason")
+        if reason == "length":
+            usage = reply.response_metadata.get("token_usage") or {}
+            reasoning = reply.additional_kwargs.get("reasoning_content") or ""
+            logger.warning(
+                "조언 출력 중단: stage=%s requested_max_tokens=%s prompt_tokens=%s "
+                "completion_tokens=%s reasoning_chars=%s content_chars=%s",
+                stage, getattr(model, "max_tokens", None), usage.get("prompt_tokens"),
+                usage.get("completion_tokens"), len(reasoning), len(reply.content),
+            )
+            raise ValueError(
+                f"조언 생성이 토큰 한도로 중단됐습니다(단계: {stage}). "
+                "llm.advice_max_tokens와 서버의 생성·컨텍스트 한도를 확인하세요. "
+                "추론이 출력 예산을 소진했을 수도 있습니다."
+            )
+        if reason not in (None, "stop"):
+            raise ValueError(f"조언 생성이 정상 종료되지 않았습니다: {reason}")
+
+        if reply.tool_calls or reply.invalid_tool_calls:
+            raise ValueError("조언 모델이 예상하지 않은 도구 호출을 반환했습니다.")
+
+        if not isinstance(reply.content, str) or not reply.content.strip():
+            raise ValueError("조언 모델의 최종 답변이 비어 있습니다.")
+
+        text = reply.content.strip()
+        fenced = re.fullmatch(
+            r"```(?:json)?[ \t]*\r?\n(.*?)\r?\n```",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
         )
+        if fenced:
+            text = fenced[1].strip()
 
-    reply = await model.ainvoke([
-        SystemMessage(content=prompt),
-        HumanMessage(content=content),
-    ])
-
-    if not isinstance(reply, AIMessage):
-        raise ValueError("분석 모델 응답 형식이 올바르지 않습니다.")
-
-    reason = reply.response_metadata.get("finish_reason")
-    if reason == "length":
-        raise ValueError(
-            "조언 생성이 토큰 한도로 중단됐습니다. "
-            "조언용 출력 예산과 서버 컨텍스트를 확인하세요."
-        )
-    if reason not in (None, "stop"):
-        raise ValueError(f"조언 생성이 정상 종료되지 않았습니다: {reason}")
-
-    if reply.tool_calls or reply.invalid_tool_calls:
-        raise ValueError("조언 모델이 예상하지 않은 도구 호출을 반환했습니다.")
-
-    if not isinstance(reply.content, str) or not reply.content.strip():
-        raise ValueError("조언 모델의 최종 답변이 비어 있습니다.")
-
-    text = reply.content.strip()
-    fenced = re.fullmatch(
-        r"```(?:json)?[ \t]*\r?\n(.*?)\r?\n```",
-        text,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
-    if fenced:
-        text = fenced[1].strip()
-
-    return schema.model_validate_json(text)
+        try:
+            return schema.model_validate_json(text)
+        except ValidationError as error:
+            errors = error.errors(include_url=False, include_input=False, include_context=False)[:8]
+            logger.warning("조언 응답 검증 실패: stage=%s attempt=%s errors=%s", stage, attempt + 1, errors)
+            if attempt == 1:
+                raise ValueError(
+                    "모델이 조언 응답 형식을 지키지 못해 한 번 다시 요청했지만 실패했습니다. "
+                    "다시 시도하거나 분석할 열을 지정해 주세요."
+                ) from error
+            request_payload["validation_errors"] = errors
 
 
 def check_evidence(review: Review, allowed: set[int]):

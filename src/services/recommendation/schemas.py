@@ -54,6 +54,7 @@ class Finding(StrictModel):
     excel_rows: list[Annotated[int, Field(ge=1, le=1048576)]] = Field(
         min_length=1,
         max_length=8,
+        description="제안을 뒷받침하는 대표 근거 행 번호 1~8개. 해당하는 모든 행을 나열하지 않는다.",
     )
     advice: str = Field(min_length=1, max_length=700)
 

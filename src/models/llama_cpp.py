@@ -5,17 +5,20 @@ from langchain_deepseek import ChatDeepSeek
 
 
 def create_model(*, base_url: str, model: str, api_key: str="not-needed", temperature: float=0.1,
-                 timeout_seconds: float=120, max_tokens: int=2048, max_retries: int=2) -> ChatDeepSeek:
+                 timeout_seconds: float=120, max_tokens: int=2048, max_retries: int=2,
+                 extra_body: dict | None = None) -> ChatDeepSeek:
     if not base_url.strip():
         raise ValueError("LLM base_url이 비어 있습니다.")
 
     if not model.strip():
         raise ValueError("LLM model이 비어 있습니다.")
 
-    extra_body: dict[str, Any] = {
+    body: dict[str, Any] = {
         "reasoning_format": "deepseek",
         "chat_template_kwargs": {"enable_thinking": False},
     }
+    if extra_body is not None:
+        body.update(extra_body)
 
     return ChatDeepSeek(
         base_url=base_url.rstrip("/"),
@@ -26,7 +29,7 @@ def create_model(*, base_url: str, model: str, api_key: str="not-needed", temper
         max_tokens=max_tokens,
         max_retries=max_retries,
         streaming=False,
-        extra_body=extra_body,
+        extra_body=body,
     )
 
 

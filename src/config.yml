@@ -13,6 +13,7 @@ environments:
       temperature: 0.1
       timeout_seconds: 120
       max_tokens: 2048
+      advice_max_tokens: 8192
       max_retries: 2
   internal:
     llm:
@@ -23,4 +24,5 @@ environments:
       temperature: 0.1
       timeout_seconds: 120
       max_tokens: 2048
+      advice_max_tokens: 8192
       max_retries: 2
