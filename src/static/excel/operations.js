@@ -68,7 +68,13 @@
                 }
                 preview = {operation: operation, snapshot: snapshot, values: values, names: headers, changed: changed};
                 ui.preview(preview); options.status("변경 내용과 결과 위치를 확인하세요. 원본 열은 유지합니다.");
-            } catch (error) { complete(error.message); }
+            } catch (error) {
+                console.error("[operations.build]", error);
+                complete(
+                    "작업 미리보기 오류\n" +
+                    (error.stack || error.message || String(error))
+                );
+            }
             finally { processing = false; abort = null; options.setBusy(false); }
         }
         function resultDescription(data, index) {

@@ -17,6 +17,14 @@ def value_catalog(values: list[str]) -> dict:
 
 def execute(payload: OperationRequest) -> OperationResponse:
     operation = payload.operation
+    print(
+        "[operations.execute v2]",
+        "file=", __file__,
+        "kind=", operation.kind,
+        "group_mode=", operation.group_mode,
+        "source_row=", operation.source_row,
+        flush=True,
+    )
     mappings = {
         mapping_key(item.source): item.target
         for item in operation.mappings
@@ -38,7 +46,7 @@ def execute(payload: OperationRequest) -> OperationResponse:
             if previous is None or row.excel_row < previous[0]:
                 representatives[key] = (row.excel_row, row.values[-1])
 
-    elif operation.kind == "group":
+    elif operation.kind == "group" and operation.group_mode == "manual":
         source = next(
             (
                 row for row in payload.rows
@@ -96,7 +104,12 @@ def execute(payload: OperationRequest) -> OperationResponse:
                 mappings.get(mapping_key(row.values[0]), row.values[0])
             ]
 
-        elif operation.group_mode == "first_non_empty":
+
+        elif (
+                operation.kind == "group"
+                and operation.group_mode == "first_non_empty"
+        ):
+
             key = tuple(row.values[:-1])
             selected = representatives.get(key)
             needs_review = selected is None
@@ -104,12 +117,22 @@ def execute(payload: OperationRequest) -> OperationResponse:
                 row.values[-1] if needs_review else selected[1]
             ]
 
-        else:
+        elif (
+                operation.kind == "group"
+                and operation.group_mode == "manual"
+        ):
+
             key = tuple(mapping_key(value) for value in row.values[:-1])
             needs_review = not all(key)
             values = [
                 representative if key == criteria else row.values[-1]
             ]
+
+        else:
+            raise ValueError(
+                f"지원하지 않는 작업 설정입니다: "
+                f"kind={operation.kind}, group_mode={operation.group_mode}"
+            )
 
         before = row.values[-1:] if operation.kind == "group" else row.values
         is_changed = values != before
