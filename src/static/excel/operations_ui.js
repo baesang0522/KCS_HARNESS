@@ -15,6 +15,9 @@
             var value = el("kind").value;
             ["preprocess", "split", "group", "replace", "map"].forEach(function (name) { el(name).hidden = name !== value; });
             el("single").hidden = value === "group";
+            var automatic = el("group-mode").value === "first_non_empty";
+            el("group-manual").hidden = automatic;
+            el("group-auto").hidden = !automatic;
         }
         function keys() { return Array.from(el("keys").selectedOptions).map(function (o) { return o.value; }); }
         function targets() {
@@ -47,14 +50,14 @@
             show: function (available, preferred, taskType, resetMode) {
                 columns = available; clear(); mapping.reset();
                 if (resetMode) {
-                    el("kind").value = "preprocess"; el("part").value = "all";
+                    el("kind").value = "preprocess"; el("part").value = "all"; el("group-mode").value = "manual";
                     el("rules").querySelectorAll("input").forEach(function (input) { input.checked = false; });
                     ["words", "find", "replacement", "delimiter", "source-row", "group-value"].forEach(function (id) { el(id).value = ""; });
                 }
                 fill(el("column"), preferred.slice(0, 1).map(String));
                 var defaults = columns.filter(function (c) { return taskType === "counterparty_cleanup" ?
                     ["country_code", "company_name"].indexOf(c.role) >= 0 : c.role === "trade_name"; }).map(function (c) { return String(c.column_id); });
-                fill(el("keys"), defaults); fill(el("value-column"), preferred.slice(-1).map(String)); fill(el("anchor"), preferred.map(String)); kind();
+                fill(el("keys"), defaults); fill(el("value-column"), preferred.slice(0, 1).map(String)); fill(el("anchor"), preferred.map(String)); kind();
             },
             operation: function () {
                 var type = el("kind").value;
@@ -67,10 +70,37 @@
                 var operation = {kind: type, column_ids: ids, rules: selected, delimiter: delimiter};
                 if (type === "group") {
                     operation.value_column_id = el("value-column").value;
-                    operation.source_row = Number(el("source-row").value);
-                    operation.representative = el("group-value").value || null;
-                    if (ids.includes(operation.value_column_id)) throw new Error("판단 기준과 값을 바꿀 열은 서로 다르게 선택하세요.");
-                    if (!Number.isInteger(operation.source_row) || operation.source_row < 1) throw new Error("대표값을 적은 Excel 행 번호를 입력하세요.");
+                    operation.group_mode = el("group-mode").value;
+
+                    if (!operation.value_column_id) {
+                        throw new Error("값을 통일할 대상 열을 선택하세요.");
+                    }
+                    if (ids.length > 19) {
+                        throw new Error("판단 기준은 최대 19열입니다.");
+                    }
+                    if (ids.includes(operation.value_column_id)) {
+                        throw new Error(
+                            "판단 기준과 값을 바꿀 열은 서로 다르게 선택하세요."
+                        );
+                    }
+
+                    operation.source_row = null;
+                    operation.representative = null;
+
+                    if (operation.group_mode === "manual") {
+                        operation.source_row = Number(el("source-row").value);
+                        operation.representative = el("group-value").value || null;
+
+                        if (
+                            !Number.isInteger(operation.source_row) ||
+                            operation.source_row < 1 ||
+                            operation.source_row > 1048576
+                        ) {
+                            throw new Error(
+                                "대표값을 적은 Excel 행 번호를 입력하세요."
+                            );
+                        }
+                    }
                 }
                 if (type === "split") operation.part = el("part").value;
                 if (type === "replace") {
@@ -84,7 +114,7 @@
                 if (!operation.column_ids.concat(operation.value_column_id || []).every(function (id) { return columns.some(function (c) { return String(c.column_id) === id; }); })) {
                     throw new Error("현재 작업에 없는 열입니다. 범위를 다시 확인하세요.");
                 }
-                clear(); el("kind").value = operation.kind; kind();
+                clear(); el("kind").value = operation.kind;el("group-mode").value = operation.group_mode || "manual"; kind();
                 fill(el("column"), operation.column_ids); fill(el("keys"), operation.column_ids);
                 if (operation.value_column_id) fill(el("value-column"), [operation.value_column_id]);
                 el("source-row").value = operation.source_row || "";
@@ -110,9 +140,31 @@
                 var count = data.values.length.toLocaleString();
                 el("summary").textContent = count + "행 확인 · 결과 " + data.names.length + "열 · " + data.changed + "행 변경";
                 if (data.operation.kind === "group") {
-                    var source = data.snapshot.rows.find(function (row) { return row.excel_row === data.operation.source_row; });
-                    var value = data.operation.representative === null ? source.values[source.values.length - 1] : data.operation.representative;
-                    el("summary").textContent += " · 적용 대표값: " + value;
+                    var counts = {"변경": 0, "유지": 0, "확인 필요": 0};
+
+                    data.values.forEach(function (row) {
+                        counts[row[1]] += 1;
+                    });
+
+                    el("summary").textContent =
+                        count + "행 확인 · 결과 2열" +
+                        " · 변경 " + counts["변경"].toLocaleString() + "행" +
+                        " · 유지 " + counts["유지"].toLocaleString() + "행" +
+                        " · 확인 필요 " + counts["확인 필요"].toLocaleString() + "행";
+
+                    if (data.operation.group_mode === "first_non_empty") {
+                        el("summary").textContent +=
+                            " · 그룹별 첫 번째 빈칸 아닌 값 사용";
+                    } else {
+                        var source = data.snapshot.rows.find(function (row) {
+                            return row.excel_row === data.operation.source_row;
+                        });
+                        var value = data.operation.representative == null
+                            ? source.values[source.values.length - 1]
+                            : data.operation.representative;
+
+                        el("summary").textContent += " · 적용 대표값: " + value;
+                    }
                 }
                 var column = data.snapshot.columns[data.operation.kind === "group" ? data.snapshot.columns.length - 1 : 0];
                 fill(el("anchor"), [String(column.column_id)]);

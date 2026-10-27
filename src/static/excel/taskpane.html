@@ -108,12 +108,51 @@
                 <p>행마다 필요한 열 수를 계산합니다. 부족한 칸은 빈칸으로 남깁니다. 최대 100개 결과 열을 지원합니다.</p>
               </div>
               <div id="op-group" hidden>
-                <label>같은 행으로 판단할 기준 열 (복수 선택)<select id="op-keys" multiple size="5"></select></label>
-                <label>값을 바꿀 열 <select id="op-value-column"></select></label>
-                <label>대표값을 적어 둔 Excel 행 번호 <input id="op-source-row" type="number" min="1" max="1048576"></label>
-                <label>적용할 대표값 (비우면 해당 행의 셀 값 사용)<input id="op-group-value" type="text" maxlength="32767"></label>
-                <p>기준 행과 선택한 기준 열의 값이 모두 같은 행에 대표값을 적용합니다. 앞뒤·연속 공백과 대소문자를 정리해 비교합니다. 해당하지 않는 행은 기존 값을 유지합니다.</p>
-                <p>Excel에서 값을 수정한 뒤 행 번호를 지정하세요. 변경 내용 확인을 누를 때 현재 셀 값을 다시 읽습니다. 결과는 새 열에 작성합니다.</p>
+                <label>
+                  같은 그룹으로 판단할 기준 열 (복수 선택)
+                  <select id="op-keys" multiple size="5"></select>
+                </label>
+
+                <label>
+                  값을 통일할 대상 열
+                  <select id="op-value-column"></select>
+                </label>
+
+                <label>
+                  대표값 선택 방식
+                  <select id="op-group-mode">
+                    <option value="manual">직접 지정 · 선택한 그룹만</option>
+                    <option value="first_non_empty">자동 선택 · 모든 그룹의 첫 번째 빈칸 아닌 값</option>
+                  </select>
+                </label>
+
+                <div id="op-group-manual">
+                  <label>
+                    대표값을 적어 둔 Excel 행 번호
+                    <input id="op-source-row" type="number" min="1" max="1048576">
+                  </label>
+                  <label>
+                    적용할 대표값 (비우면 해당 행의 셀 값 사용)
+                    <input id="op-group-value" type="text" maxlength="32767">
+                  </label>
+                  <p>
+                    기준 행과 기준값이 같은 그룹만 처리합니다.
+                    기존처럼 앞뒤·연속 공백과 대소문자를 정리해 비교합니다.
+                  </p>
+                </div>
+
+                <p id="op-group-auto" hidden>
+                  기준값이 정확히 같은 모든 그룹을 처리합니다.
+                  각 그룹에서 Excel 행 번호가 가장 작은 빈칸 아닌 값을 대표값으로 사용합니다.
+                  공백과 대소문자를 구분하며, 필터로 숨겨진 행도 포함합니다.
+                  기준값이 누락되거나 그룹의 대상 값이 모두 비어 있으면
+                  원본을 유지하고 ‘확인 필요’로 표시합니다.
+                </p>
+
+                <p>
+                  원본을 유지하고 결과값과 변경여부를 새 열 두 개에 나란히 작성합니다.
+                  변경여부는 ‘변경’, ‘유지’, ‘확인 필요’로 표시합니다.
+                </p>
               </div>
               <div id="op-replace" hidden>
                 <label>찾을 문자열 <input id="op-find" type="text" maxlength="32767"></label>

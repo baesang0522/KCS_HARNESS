@@ -151,14 +151,21 @@ def build_request_tools(task_context: dict):
             value_column_id: str,
             source_row: int | None = None,
             representative: str | None = None,
+            group_mode: Literal["manual", "first_non_empty"] = "manual",
     ) -> dict:
-        """같은 기준의 행에 대표값을 적용하도록 설정한다. 기준 행이 미정이면 카드에서 입력한다."""
+        """같은 기준의 행에 대표값을 적용하는 카드를 연다.
+
+        manual은 지정한 기준 행의 그룹만 처리한다.
+        first_non_empty는 모든 그룹에 첫 번째 빈칸 아닌 값을 적용한다.
+        결과값과 변경여부를 새 열 두 개로 만든다.
+        """
         return card(
             kind="group",
             column_ids=column_ids,
             value_column_id=value_column_id,
             source_row=source_row,
             representative=representative,
+            group_mode=group_mode,
         )
 
     @tool

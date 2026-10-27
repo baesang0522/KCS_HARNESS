@@ -58,6 +58,7 @@ class Operation(StrictModel):
     source_row: int | None = Field(default=None, ge=1, le=1048576)
     representative: Text | None = None
     part: Literal["all", "last"] = "all"
+    group_mode: Literal["manual", "first_non_empty"] = "manual"
 
     @property
     def input_column_ids(self) -> list[str]:
@@ -76,6 +77,13 @@ class Operation(StrictModel):
                 raise ValueError("대표값은 빈 값일 수 없습니다.")
         elif self.value_column_id is not None or self.source_row is not None or self.representative is not None:
             raise ValueError("기준 행과 대표값은 같은 기준의 행에 대표값 적용에서만 사용합니다.")
+        if self.group_mode != "manual":
+            if self.kind != "group":
+                raise ValueError("자동 대표값 선택은 그룹 작업에서만 사용합니다.")
+            if self.source_row is not None or self.representative is not None:
+                raise ValueError(
+                    "자동 방식에서는 기준 행이나 대표값을 직접 지정하지 않습니다."
+                )
         if self.kind != "split" and self.part != "all":
             raise ValueError("마지막 단어 추출은 문자열 분리에서만 사용합니다.")
         if self.kind != "group" and len(self.column_ids) != 1:
@@ -123,7 +131,8 @@ class OperationRequest(StrictModel):
             raise ValueError("찾을 문자열을 입력하세요.")
         if self.operation.kind == "map" and not self.operation.mappings:
             raise ValueError("원본 값과 대표값을 지정하세요.")
-        if self.operation.kind == "group" and self.operation.source_row is None:
+        if (self.operation.kind =="group" and self.operation.group_mode == "manual"
+                and self.operation.source_row is None):
             raise ValueError("대표값의 기준이 되는 행을 지정하세요.")
         if len({row.excel_row for row in self.rows}) != len(self.rows):
             raise ValueError("행 번호가 중복되었습니다.")

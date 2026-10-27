@@ -59,7 +59,13 @@
                     progress("처리", values.length, snapshot.rows.length);
                 }
                 values.forEach(function (row) { while (row.length < headers.length) row.push(""); });
-                if (!changed) { complete(snapshot.rows.length.toLocaleString() + "행을 확인했습니다. 적용 조건에 따른 변경이 없어 작업을 마쳤습니다."); return; }
+                if (!changed && operation.kind !== "group") {
+                    complete(
+                        snapshot.rows.length.toLocaleString() +
+                        "행을 확인했습니다. 적용 조건에 따른 변경이 없어 작업을 마쳤습니다."
+                    );
+                    return;
+                }
                 preview = {operation: operation, snapshot: snapshot, values: values, names: headers, changed: changed};
                 ui.preview(preview); options.status("변경 내용과 결과 위치를 확인하세요. 원본 열은 유지합니다.");
             } catch (error) { complete(error.message); }
@@ -88,8 +94,27 @@
             } else if (operation.kind === "map") {
                 action = "공백·대소문자 정리 기준 매핑 " + operation.mappings.length + "개 적용";
             } else if (operation.kind === "group") {
-                action = "기준 열 " + data.snapshot.columns.slice(0, -1).map(function (column) { return column.header; }).join(", ") +
-                    "의 공백·대소문자 정리 후 같은 값에 대표값 적용 / 기준 행 " + operation.source_row;
+                var criteriaNames = data.snapshot.columns.slice(0, -1)
+                    .map(function (column) { return column.header; })
+                    .join(", ");
+
+                action = "기준 열 " + criteriaNames;
+
+                if (operation.group_mode === "first_non_empty") {
+                    action +=
+                        "의 정확히 같은 값끼리 그룹화 / " +
+                        "그룹별 Excel 첫 번째 빈칸 아닌 값 적용";
+                } else {
+                    action +=
+                        "의 공백·대소문자 정리 후 같은 값에 대표값 적용 / " +
+                        "기준 행 " + operation.source_row;
+                }
+
+                if (index === 1) {
+                    action +=
+                        " / 변경여부: 변경·유지·확인 필요. " +
+                        "확인 필요는 기준값 누락 또는 자동 대표값 없음";
+                }
             }
             function short(value, max) { return value.length > max ? value.slice(0, max - 1) + "…" : value; }
             return "생성 원본: " + short(source.header, 180) +
@@ -101,7 +126,12 @@
             var data = preview;
             try {
                 var output = ui.output(); options.setBusy(true);
-                var names = data.names.map(function (_, i) { return output.name + (data.names.length > 1 ? " " + (i + 1) : ""); });
+                var names = data.operation.kind === "group"
+                    ? [output.name, output.name + " 변경여부"]
+                    : data.names.map(function (_, i) {
+                        return output.name +
+                            (data.names.length > 1 ? " " + (i + 1) : "");
+                    });
                 // 쓰기 시작 후 같은 미리보기를 재사용하지 않는다.
                 invalidate();
                 var result = await sheet.write(data.snapshot, data.values, names, output, progress);
