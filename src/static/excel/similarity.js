@@ -6,11 +6,10 @@
             options.status(label + " · " + done.toLocaleString() + "/" + total.toLocaleString());
         }
         function updateRun() {
-            el("run").disabled = options.isBusy() || !["sequence", "levenshtein"].includes(el("method").value) || !el("confirmed").checked;
+            el("run").disabled = options.isBusy() || !["sequence", "levenshtein"].includes(el("method").value);
         }
         function reset() {
             el("panel").hidden = true;
-            el("confirmed").checked = false;
             el("method").value = "";
             updateRun();
             document.getElementById("operations").hidden = false;
@@ -40,18 +39,15 @@
             el("group").value = settings.group_column_id || "";
             el("method").value = "";
             el("scope").textContent = workspace.sheet_name + " · 현재 범위 " + target.row_count.toLocaleString() + "행. 숨긴 행도 포함합니다.";
-            el("confirmed").checked = false;
             document.getElementById("operations").hidden = true;
             el("panel").hidden = false;
             describe();
         }
         el("method").addEventListener("change", describe);
-        el("confirmed").addEventListener("change", updateRun);
         el("back").addEventListener("click", function () { if (!options.isBusy()) reset(); });
         el("run").addEventListener("click", async function () {
             if (options.isBusy()) return;
             if (!["sequence", "levenshtein"].includes(el("method").value)) { options.status("비교 방식을 선택해 주세요."); return; }
-            if (!el("confirmed").checked) { options.status("선택한 열의 정제를 마쳤는지 확인해 주세요."); return; }
             var settings = {
                 column_id: el("column").value,
                 group_column_id: el("group").value || null,
