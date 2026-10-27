@@ -1,3 +1,5 @@
+import time
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
@@ -10,6 +12,21 @@ from services.recommendation.service import process_recommendation
 
 router = APIRouter()
 
+
+def log_chat(event: str, *, level="INFO", **fields) -> None:
+    print(
+        json.dumps(
+            {
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "level": level,
+                "event": event,
+                **fields,
+            },
+            ensure_ascii=False,
+            default=str,
+        ),
+        flush=True,
+    )
 
 @router.get("/health")
 async def health() -> dict[str, str]:
@@ -40,21 +57,98 @@ async def read_conversation(conversation_id: UUID, request: Request):
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest, request: Request):
-    return await process_chat(
-        runtime=request.app.state.runtime,
-        repository=request.app.state.conversations,
-        jobs=request.app.state.jobs,
-        conversation_id=str(payload.conversation_id),
-        request_id=str(payload.request_id),
-        message=payload.message,
-        workspace=payload.workspace.model_dump() if payload.workspace else None,
+    ids = {
+        "conversation_id": str(payload.conversation_id),
+        "request_id": str(payload.request_id),
+        "endpoint": "/chat",
+    }
+    workspace = (
+        payload.workspace.model_dump()
+        if payload.workspace else None
     )
+    started = time.perf_counter()
+
+    log_chat(
+        "chat.received",
+        **ids,
+        message=payload.message,
+        task_type=workspace.get("task_type") if workspace else None,
+        has_workspace=workspace is not None,
+        target_column_ids=(
+            workspace.get("target_column_ids", [])
+            if workspace else []
+        ),
+    )
+
+    try:
+        result = await process_chat(
+            runtime=request.app.state.runtime,
+            repository=request.app.state.conversations,
+            jobs=request.app.state.jobs,
+            conversation_id=ids["conversation_id"],
+            request_id=ids["request_id"],
+            message=payload.message,
+            workspace=workspace,
+        )
+    except Exception as error:
+        log_chat(
+            "chat.failed",
+            level="ERROR",
+            **ids,
+            error_type=type(error).__name__,
+            error_message=str(error),
+            elapsed_ms=round((time.perf_counter() - started) * 1000),
+        )
+        raise
+
+    log_chat(
+        "chat.completed",
+        **ids,
+        ui_action=result.get("ui_action"),
+        answer=result["answer"],
+        elapsed_ms=round((time.perf_counter() - started) * 1000),
+    )
+    return result
 
 
 @router.post("/chat/recommendation", response_model=ChatResponse)
 async def recommendation(payload: AdviceRequest, request: Request):
-    return await process_recommendation(
-        runtime=request.app.state.runtime,
-        repository=request.app.state.conversations,
-        payload=payload,
+    ids = {
+        "conversation_id": str(payload.conversation_id),
+        "request_id": str(payload.request_id),
+        "endpoint": "/chat/recommendation",
+    }
+    started = time.perf_counter()
+
+    log_chat(
+        "recommendation.received",
+        **ids,
+        column_ids=payload.column_ids,
+        row_count=len(payload.rows),
     )
+
+    try:
+        result = await process_recommendation(
+            runtime=request.app.state.runtime,
+            repository=request.app.state.conversations,
+            payload=payload,
+        )
+    except Exception as error:
+        log_chat(
+            "recommendation.failed",
+            level="ERROR",
+            **ids,
+            error_type=type(error).__name__,
+            error_message=str(error),
+            elapsed_ms=round((time.perf_counter() - started) * 1000),
+        )
+        raise
+
+    log_chat(
+        "recommendation.completed",
+        **ids,
+        ui_action=result.get("ui_action"),
+        answer=result["answer"],
+        elapsed_ms=round((time.perf_counter() - started) * 1000),
+    )
+    return result
