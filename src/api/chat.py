@@ -50,7 +50,7 @@ async def read_conversation(conversation_id: UUID, request: Request):
             "conversation_id": cid,
             "messages": to_messages(conversation.turns),
             "workflow": workflow_snapshot(
-                conversation.workflow, request.app.state.jobs,
+                conversation.workflow, request.app.state.formula_jobs,
             ),
         }
 
@@ -84,7 +84,7 @@ async def chat(payload: ChatRequest, request: Request):
         result = await process_chat(
             runtime=request.app.state.runtime,
             repository=request.app.state.conversations,
-            jobs=request.app.state.jobs,
+            formula_jobs=request.app.state.formula_jobs,
             conversation_id=ids["conversation_id"],
             request_id=ids["request_id"],
             message=payload.message,

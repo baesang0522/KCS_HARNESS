@@ -63,12 +63,12 @@ class FormulaSheetContext(BaseModel):
         return self
 
 
-class CreateJobRequest(BaseModel):
+class CreateFormulaJobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     task_type: Literal["formula"]
     conversation_id: UUID
-    job_id: UUID
+    formula_job_id: UUID
     instruction: str = Field(min_length=1, max_length=8000)
     worksheet_id: str = Field(min_length=1, max_length=256)
     sheet_name: str = Field(min_length=1, max_length=256)
@@ -250,12 +250,12 @@ class FormulaApprovalRequest(BaseModel):
         return self.target_ranges or (self.target_range,)  # type: ignore[return-value]
 
 
-class Job(BaseModel):
+class FormulaJob(BaseModel):
     task_type: Literal["formula"] = "formula"
     status: Literal[
         "CREATED", "PLANNING", "PREVIEW_READY", "NEEDS_INPUT", "FAILED", "APPLIED"
     ] = "CREATED"
-    source: CreateJobRequest
+    source: CreateFormulaJobRequest
     preview: FormulaPreview | None = None
     planning_context: FormulaPlanningContext | None = None
     approved_preview_id: UUID | None = None

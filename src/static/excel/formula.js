@@ -7,7 +7,7 @@
         var excel = options.excel;
         var instruction = "";
         var selection = null;
-        var job = null;
+        var formulaJob = null;
         var preview = null;
         var targetSnapshot = null;
         var applied = false;
@@ -41,25 +41,25 @@
                 selection = await excel.readFormulaContext(useWorkspace && options.getTarget ? await options.getTarget() : null);
                 var payload = Object.assign({}, selection, {
                     conversation_id: options.getConversationId(),
-                    job_id: api.newRequestId(),
+                    formula_job_id: api.newRequestId(),
                     instruction: instruction
                 });
-                job = await api.requestJson("/jobs", {
+                formulaJob = await api.requestJson("/formula-jobs", {
                     method: "POST",
                     headers: {"Content-Type": "application/json"},
                     body: JSON.stringify(payload)
                 });
-                job = await api.requestJson("/jobs/" + job.job_id + "/analyze", {
+                formulaJob = await api.requestJson("/formula-jobs/" + formulaJob.formula_job_id + "/analyze", {
                     method: "POST"
                 });
-                if (job.status === "NEEDS_INPUT") {
-                    options.complete(job.clarification || "작업에 필요한 정보를 알려주세요.");
+                if (formulaJob.status === "NEEDS_INPUT") {
+                    options.complete(formulaJob.clarification || "작업에 필요한 정보를 알려주세요.");
                     return;
                 }
-                if (job.status !== "PREVIEW_READY" || !job.preview) {
-                    throw new Error(job.error || "수식 계획을 만들지 못했습니다.");
+                if (formulaJob.status !== "PREVIEW_READY" || !formulaJob.preview) {
+                    throw new Error(formulaJob.error || "수식 계획을 만들지 못했습니다.");
                 }
-                preview = job.preview;
+                preview = formulaJob.preview;
                 await useTarget(await excel.prepareFormulaPreview(preview, selection));
             } catch (error) {
                 if (!targetSnapshot) preview = null;
@@ -84,7 +84,7 @@
 
         function selectSource() {
             if (options.isBusy() || applied) return;
-            selection = job = preview = targetSnapshot = null;
+            selection = formulaJob = preview = targetSnapshot = null;
             useWorkspace = false;
             ui.reset();
             return selectAndPlan();
@@ -95,7 +95,7 @@
             options.setBusy(true);
             try {
                 var approved = await api.requestJson(
-                    "/jobs/" + job.job_id + "/previews/" +
+                    "/formula-jobs/" + formulaJob.formula_job_id + "/previews/" +
                     preview.preview_id + "/approve",
                     {
                         method: "POST",
@@ -118,7 +118,7 @@
                 ui.setApplied(result);
                 if (options.onResult) await options.onResult(result, selection);
                 await api.requestJson(
-                    "/jobs/" + job.job_id + "/previews/" +
+                    "/formula-jobs/" + formulaJob.formula_job_id + "/previews/" +
                     preview.preview_id + "/complete",
                     {method: "POST"}
                 );
@@ -135,7 +135,7 @@
             dismiss: function () { window.clearTimeout(startTimer); ui.reset(); },
             openAndSelect: function (value) {
                 instruction = value;
-                selection = job = preview = targetSnapshot = null;
+                selection = formulaJob = preview = targetSnapshot = null;
                 applied = false;
                 writeAttempted = false;
                 useWorkspace = true;
@@ -147,7 +147,7 @@
             reset: function () {
                 window.clearTimeout(startTimer);
                 instruction = "";
-                selection = job = preview = targetSnapshot = null;
+                selection = formulaJob = preview = targetSnapshot = null;
                 applied = false;
                 writeAttempted = false;
                 useWorkspace = true;

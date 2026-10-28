@@ -96,7 +96,7 @@ async def route_request(runtime, messages, *, task_context: dict):
         decision.similarity.check_workspace(workspace)
 
     if decision.intent == "task_followup" and not (
-        workspace or task_context.get("active_job")
+        workspace or task_context.get("active_formula_job")
     ):
         raise ValueError("후속 질문을 연결할 현재 작업이 없습니다.")
 

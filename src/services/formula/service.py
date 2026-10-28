@@ -6,9 +6,9 @@ from uuid import UUID
 
 from services.errors import ConflictError, NotFoundError
 from services.formula.schemas import (
-    CreateJobRequest, FormulaAction, FormulaApprovalRequest, FormulaPlan,
+    CreateFormulaJobRequest, FormulaAction, FormulaApprovalRequest, FormulaPlan,
     FormulaConversationMessage, FormulaHistoryEntry, FormulaPlanningContext,
-    FormulaPreview, Job, range_bounds,
+    FormulaPreview, FormulaJob, range_bounds,
 )
 
 
@@ -22,7 +22,7 @@ SOURCE_DEPENDENT_REQUEST = re.compile(
 )
 
 
-def validate_source_reference(plan: FormulaPlan, source: CreateJobRequest) -> None:
+def validate_source_reference(plan: FormulaPlan, source: CreateFormulaJobRequest) -> None:
     if not plan.actions or not SOURCE_DEPENDENT_REQUEST.search(source.instruction):
         return
     first_cell = source.address.rsplit("!", 1)[-1].split(":", 1)[0].replace("$", "")
@@ -57,61 +57,61 @@ def parse_formula_plan(raw: str) -> FormulaPlan:
         return FormulaPlan.model_validate_json(repaired)
 
 
-def find_job(jobs: dict, job_id: UUID) -> Job:
-    job = jobs.get(str(job_id))
-    if not isinstance(job, Job):
+def find_formula_job(formula_jobs: dict, formula_job_id: UUID) -> FormulaJob:
+    formula_job = formula_jobs.get(str(formula_job_id))
+    if not isinstance(formula_job, FormulaJob):
         raise NotFoundError("수식 작업이 없습니다. 다시 시작하세요.")
-    return job
+    return formula_job
 
 
-def public_job(job: Job) -> dict:
+def public_formula_job(formula_job: FormulaJob) -> dict:
     return {
-        "job_id": str(job.source.job_id),
-        "conversation_id": str(job.source.conversation_id),
-        "task_type": job.task_type,
-        "status": job.status,
-        "sheet_name": job.source.sheet_name,
-        "address": job.source.address,
-        "instruction": job.source.instruction,
+        "formula_job_id": str(formula_job.source.formula_job_id),
+        "conversation_id": str(formula_job.source.conversation_id),
+        "task_type": formula_job.task_type,
+        "status": formula_job.status,
+        "sheet_name": formula_job.source.sheet_name,
+        "address": formula_job.source.address,
+        "instruction": formula_job.source.instruction,
         "preview": (
-            job.preview.model_dump(mode="json") if job.preview else None
+            formula_job.preview.model_dump(mode="json") if formula_job.preview else None
         ),
         "clarification": (
-            job.preview.plan.clarification if job.preview else None
+            formula_job.preview.plan.clarification if formula_job.preview else None
         ),
         "approved_preview_id": (
-            str(job.approved_preview_id) if job.approved_preview_id else None
+            str(formula_job.approved_preview_id) if formula_job.approved_preview_id else None
         ),
-        "error": job.error,
+        "error": formula_job.error,
     }
 
 
-def job_context(job: Job) -> dict:
-    public = public_job(job)
+def formula_job_context(formula_job: FormulaJob) -> dict:
+    public = public_formula_job(formula_job)
     return {
-        "job_id": public["job_id"],
-        "task_type": job.task_type,
-        "status": job.status,
+        "formula_job_id": public["formula_job_id"],
+        "task_type": formula_job.task_type,
+        "status": formula_job.status,
         "sheet_name": public["sheet_name"],
         "address": public["address"],
         "instruction": public["instruction"],
-        "analysis": job.preview.plan.summary if job.preview else job.error,
-        "plan": job.preview.plan.model_dump(mode="json") if job.preview else None,
+        "analysis": formula_job.preview.plan.summary if formula_job.preview else formula_job.error,
+        "plan": formula_job.preview.plan.model_dump(mode="json") if formula_job.preview else None,
         "analysis_truncated": False,
     }
 
 
-async def create_job(payload: CreateJobRequest, repository, jobs: dict) -> dict:
-    cid, key = str(payload.conversation_id), str(payload.job_id)
+async def create_formula_job(payload: CreateFormulaJobRequest, repository, formula_jobs: dict) -> dict:
+    cid, key = str(payload.conversation_id), str(payload.formula_job_id)
     async with repository.edit(cid) as conversation:
-        existing = jobs.get(key)
+        existing = formula_jobs.get(key)
         if existing is not None:
-            if not isinstance(existing, Job) or existing.source != payload:
+            if not isinstance(existing, FormulaJob) or existing.source != payload:
                 raise ConflictError("같은 작업 ID에 다른 수식 요청이 전달됐습니다.")
-            return public_job(existing)
-        if len(jobs) >= 100:
+            return public_formula_job(existing)
+        if len(formula_jobs) >= 100:
             raise ConflictError("개발용 작업 수 제한에 도달했습니다.")
-        previous = jobs.get(conversation.workflow.active_job_id)
+        previous = formula_jobs.get(conversation.workflow.active_formula_job_id)
         history = [
             FormulaHistoryEntry(
                 instruction=item.source.instruction,
@@ -120,9 +120,9 @@ async def create_job(payload: CreateJobRequest, repository, jobs: dict) -> dict:
                 status=item.status,
                 plan=item.preview.plan,
             )
-            for item in jobs.values()
+            for item in formula_jobs.values()
             if (
-                isinstance(item, Job)
+                isinstance(item, FormulaJob)
                 and item.preview is not None
                 and item.source.conversation_id == payload.conversation_id
                 and item.source.sheet_name == payload.sheet_name
@@ -136,49 +136,49 @@ async def create_job(payload: CreateJobRequest, repository, jobs: dict) -> dict:
             ])
         planning_context = FormulaPlanningContext(
             previous_instruction=(
-                previous.source.instruction if isinstance(previous, Job) else None
+                previous.source.instruction if isinstance(previous, FormulaJob) else None
             ),
             previous_sheet_name=(
-                previous.source.sheet_name if isinstance(previous, Job) else None
+                previous.source.sheet_name if isinstance(previous, FormulaJob) else None
             ),
             previous_address=(
-                previous.source.address if isinstance(previous, Job) else None
+                previous.source.address if isinstance(previous, FormulaJob) else None
             ),
             previous_status=(
-                previous.status if isinstance(previous, Job) else None
+                previous.status if isinstance(previous, FormulaJob) else None
             ),
             previous_plan=(
                 previous.preview.plan
-                if isinstance(previous, Job) and previous.preview else None
+                if isinstance(previous, FormulaJob) and previous.preview else None
             ),
             previous_plans=tuple(history),
             recent_conversation=tuple(recent_messages),
         )
-        job = Job(source=payload, planning_context=planning_context)
-        jobs[key] = job
-        conversation.workflow.active_job_id = key
+        formula_job = FormulaJob(source=payload, planning_context=planning_context)
+        formula_jobs[key] = formula_job
+        conversation.workflow.active_formula_job_id = key
         conversation.workflow.task_type = "formula"
         conversation.workflow.pending_intent = None
-        conversation.workflow.phase = "JOB_ATTACHED"
-        return public_job(job)
+        conversation.workflow.phase = "FORMULA_JOB_ATTACHED"
+        return public_formula_job(formula_job)
 
 
-async def plan_job(job_id: UUID, jobs: dict, runtime) -> dict:
-    job = find_job(jobs, job_id)
-    if job.status == "PLANNING":
+async def plan_formula_job(formula_job_id: UUID, formula_jobs: dict, runtime) -> dict:
+    formula_job = find_formula_job(formula_jobs, formula_job_id)
+    if formula_job.status == "PLANNING":
         raise ConflictError("이미 수식 계획을 만들고 있습니다.")
-    if job.status in {"PREVIEW_READY", "NEEDS_INPUT"}:
-        return public_job(job)
+    if formula_job.status in {"PREVIEW_READY", "NEEDS_INPUT"}:
+        return public_formula_job(formula_job)
 
-    job.status, job.error = "PLANNING", ""
+    formula_job.status, formula_job.error = "PLANNING", ""
     try:
-        source = job.source
+        source = formula_job.source
         response = await asyncio.wait_for(
             runtime.respond(runtime.formula_prompt, {
                 "instruction": source.instruction,
                 "context": (
-                    job.planning_context.model_dump(mode="json")
-                    if job.planning_context else None
+                    formula_job.planning_context.model_dump(mode="json")
+                    if formula_job.planning_context else None
                 ),
                 "selection": {
                     "worksheet_id": source.worksheet_id,
@@ -199,40 +199,40 @@ async def plan_job(job_id: UUID, jobs: dict, runtime) -> dict:
         )
         plan = parse_formula_plan(response.content.strip())
         validate_source_reference(plan, source)
-        job.preview = FormulaPreview(plan=plan)
-        job.approved_preview_id = None
-        job.status = "PREVIEW_READY" if plan.actions else "NEEDS_INPUT"
+        formula_job.preview = FormulaPreview(plan=plan)
+        formula_job.approved_preview_id = None
+        formula_job.status = "PREVIEW_READY" if plan.actions else "NEEDS_INPUT"
     except asyncio.CancelledError:
-        job.status = "FAILED"
-        job.error = "수식 계획 생성이 중단됐습니다. 다시 시도하세요."
+        formula_job.status = "FAILED"
+        formula_job.error = "수식 계획 생성이 중단됐습니다. 다시 시도하세요."
         raise
     except Exception:
-        logger.exception("수식 계획 생성 실패: job_id=%s", job_id)
-        job.status = "FAILED"
-        job.error = "안전하게 실행할 수식 계획을 만들지 못했습니다. 요청을 구체적으로 다시 작성하세요."
-    return public_job(job)
+        logger.exception("수식 계획 생성 실패: formula_job_id=%s", formula_job_id)
+        formula_job.status = "FAILED"
+        formula_job.error = "안전하게 실행할 수식 계획을 만들지 못했습니다. 요청을 구체적으로 다시 작성하세요."
+    return public_formula_job(formula_job)
 
 
 def approve_preview(
-    job_id: UUID,
+    formula_job_id: UUID,
     preview_id: UUID,
     payload: FormulaApprovalRequest | None,
-    jobs: dict,
+    formula_jobs: dict,
 ) -> FormulaPreview:
-    job = find_job(jobs, job_id)
+    formula_job = find_formula_job(formula_jobs, formula_job_id)
     if (
-        job.status != "PREVIEW_READY"
-        or job.preview is None
-        or job.preview.preview_id != preview_id
+        formula_job.status != "PREVIEW_READY"
+        or formula_job.preview is None
+        or formula_job.preview.preview_id != preview_id
     ):
         raise ConflictError("확인한 수식 계획이 현재 미리보기와 다릅니다.")
     if payload is not None:
         requested_ranges = payload.ranges()
-        if len(requested_ranges) != len(job.preview.plan.actions):
+        if len(requested_ranges) != len(formula_job.preview.plan.actions):
             raise ConflictError("결과 열 개수가 수식 계획과 다릅니다.")
         revised_actions = []
         for action, target_range in zip(
-            job.preview.plan.actions, requested_ranges, strict=True,
+            formula_job.preview.plan.actions, requested_ranges, strict=True,
         ):
             original = range_bounds(action.target_range)
             requested = range_bounds(target_range)
@@ -243,19 +243,19 @@ def approve_preview(
                 "target_range": target_range,
                 "anchor_cell": target_range.split(":", 1)[0],
             }))
-        job.preview = FormulaPreview(
-            preview_id=job.preview.preview_id,
-            plan=job.preview.plan.model_copy(update={
+        formula_job.preview = FormulaPreview(
+            preview_id=formula_job.preview.preview_id,
+            plan=formula_job.preview.plan.model_copy(update={
                 "actions": tuple(revised_actions),
             }),
         )
-    job.approved_preview_id = preview_id
-    return job.preview
+    formula_job.approved_preview_id = preview_id
+    return formula_job.preview
 
 
-def complete_job(job_id: UUID, preview_id: UUID, jobs: dict) -> dict:
-    job = find_job(jobs, job_id)
-    if job.approved_preview_id != preview_id:
+def complete_formula_job(formula_job_id: UUID, preview_id: UUID, formula_jobs: dict) -> dict:
+    formula_job = find_formula_job(formula_jobs, formula_job_id)
+    if formula_job.approved_preview_id != preview_id:
         raise ConflictError("승인된 수식 계획만 완료할 수 있습니다.")
-    job.status = "APPLIED"
-    return public_job(job)
+    formula_job.status = "APPLIED"
+    return public_formula_job(formula_job)

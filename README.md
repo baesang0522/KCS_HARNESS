@@ -32,7 +32,7 @@ Excel Add-in에서 모델규격·해외거래처 데이터를 작업 시트로 �
 
 - `api/router.py`: 라우터 등록을 한곳에서 관리합니다.
 - `api/operations.py`, `services/operations/`: 준비된 문자열 연산과 입력 검증. LLM 없이 실행합니다.
-- `api/jobs.py`, `services/formula/`: 현재 사용 중인 수식 생성·승인·완료 처리. `/jobs` API 주소는 유지합니다.
+- `api/formula_jobs.py`, `services/formula/`: 수식 전용 작업 생성·승인·완료 처리. `/formula-jobs` API와 `formula_job_id`를 사용합니다. 일반 정제 연산은 별도 job을 생성하지 않습니다.
 - `repositories/conversation_repository.py`: 대화와 작업 문맥을 API 메모리에 보관합니다.
 - `agents/request_router.py`, `services/chat.py`: 자연어 분류와 현재 작업 문맥 전달.
 - `runtime.py`: 모델 연결과 직접 호출. 일반 대화·후속 설명은 분류와 답변을 한 번에 생성합니다. 수식 계획은 필요한 Excel 표본을 받은 뒤 별도로 생성합니다.
