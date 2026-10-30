@@ -16,6 +16,7 @@ async def lifespan(app: FastAPI):
     # PoC 상태는 이 API 프로세스의 수명 동안만 유지한다.
     app.state.conversations = MemoryConversationRepository()
     app.state.formula_jobs = {}
+    app.state.operation_jobs = {}
 
     yield
 

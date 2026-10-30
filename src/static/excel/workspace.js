@@ -14,7 +14,24 @@
         var ui = window.createWorkspaceUI(), type = "model_normalization";
         var source = null, workspace = null, target = null, creationName = null, ready = false;
         var lastResults = [], finalized = null, lastFormula = null;
-        var operations = window.createOperations({api: options.api, isBusy: options.isBusy,
+        var jobs = window.createOperationJobs(
+            options.api,
+            options.getConversationId
+        );
+        var history = window.createWorkspaceHistory({
+            ui: ui,
+            jobs: jobs,
+            getWorkspace: function () { return workspace; },
+            isBusy: options.isBusy,
+            setBusy: options.setBusy,
+            save: save,
+            activate: activate,
+            selectResult: selectResult
+        });
+        var operations = window.createOperations({
+            api: options.api,
+            jobs: jobs,
+            isBusy: options.isBusy,
             setBusy: options.setBusy, status: ui.status, complete: options.complete, refresh: refresh,
             changed: function () { lastFormula = null; finalized = null; },
             result: async function (result) {
@@ -37,11 +54,13 @@
         });
         async function save() {
             if (!workspace) return;
-            await Excel.run(async function (context) {
-                context.workbook.settings.add("kcs.workspace.current", Object.assign({}, workspace, {
-                    target: target, last_result_column_ids: lastResults, finalized: finalized
-                })); await context.sync();
-            });
+
+            workspace.target = target;
+            workspace.target_column_ids = operations.targets();
+            workspace.last_result_column_ids = lastResults;
+            workspace.finalized = finalized;
+
+            await window.workspaceStore.save(workspace);
         }
         async function refresh() {
             if (!workspace) return false;
@@ -115,8 +134,19 @@
                 var next = await window.workspaceCopy.create(source, creationName, function (done, total) { ui.status("작업 시트 복사 · " + done + "/" + total + "행"); });
                 workspace = next; target = next.target; lastResults = []; finalized = null; lastFormula = null;
                 var defaultRole = type === "model_normalization" ? "model_spec" : "company_name";
-                display(workspace.columns.filter(function (c) { return c.role === defaultRole; }).map(function (c) { return String(c.column_id); }), true);
-                ui.status("작업 시트를 만들었습니다. 원본은 유지됩니다. 처리할 열과 기능을 선택하세요.");
+                display(workspace.columns.filter(function (c) {
+                    return c.role === defaultRole;
+                }).map(function (c) {
+                    return String(c.column_id);
+                }), true);
+                await save();
+                await history.refreshSheets();
+                await history.refreshJobs();
+
+                ui.status(
+                    "작업 시트를 만들었습니다. 원본은 유지됩니다. " +
+                    "처리할 열과 기능을 선택하세요."
+                );
             } catch (error) { ui.status(error.message); }
             finally { options.setBusy(false); }
         }
@@ -133,27 +163,165 @@
             } catch (error) { ui.status(error.message); }
             finally { options.setBusy(false); }
         }
+        async function activate(saved) {
+            if (!saved || !profiles[saved.task_type]) {
+                throw new Error("저장된 작업 시트를 찾을 수 없습니다.");
+            }
+
+            var previous = {
+                workspace: workspace,
+                target: target,
+                type: type,
+                lastResults: lastResults,
+                finalized: finalized,
+                lastFormula: lastFormula,
+                ids: operations.targets().slice()
+            };
+
+            try {
+                workspace = JSON.parse(JSON.stringify(saved));
+                target = null;
+                type = saved.task_type;
+                lastResults = (
+                    saved.last_result_column_ids || []
+                ).map(String);
+                finalized = saved.finalized || null;
+                lastFormula = null;
+
+                await refresh();
+
+                target = await window.workspaceSheet.readWorkspaceTarget(
+                    workspace,
+                    true
+                );
+
+                if (!target) {
+                    throw new Error(
+                        "저장된 작업 시트의 범위를 확인할 수 없습니다."
+                    );
+                }
+
+                if (
+                    saved.target &&
+                    saved.target.row_start >= target.row_start &&
+                    saved.target.row_count > 0 &&
+                    saved.target.row_start + saved.target.row_count <=
+                        target.row_start + target.row_count
+                ) {
+                    target.row_start = saved.target.row_start;
+                    target.row_count = saved.target.row_count;
+                }
+
+                ui.open(type);
+                display(saved.target_column_ids || lastResults, true);
+
+                await save();
+
+                source = null;
+                ready = false;
+                creationName = null;
+            } catch (error) {
+                workspace = previous.workspace;
+                target = previous.target;
+                type = previous.type;
+                lastResults = previous.lastResults;
+                finalized = previous.finalized;
+                lastFormula = previous.lastFormula;
+
+                if (workspace && target) {
+                    ui.open(type);
+                    display(previous.ids, true);
+                } else {
+                    operations.reset();
+                    ui.open(type);
+                    ui.setup();
+                }
+
+                throw error;
+            }
+        }
+
+        async function selectResult(job) {
+            if (
+                !workspace ||
+                job.status !== "APPLIED" ||
+                job.source.workspace_id !== workspace.workspace_id ||
+                job.source.worksheet_id !== workspace.worksheet_id ||
+                String(job.source.table_id) !== String(workspace.table_id)
+            ) {
+                throw new Error(
+                    "현재 작업 시트에서 완료된 실행이 아닙니다."
+                );
+            }
+
+            await refresh();
+
+            var ids = job.result_column_ids.map(String);
+
+            if (!ids.length || ids.some(function (id) {
+                return !workspace.columns.some(function (column) {
+                    return String(column.column_id) === id;
+                });
+            })) {
+                throw new Error(
+                    "이 실행의 결과 열이 삭제되었습니다. 다른 결과를 선택하세요."
+                );
+            }
+
+            // shortcut: 과거 행 이동 이력이 없어 현재 표 전체를 사용한다. 행 추적 도입 시 재검토.
+            var next = await window.workspaceSheet.readWorkspaceTarget(
+                workspace,
+                true
+            );
+
+            if (!next) {
+                throw new Error(
+                    "현재 작업 표의 범위를 확인할 수 없습니다."
+                );
+            }
+
+            var columns = ids.map(function (id) {
+                return next.columns.find(function (column) {
+                    return String(column.column_id) === id;
+                });
+            });
+
+            if (columns.some(function (column) { return !column; })) {
+                throw new Error(
+                    "선택 중 결과 열이 바뀌었습니다. 목록을 새로고침하세요."
+                );
+            }
+
+            next.columns = columns;
+            next.column_count = columns.length;
+            target = next;
+            finalized = null;
+            lastFormula = null;
+
+            display(ids, true);
+            await save();
+        }
+
         async function restore() {
             if (options.isBusy()) return;
             options.setBusy(true);
+
             try {
                 window.workspaceSheet.requireExcel("1.9");
-                var saved = await Excel.run(async function (context) {
-                    var setting = context.workbook.settings.getItemOrNullObject("kcs.workspace.current");
-                    setting.load("value"); await context.sync(); return setting.isNullObject ? null : setting.value;
-                });
-                if (!saved || !profiles[saved.task_type]) throw new Error("이 통합문서에 저장된 작업이 없습니다.");
-                workspace = saved; target = null; type = saved.task_type; finalized = saved.finalized || null;
-                lastResults = (saved.last_result_column_ids || []).map(String);
-                await refresh();
-                target = await window.workspaceSheet.readWorkspaceTarget(workspace, true);
-                if (saved.target && saved.target.row_start >= target.row_start && saved.target.row_count > 0 &&
-                    saved.target.row_start + saved.target.row_count <= target.row_start + target.row_count) {
-                    target.row_start = saved.target.row_start; target.row_count = saved.target.row_count;
-                }
-                ui.open(type); display(lastResults, true); ui.status("저장된 작업 시트를 불러왔습니다. 현재 값으로 이어서 작업합니다.");
-            } catch (error) { workspace = target = null; operations.reset(); ui.setup(); ui.status(error.message); }
-            finally { options.setBusy(false); }
+
+                await activate(await window.workspaceStore.current());
+                await history.refreshSheets();
+                await history.refreshJobs();
+
+                ui.status(
+                    "저장된 작업 시트를 불러왔습니다. " +
+                    "현재 값으로 이어서 작업합니다."
+                );
+            } catch (error) {
+                ui.status(error.message);
+            } finally {
+                options.setBusy(false);
+            }
         }
         function newSource() {
             similarity.reset();
@@ -162,17 +330,74 @@
             operations.reset(); ui.setup();
         }
         async function open(nextType) {
-            type = nextType || type; options.enterConversation(); ui.open(type);
-            if (!workspace || workspace.task_type !== type) { newSource(); ui.status("머리글을 포함한 원본 범위를 선택하고 가져오세요."); return; }
-            var wasBusy = options.isBusy(); options.setBusy(true);
-            try { await refresh(); display(operations.targets()); }
-            catch (error) { ui.status(error.message); }
-            finally { options.setBusy(wasBusy); }
+            var wasBusy = options.isBusy();
+            options.enterConversation();
+            options.setBusy(true);
+
+            try {
+                await save();
+
+                type = nextType || type;
+                ui.open(type);
+
+                if (!workspace || workspace.task_type !== type) {
+                    newSource();
+                    ui.status(
+                        "원본을 가져오거나 저장된 작업 시트를 선택하세요."
+                    );
+                } else {
+                    await refresh();
+                    display(operations.targets());
+                }
+
+                await history.refreshSheets();
+                await history.refreshJobs();
+            } catch (error) {
+                ui.status(error.message);
+            } finally {
+                options.setBusy(wasBusy);
+            }
         }
-        ui.bind({select: select, start: start, restore: restore,
-            target: function () { chooseTarget(false); }, return: function () { chooseTarget(true); },
-            new: function () { if (options.isBusy()) return; newSource(); ui.status("새 원본을 선택하세요. 기존 작업 시트는 유지됩니다."); },
-            type: function (nextType) { type = nextType; newSource(); ui.status("선택한 업무의 필수 열을 지정하세요."); }
+        ui.bind({
+            select: select,
+            start: start,
+            restore: restore,
+
+            target: function () {
+                chooseTarget(false);
+            },
+            return: function () {
+                chooseTarget(true);
+            },
+
+            switch: history.switchWorkspace,
+            "resume-job": history.resumeResult,
+            "reload-history": history.reload,
+
+            new: async function () {
+                if (options.isBusy()) return;
+                options.setBusy(true);
+
+                try {
+                    await save();
+                    newSource();
+
+                    await history.refreshSheets();
+                    await history.refreshJobs();
+
+                    ui.status(
+                        "새 원본을 선택하세요. 기존 작업 시트는 유지됩니다."
+                    );
+                } catch (error) {
+                    ui.status(error.message);
+                } finally {
+                    options.setBusy(false);
+                }
+            },
+
+            type: function (nextType) {
+                if (!options.isBusy()) return open(nextType);
+            }
         });
         return {
             open: open,

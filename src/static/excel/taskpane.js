@@ -356,8 +356,12 @@
     });
 
     workspace = window.createWorkspaceController({
-        api: api, enterConversation: enterConversation, complete: completeTask,
-        isBusy: function () { return sending; }, setBusy: setBusy
+        api: api,
+        enterConversation: enterConversation,
+        complete: completeTask,
+        isBusy: function () { return sending; },
+        setBusy: setBusy,
+        getConversationId: function () { return conversationId; }
     });
     formula = window.createFormulaController({
         ui: window.createFormulaUI({
