@@ -4,7 +4,21 @@
         var ui = window.createOperationsUI(), sheet = window.operationsSheet;
         var workspace = null, target = null, preview = null, processing = false, cancelled = false, abort = null;
         var finalSnapshot = null;
-        function invalidate() { preview = finalSnapshot = null; ui.clear(); }
+        function invalidate(keepJob) {
+            var discarded = preview;
+
+            preview = finalSnapshot = null;
+            ui.clear();
+
+            if (discarded && keepJob !== true) {
+                options.jobs.status(
+                    discarded.job,
+                    "CANCELLED"
+                ).catch(function (error) {
+                    console.warn("정제 미리보기 취소 기록 실패", error);
+                });
+            }
+        }
         function complete(text) { invalidate(); options.complete(text); }
         async function sampleRows() {
             if (!workspace || !target) return [];
@@ -30,11 +44,20 @@
         async function build() {
             if (options.isBusy() || !target) return;
             options.setBusy(true);
+            var job = null;
             try {
                 if (await options.refresh()) { complete("삭제된 대상 열을 제외했습니다. 작업 화면에서 다음 처리할 열을 선택하세요."); return; }
                 var operation = ui.operation(); invalidate(); processing = true; cancelled = false;
                 if (!operation) { complete("선택한 전처리 규칙이 없어 변경 없이 작업을 마쳤습니다."); return; }
-                abort = new AbortController(); options.setBusy(true);
+                abort = new AbortController();
+                options.setBusy(true);
+
+                job = await options.jobs.create(
+                    workspace,
+                    target,
+                    operation
+                );
+                check();
                 var ids = operation.column_ids.concat(operation.kind === "group" ? [operation.value_column_id] : []);
                 var snapshot = await sheet.read(workspace, target, ids, progress, check);
                 var values = [], changed = 0, headers = [];
@@ -43,10 +66,11 @@
                 for (var offset = 0; offset < snapshot.rows.length; offset += size) {
                     check();
                     var rows = snapshot.rows.slice(offset, offset + size).map(function (row) { return {excel_row: row.excel_row, values: row.values}; });
-                    var result = await options.api.requestJson("/operations/preview", {
-                        method: "POST", headers: {"Content-Type": "application/json"}, signal: abort.signal,
-                        body: JSON.stringify({operation: operation, rows: rows})
-                    });
+                    var result = await options.jobs.preview(
+                        job,
+                        rows,
+                        abort.signal
+                    );
                     check();
                     if (!Array.isArray(result.rows) || result.rows.length !== rows.length || !result.headers.length) throw new Error("결과 행 수가 요청과 다릅니다.");
                     result.rows.forEach(function (row, i) {
@@ -60,22 +84,49 @@
                 }
                 values.forEach(function (row) { while (row.length < headers.length) row.push(""); });
                 if (!changed && operation.kind !== "group") {
+                    await options.jobs.status(job, "NO_CHANGE");
                     complete(
                         snapshot.rows.length.toLocaleString() +
                         "행을 확인했습니다. 적용 조건에 따른 변경이 없어 작업을 마쳤습니다."
                     );
                     return;
                 }
-                preview = {operation: operation, snapshot: snapshot, values: values, names: headers, changed: changed};
+                await options.jobs.status(job, "PREVIEW_READY");
+                check();
+                preview = {
+                    job: job,
+                    operation: operation,
+                    snapshot: snapshot,
+                    values: values,
+                    names: headers,
+                    changed: changed
+                };
                 ui.preview(preview); options.status("변경 내용과 결과 위치를 확인하세요. 원본 열은 유지합니다.");
             } catch (error) {
+                if (job) {
+                    try {
+                        await options.jobs.status(
+                            job,
+                            cancelled ? "CANCELLED" : "FAILED"
+                        );
+                    } catch (recordError) {
+                        error.message +=
+                            " · 실행 상태 기록 실패: " +
+                            recordError.message;
+                    }
+                }
+
                 console.error("[operations.build]", error);
+
                 complete(
                     "작업 미리보기 오류\n" +
-                    (error.stack || error.message || String(error))
+                    (error.message || String(error))
                 );
+            } finally {
+                processing = false;
+                abort = null;
+                options.setBusy(false);
             }
-            finally { processing = false; abort = null; options.setBusy(false); }
         }
         function resultDescription(data, index) {
             var operation = data.operation;
@@ -129,25 +180,84 @@
         }
         async function apply() {
             if (options.isBusy() || !preview) return;
+
             var data = preview;
+            var result = null;
+            var recorded = false;
+            var applyRequested = false;
+            var writeStarted = false;
+
             try {
-                var output = ui.output(); options.setBusy(true);
+                var output = ui.output();
+                options.setBusy(true);
+
                 var names = data.operation.kind === "group"
                     ? [output.name, output.name + " 변경여부"]
                     : data.names.map(function (_, i) {
                         return output.name +
                             (data.names.length > 1 ? " " + (i + 1) : "");
                     });
-                // 쓰기 시작 후 같은 미리보기를 재사용하지 않는다.
-                invalidate();
-                var result = await sheet.write(data.snapshot, data.values, names, output, progress);
-                result.columns.forEach(function (column, index) {
-                    column.description = resultDescription(data, index);
-                });
-                await options.result(result);
-                complete(result.row_count.toLocaleString() + "행의 결과를 작성했습니다. 새 결과 열에서 이어서 작업할 수 있습니다.");
-            } catch (error) { complete(error.message); }
-            finally { options.setBusy(false); }
+
+                invalidate(true);
+                applyRequested = true;
+                await options.jobs.beginApply(data.job, output);
+
+                writeStarted = true;
+                result = await sheet.write(
+                    data.snapshot, data.values, names, output, progress
+                );
+
+                var saveError = null;
+                try {
+                    result.columns.forEach(function (column, index) {
+                        column.description = resultDescription(data, index);
+                    });
+                    await options.result(result, data.job);
+                } catch (error) {
+                    saveError = error;
+                }
+
+                await options.jobs.status(
+                    data.job,
+                    "APPLIED",
+                    result.columns.map(function (column) {
+                        return String(column.column_id);
+                    })
+                );
+                recorded = true;
+
+                if (saveError) throw saveError;
+
+                complete(
+                    result.row_count.toLocaleString() +
+                    "행의 결과를 작성하고 실행 기록을 저장했습니다."
+                );
+            } catch (error) {
+                if (!applyRequested) {
+                    options.status(error.message);
+                    return;
+                }
+
+                var recordMessage = "";
+                if (!recorded) {
+                    try {
+                        await options.jobs.status(data.job, "UNKNOWN");
+                    } catch (recordError) {
+                        console.warn("정제 적용 상태 기록 실패", recordError);
+                        recordMessage = " · 서버 실행 상태를 확인하지 못했습니다.";
+                    }
+                }
+
+                var message = result
+                    ? "결과는 작성됐습니다. 다시 적용하지 마세요. "
+                    : writeStarted
+                        ? "결과가 일부 작성됐을 수 있습니다. 시트를 확인하세요. "
+                        : "적용 시작을 확인하지 못해 Excel 쓰기를 진행하지 않았습니다. ";
+
+                complete(message + error.message + recordMessage);
+            } finally {
+                options.setBusy(false);
+            }
         }
         async function finalize() {
             if (options.isBusy() || !target) return;
