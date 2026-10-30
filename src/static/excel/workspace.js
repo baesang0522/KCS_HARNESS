@@ -18,16 +18,6 @@
             options.api,
             options.getConversationId
         );
-        var history = window.createWorkspaceHistory({
-            ui: ui,
-            jobs: jobs,
-            getWorkspace: function () { return workspace; },
-            isBusy: options.isBusy,
-            setBusy: options.setBusy,
-            save: save,
-            activate: activate,
-            selectResult: selectResult
-        });
         var operations = window.createOperations({
             api: options.api,
             jobs: jobs,
@@ -140,8 +130,6 @@
                     return String(c.column_id);
                 }), true);
                 await save();
-                await history.refreshSheets();
-                await history.refreshJobs();
 
                 ui.status(
                     "작업 시트를 만들었습니다. 원본은 유지됩니다. " +
@@ -241,67 +229,6 @@
             }
         }
 
-        async function selectResult(job) {
-            if (
-                !workspace ||
-                job.status !== "APPLIED" ||
-                job.source.workspace_id !== workspace.workspace_id ||
-                job.source.worksheet_id !== workspace.worksheet_id ||
-                String(job.source.table_id) !== String(workspace.table_id)
-            ) {
-                throw new Error(
-                    "현재 작업 시트에서 완료된 실행이 아닙니다."
-                );
-            }
-
-            await refresh();
-
-            var ids = job.result_column_ids.map(String);
-
-            if (!ids.length || ids.some(function (id) {
-                return !workspace.columns.some(function (column) {
-                    return String(column.column_id) === id;
-                });
-            })) {
-                throw new Error(
-                    "이 실행의 결과 열이 삭제되었습니다. 다른 결과를 선택하세요."
-                );
-            }
-
-            // shortcut: 과거 행 이동 이력이 없어 현재 표 전체를 사용한다. 행 추적 도입 시 재검토.
-            var next = await window.workspaceSheet.readWorkspaceTarget(
-                workspace,
-                true
-            );
-
-            if (!next) {
-                throw new Error(
-                    "현재 작업 표의 범위를 확인할 수 없습니다."
-                );
-            }
-
-            var columns = ids.map(function (id) {
-                return next.columns.find(function (column) {
-                    return String(column.column_id) === id;
-                });
-            });
-
-            if (columns.some(function (column) { return !column; })) {
-                throw new Error(
-                    "선택 중 결과 열이 바뀌었습니다. 목록을 새로고침하세요."
-                );
-            }
-
-            next.columns = columns;
-            next.column_count = columns.length;
-            target = next;
-            finalized = null;
-            lastFormula = null;
-
-            display(ids, true);
-            await save();
-        }
-
         async function restore() {
             if (options.isBusy()) return;
             options.setBusy(true);
@@ -310,8 +237,6 @@
                 window.workspaceSheet.requireExcel("1.9");
 
                 await activate(await window.workspaceStore.current());
-                await history.refreshSheets();
-                await history.refreshJobs();
 
                 ui.status(
                     "저장된 작업 시트를 불러왔습니다. " +
@@ -343,15 +268,13 @@
                 if (!workspace || workspace.task_type !== type) {
                     newSource();
                     ui.status(
-                        "원본을 가져오거나 저장된 작업 시트를 선택하세요."
+                        "원본 범위를 가져오거나 저장된 작업 이어가기를 누르세요."
                     );
                 } else {
                     await refresh();
                     display(operations.targets());
                 }
 
-                await history.refreshSheets();
-                await history.refreshJobs();
             } catch (error) {
                 ui.status(error.message);
             } finally {
@@ -370,10 +293,6 @@
                 chooseTarget(true);
             },
 
-            switch: history.switchWorkspace,
-            "resume-job": history.resumeResult,
-            "reload-history": history.reload,
-
             new: async function () {
                 if (options.isBusy()) return;
                 options.setBusy(true);
@@ -382,8 +301,6 @@
                     await save();
                     newSource();
 
-                    await history.refreshSheets();
-                    await history.refreshJobs();
 
                     ui.status(
                         "새 원본을 선택하세요. 기존 작업 시트는 유지됩니다."

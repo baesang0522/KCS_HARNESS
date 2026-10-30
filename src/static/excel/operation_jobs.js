@@ -34,15 +34,6 @@
                 });
             },
 
-            list: function (workspace) {
-                return api.requestJson(
-                    "/operation-jobs?conversation_id=" +
-                    encodeURIComponent(getConversationId()) +
-                    "&workspace_id=" +
-                    encodeURIComponent(workspace.workspace_id)
-                );
-            },
-
             preview: function (job, rows, signal) {
                 return post(
                     path(job, "preview"),
