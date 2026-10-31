@@ -179,3 +179,75 @@ def update_job(job: OperationJob, update: JobUpdate) -> OperationJob:
     job.status = update.status
     job.result_column_ids = list(update.result_column_ids)
     return job
+
+
+def operation_history_context(
+    jobs: dict, *, conversation_id: str, workspace: dict | None
+) -> dict:
+    if not workspace:
+        return {"records": [], "omitted_count": 0}
+
+    columns = {
+        str(column["column_id"]): column
+        for column in workspace["columns"]
+    }
+    matched = [
+        job for job in jobs.values()
+        if str(job.source.conversation_id) == conversation_id
+        and str(job.source.workspace_id) == str(workspace["workspace_id"])
+        and job.source.worksheet_id == workspace["worksheet_id"]
+        and str(job.source.table_id) == str(workspace["table_id"])
+        and job.source.task_type == workspace["task_type"]
+    ]
+    matched.sort(key=lambda job: job.created_at, reverse=True)
+
+    def column_info(column_id: str) -> dict:
+        column = columns.get(str(column_id))
+        return {
+            "column_id": str(column_id),
+            "current_header": column["header"] if column else None,
+            "exists": column is not None,
+        }
+
+    records = []
+    # shortcut: 현재 작업공간의 최근 8건만 제공한다. 오래된 실행·다른 시트 탐색은 별도 검색 단계에서 확장한다.
+    for job in matched[:8]:
+        operation = job.source.operation
+        settings = operation.model_dump_json(exclude_defaults=True)
+        results = []
+
+        for index, column_id in enumerate(job.result_column_ids):
+            result = column_info(column_id)
+            result["purpose"] = (
+                "change_status"
+                if operation.kind == "group" and index == 1
+                else "data"
+            )
+            result["can_continue"] = (
+                job.status == "APPLIED" and result["exists"]
+            )
+            results.append(result)
+
+        records.append({
+            "job_id": str(job.source.operation_job_id),
+            "created_at": job.created_at.isoformat(),
+            "status": job.status,
+            "kind": operation.kind,
+            "input_columns": [
+                column_info(column_id)
+                for column_id in operation.input_column_ids
+            ],
+            "settings_excerpt": settings[:1600],
+            "settings_truncated": len(settings) > 1600,
+            "output_name": job.output.name if job.output else None,
+            "result_columns": results,
+            "executed_range": {
+                "first_excel_row": job.source.row_start + 1,
+                "row_count": job.source.row_count,
+            },
+        })
+
+    return {
+        "records": records,
+        "omitted_count": max(0, len(matched) - len(records)),
+    }

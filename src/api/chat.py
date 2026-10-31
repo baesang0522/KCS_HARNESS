@@ -63,7 +63,7 @@ async def chat(payload: ChatRequest, request: Request):
         "endpoint": "/chat",
     }
     workspace = (
-        payload.workspace.model_dump()
+        payload.workspace.model_dump(mode="json")
         if payload.workspace else None
     )
     started = time.perf_counter()
@@ -85,6 +85,7 @@ async def chat(payload: ChatRequest, request: Request):
             runtime=request.app.state.runtime,
             repository=request.app.state.conversations,
             formula_jobs=request.app.state.formula_jobs,
+            operation_jobs=request.app.state.operation_jobs,
             conversation_id=ids["conversation_id"],
             request_id=ids["request_id"],
             message=payload.message,

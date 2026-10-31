@@ -325,7 +325,8 @@
                 if (!workspace) return null;
                 await refresh();
                 var sampleRows = await operations.sampleRows();
-                return {task_type: workspace.task_type, worksheet_id: workspace.worksheet_id,
+                return {workspace_id: workspace.workspace_id,
+                    task_type: workspace.task_type, worksheet_id: workspace.worksheet_id,
                     table_id: String(workspace.table_id), sheet_name: workspace.sheet_name, row_count: target.row_count,
                     columns: workspace.columns.map(function (c) { return {column_id: String(c.column_id), header: c.header,
                         role: c.role, description: c.description || ""}; }),

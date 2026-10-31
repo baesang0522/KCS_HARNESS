@@ -1,4 +1,5 @@
 """화면과 자연어 요청이 공유하는 연산 계약."""
+from uuid import UUID
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -163,6 +164,7 @@ class SampleRow(StrictModel):
 
 
 class WorkspaceContext(StrictModel):
+    workspace_id: UUID
     worksheet_id: str = Field(min_length=1, max_length=256)
     table_id: str = Field(min_length=1, max_length=256)
     task_type: TaskType

@@ -6,6 +6,7 @@ from agents.request_router import route_request
 from repositories.conversation_repository import StoredTurn
 from services.errors import ConflictError, ModelProcessingError
 from services.formula.service import formula_job_context
+from services.operations.jobs import operation_history_context
 
 logger = logging.getLogger(__name__)
 
@@ -19,19 +20,35 @@ def workflow_snapshot(state, formula_jobs: dict) -> dict:
             "formula_job_status": formula_job.status if formula_job else None}
 
 
-def build_task_context(state, formula_jobs: dict, *,
+def build_task_context(state, formula_jobs: dict, *, operation_jobs: dict,
                        conversation_id: str, workspace=None) -> dict:
     formula_job = formula_jobs.get(state.active_formula_job_id)
-    if formula_job and str(formula_job.source.conversation_id) != conversation_id:
+
+    if (
+        formula_job
+        and str(formula_job.source.conversation_id) != conversation_id
+    ):
         raise ValueError("현재 대화와 작업의 연결이 일치하지 않습니다.")
 
-    return {"pending_intent": state.pending_intent,
-            "task_type": workspace["task_type"] if workspace else state.task_type,
-            "phase": state.phase, "workspace": workspace,
-            "active_formula_job": formula_job_context(formula_job) if formula_job else None}
+    return {
+        "pending_intent": state.pending_intent,
+        "task_type": (
+            workspace["task_type"] if workspace else state.task_type
+        ),
+        "phase": state.phase,
+        "workspace": workspace,
+        "active_formula_job": (
+            formula_job_context(formula_job) if formula_job else None
+        ),
+        "operation_history": operation_history_context(
+            operation_jobs,
+            conversation_id=conversation_id,
+            workspace=workspace,
+        ),
+    }
 
 
-async def process_chat(*, runtime, repository, formula_jobs: dict, conversation_id: str,
+async def process_chat(*, runtime, repository, formula_jobs: dict, operation_jobs: dict, conversation_id: str,
                        request_id: str, message: str, workspace=None) -> dict:
     async with repository.edit(conversation_id) as conversation:
         for turn in conversation.turns:
@@ -53,7 +70,8 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, conversation_
         state = conversation.workflow
         action, reasoning = None, []
         try:
-            context = build_task_context(state, formula_jobs, conversation_id=conversation_id, workspace=workspace)
+            context = build_task_context(state, formula_jobs, operation_jobs=operation_jobs,
+                                         conversation_id=conversation_id, workspace=workspace)
             decision, reasoning = await route_request(runtime, messages, task_context=context)
             answer = decision.answer
             if decision.intent == "start_task":
