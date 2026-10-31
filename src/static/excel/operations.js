@@ -39,6 +39,66 @@
             } catch (error) { options.status(error.message); }
             finally { options.setBusy(false); }
         }
+        async function recommendExtraction() {
+            if (options.isBusy() || !target) return;
+            options.setBusy(true);
+            try {
+                if (await options.refresh()) throw new Error("대상 열이 바뀌었습니다. 다시 선택하세요.");
+
+                var ids = ui.targets();
+                if (ids.length !== 1) throw new Error("추천할 열 하나를 선택하세요.");
+
+                var snapshot = await sheet.read(
+                    workspace, target, ids, progress, function () {}
+                );
+                var rows = snapshot.rows;
+                if (!rows.length) throw new Error("추천할 데이터가 없습니다.");
+
+                var summary = {sample_count: 0, suggestions: []};
+
+                for (var offset = 0; offset < rows.length;) {
+                    var values = [], characters = 0;
+                    while (offset < rows.length && values.length < 10000) {
+                        var value = rows[offset].values[0];
+                        if (value.length > 32767) throw new Error("셀 문자열이 너무 깁니다.");
+                        if (characters + value.length > 16000000) break;
+
+                        values.push(value);
+                        characters += value.length;
+                        offset += 1;
+                    }
+
+                    var data = await options.api.requestJson("/operations/extraction-suggestions", {
+                        method: "POST",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({values: values})
+                    });
+
+                    summary.sample_count += data.sample_count;
+                    data.suggestions.forEach(function (item) {
+                        var total = summary.suggestions.find(function (entry) {
+                            return entry.mode === item.mode;
+                        });
+                        if (!total) {
+                            summary.suggestions.push(item);
+                            return;
+                        }
+                        total.matched_rows += item.matched_rows;
+                        total.multiple_rows += item.multiple_rows;
+                        total.examples = total.examples.concat(item.examples).slice(0, 2);
+                    });
+
+                    progress("패턴 검사", offset, rows.length);
+                }
+
+                ui.extractionSuggestions(summary);
+                options.status("전체 대상의 추천을 확인하고 추출 방식을 선택하세요. 적용 전 ‘변경 내용 확인’에서 결과를 검토합니다.");
+            } catch (error) {
+                options.status(error.message);
+            } finally {
+                options.setBusy(false);
+            }
+        }
         function check() { if (cancelled) throw new Error("처리를 취소했습니다. 시트는 변경하지 않았습니다."); }
         function progress(phase, done, total) { options.status(phase + " · " + done.toLocaleString() + "/" + total.toLocaleString() + "행. 완료 전에는 편집·정렬을 기다려 주세요."); }
         async function build() {
@@ -83,7 +143,7 @@
                     progress("처리", values.length, snapshot.rows.length);
                 }
                 values.forEach(function (row) { while (row.length < headers.length) row.push(""); });
-                if (!changed && operation.kind !== "group") {
+                if (!changed && !["group", "extract"].includes(operation.kind)) {
                     await options.jobs.status(job, "NO_CHANGE");
                     complete(
                         snapshot.rows.length.toLocaleString() +
@@ -143,6 +203,9 @@
                 action = operation.rules.map(function (rule) {
                     return labels[rule.operation] + (rule.operation === "remove_words" ? " " + JSON.stringify(rule.words) : "");
                 }).join(" → ");
+            } else if (operation.kind === "extract") {
+                action = operation.extraction_mode === "labelled" ? "MODEL·CODE·GRADE 뒤의 값 추출" : "문자·숫자 모델명 후보 추출";
+                if (index === 1) action += " / 추출상태: 단일 후보·미검출·복수 후보";
             } else if (operation.kind === "split") {
                 action = (operation.delimiter === null ? "공백" : JSON.stringify(operation.delimiter)) +
                     " 기준 분리 / " + (operation.part === "last" ? "마지막 단어" : (index + 1) + "번째 조각");
@@ -191,8 +254,8 @@
                 var output = ui.output();
                 options.setBusy(true);
 
-                var names = data.operation.kind === "group"
-                    ? [output.name, output.name + " 변경여부"]
+                var names = ["group", "extract"].includes(data.operation.kind)
+                    ? [output.name, output.name + (data.operation.kind === "group" ? " 변경여부" : " 추출상태")]
                     : data.names.map(function (_, i) {
                         return output.name +
                             (data.names.length > 1 ? " " + (i + 1) : "");
@@ -285,6 +348,7 @@
         }
         ui.bind({preview: build, apply: apply, finalize: finalize, status: options.status,
             "load-values": loadValues,
+            recommend: recommendExtraction,
             change: function () { invalidate(); options.changed(); },
             "confirm-final": confirmFinal, "cancel-final": invalidate, edit: invalidate,
             cancel: function () { cancelled = true; if (abort) abort.abort(); }});
@@ -292,6 +356,7 @@
             reconcile: function (work, next, fallback) { workspace = work; target = next; invalidate(); return ui.reconcile(work.columns, fallback, work.task_type); },
             show: function (work, next, preferred, resetMode) { workspace = work; target = next; invalidate(); ui.show(work.columns, preferred || [], work.task_type, resetMode); },
             configure: function (operation) { invalidate(); ui.configure(operation); },
+            recommendExtraction: recommendExtraction,
             sampleRows: sampleRows,
             targets: ui.targets,
             invalidate: invalidate,

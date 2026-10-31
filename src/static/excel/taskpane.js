@@ -74,6 +74,57 @@
     var conversationId = null;
     var pendingRequest = null;
     var storageKey = 'kcs-chat-session-v1';
+    var activeRequest = null;
+
+    function beginRequest() {
+        var run = {
+            controller: new AbortController(), cancelled: false,
+            request: null, stopping: Promise.resolve("")
+        };
+        activeRequest = run;
+        return run;
+    }
+
+    function endRequest(run) {
+        if (activeRequest === run) activeRequest = null;
+    }
+
+    async function reportStop(run) {
+        notice.textContent = await run.stopping;
+    }
+
+    function checkChat(run) {
+        if (run.cancelled) throw new DOMException("요청을 중지했습니다.", "AbortError");
+    }
+
+    async function cancelServerRequest(request) {
+        if (!request) return "";
+        var controller = new AbortController();
+        var timer = window.setTimeout(function () { controller.abort(); }, 5000);
+        try {
+            await api.requestJson(
+                '/conversations/' + encodeURIComponent(request.conversation_id) +
+                '/requests/' + encodeURIComponent(request.request_id) + '/cancel',
+                {method: 'POST', signal: controller.signal}
+            );
+            return "";
+        } catch (error) {
+            return "화면의 요청은 중지했지만 서버 중지는 확인하지 못했습니다. " + error.message;
+        } finally {
+            window.clearTimeout(timer);
+        }
+    }
+
+    function stopMessage() {
+        var run = activeRequest;
+        if (!run || run.cancelled) return;
+        run.cancelled = true;
+        run.controller.abort();
+        run.stopping = cancelServerRequest(run.request);
+        notice.textContent = '요청을 중지하고 있습니다…';
+        setBusy(true);
+    }
+
 
     function saveSession() {
         try {
@@ -88,7 +139,13 @@
 
     function setBusy(value) {
         sending = value;
-        document.querySelector('.send').disabled = value;
+        var button = document.querySelector('.send');
+        var stoppable = value && activeRequest;
+        button.disabled = value && (!stoppable || activeRequest.cancelled);
+        button.setAttribute('aria-label', stoppable ? '요청 중지' : '요청 보내기');
+        button.title = stoppable ? '요청 중지' : '요청 보내기';
+        button.querySelector('path').setAttribute('d', stoppable
+            ? 'M7 7h10v10H7Z' : 'm6 12 6-6 6 6M12 6v13');
         document.getElementById('new-chat').disabled = value;
         document.getElementById('open-workspace').disabled = value;
         document.querySelectorAll('[data-close-task]').forEach(function (button) { button.disabled = value; });
@@ -216,6 +273,7 @@
             saveSession();
         }
 
+        var run = beginRequest();
         setBusy(true);
         enterConversation();
         closeTaskCards();
@@ -228,21 +286,29 @@
                 await createConversation();
             }
 
+            checkChat(run);
             if (!pendingRequest) {
-                pendingRequest = {
+                run.request = {
                     conversation_id: conversationId,
-                    request_id: api.newRequestId(),
-                    message: value,
-                    workspace: await workspace.context()
+                    request_id: api.newRequestId()
                 };
+                var context = await workspace.context();
+                checkChat(run);
+                pendingRequest = Object.assign({}, run.request, {
+                    message: value, workspace: context
+                });
                 saveSession();
+            } else {
+                run.request = pendingRequest;
             }
 
             var reply = await api.requestJson('/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(pendingRequest)
+                body: JSON.stringify(pendingRequest),
+                signal: run.controller.signal
             });
+            checkChat(run);
 
             if (reply.ui_action && reply.ui_action.type === "analyze_data") {
                 notice.textContent = "전체 데이터를 읽고 있습니다…";
@@ -250,9 +316,11 @@
                     reply.ui_action.column_ids,
                     pendingRequest.workspace,
                     function (label, done, total) {
-                        notice.textContent = label + " · " + done + "/" + total + "행";
-                    }
+                        if (!run.cancelled) notice.textContent = label + " · " + done + "/" + total + "행";
+                    },
+                    function () { checkChat(run); }
                 );
+                checkChat(run);
                 notice.textContent = "전체 원문과 열 설명을 검토하고 있습니다. 데이터가 많으면 시간이 걸립니다.";
                 reply = await api.requestJson('/chat/recommendation', {
                     method: 'POST',
@@ -260,10 +328,15 @@
                     body: JSON.stringify(Object.assign({}, data, {
                         conversation_id: pendingRequest.conversation_id,
                         request_id: pendingRequest.request_id
-                    }))
+                    })),
+                    signal: run.controller.signal
                 });
+                checkChat(run);
             }
 
+            checkChat(run);
+            activeRequest = null;
+            setBusy(true);
             pendingRequest = null;
             saveSession();
             message.value = '';
@@ -274,6 +347,10 @@
 
             try {
                 await handleUIAction(reply.ui_action, value);
+                if (reply.ui_action && reply.ui_action.type === "configure_operation" && reply.ui_action.operation.kind === "extract") {
+                    setBusy(false);
+                    await workspace.recommendExtraction();
+                }
             } catch (uiError) {
                 // 서버에서 성공한 요청을 다시 전송하게 만들지 않는다.
                 notice.textContent =
@@ -284,6 +361,15 @@
             return true;
 
         } catch (error) {
+            if (run.cancelled) {
+                pendingRequest = null;
+                pendingBubble = null;
+                saveSession();
+                appendMessage('assistant', '요청을 중지했습니다.');
+                message.value = value;
+                await reportStop(run);
+                return false;
+            }
             // 422는 모델 실행 전 입력 검증 실패. 오래된 작업 문맥으로 재시도하지 않는다.
             if (error.status === 422) { pendingRequest = null; pendingBubble = null; saveSession(); }
             if (!pendingRequest) pendingBubble = null;
@@ -293,6 +379,7 @@
             message.value = value;
 
         } finally {
+            endRequest(run);
             setBusy(false);
             message.focus();
         }
@@ -330,7 +417,8 @@
     });
     document.getElementById('composer').addEventListener('submit', function (event) {
         event.preventDefault();
-        sendMessage();
+        if (activeRequest) stopMessage();
+        else sendMessage();
     });
     document.getElementById('message-resize').addEventListener('click', function () {
         var expanded = this.getAttribute('aria-expanded') !== 'true';
@@ -372,6 +460,10 @@
         }),
         api: api,
         excel: window.formulaSheet,
+        beginRequest: beginRequest,
+        endRequest: endRequest,
+        checkRequest: checkChat,
+        reportStop: reportStop,
         getTarget: workspace.formulaTarget,
         prepareOutput: workspace.prepareFormulaOutput,
         onResult: workspace.formulaResult,

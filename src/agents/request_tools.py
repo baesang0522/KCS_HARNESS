@@ -169,6 +169,18 @@ def build_request_tools(task_context: dict):
         )
 
     @tool
+    def find_model_candidates(
+        column_id: str | None = None,
+        extraction_mode: Literal["alphanumeric", "labelled"] | None = None,
+    ) -> dict:
+        """모델명 후보 추출 카드를 연다. 방식 미지정이면 표본에서 추천하며 자동 적용하지 않는다."""
+        return card(
+            kind="extract",
+            column_ids=[target(column_id)],
+            extraction_mode=extraction_mode,
+        )
+
+    @tool
     def inspect_similarity(
             column_id: str | None = None,
             group_column_id: str | None = None,
@@ -213,6 +225,7 @@ def build_request_tools(task_context: dict):
             split_text,
             map_values,
             group_values,
+            find_model_candidates,
             inspect_similarity,
             recommend_preprocessing,
         ])

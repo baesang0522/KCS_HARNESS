@@ -81,16 +81,19 @@ async def chat(payload: ChatRequest, request: Request):
     )
 
     try:
-        result = await process_chat(
-            runtime=request.app.state.runtime,
-            repository=request.app.state.conversations,
-            formula_jobs=request.app.state.formula_jobs,
-            operation_jobs=request.app.state.operation_jobs,
-            conversation_id=ids["conversation_id"],
-            request_id=ids["request_id"],
-            message=payload.message,
-            workspace=workspace,
-        )
+        async with request.app.state.conversations.request(
+            ids["conversation_id"], ids["request_id"]
+        ):
+            result = await process_chat(
+                runtime=request.app.state.runtime,
+                repository=request.app.state.conversations,
+                formula_jobs=request.app.state.formula_jobs,
+                operation_jobs=request.app.state.operation_jobs,
+                conversation_id=ids["conversation_id"],
+                request_id=ids["request_id"],
+                message=payload.message,
+                workspace=workspace,
+            )
     except Exception as error:
         log_chat(
             "chat.failed",
@@ -129,11 +132,14 @@ async def recommendation(payload: AdviceRequest, request: Request):
     )
 
     try:
-        result = await process_recommendation(
-            runtime=request.app.state.runtime,
-            repository=request.app.state.conversations,
-            payload=payload,
-        )
+        async with request.app.state.conversations.request(
+            ids["conversation_id"], ids["request_id"]
+        ):
+            result = await process_recommendation(
+                runtime=request.app.state.runtime,
+                repository=request.app.state.conversations,
+                payload=payload,
+            )
     except Exception as error:
         log_chat(
             "recommendation.failed",
@@ -152,4 +158,21 @@ async def recommendation(payload: AdviceRequest, request: Request):
         answer=result["answer"],
         elapsed_ms=round((time.perf_counter() - started) * 1000),
     )
+    return result
+
+
+@router.post("/conversations/{conversation_id}/requests/{request_id}/cancel")
+async def cancel_chat(conversation_id: UUID, request_id: UUID, request: Request):
+    result = request.app.state.conversations.cancel_request(
+        str(conversation_id), str(request_id)
+    )
+    job = request.app.state.formula_jobs.get(str(request_id))
+    if (
+        job is not None and job.source.conversation_id == conversation_id
+        and job.approved_preview_id is None
+        and job.status in {"CREATED", "PLANNING", "PREVIEW_READY", "NEEDS_INPUT"}
+    ):
+        job.status = "FAILED"
+        job.error = "사용자가 수식 계획 생성을 중지했습니다."
+        job.preview = None
     return result

@@ -11,7 +11,10 @@ router = APIRouter(prefix="/formula-jobs", tags=["formula"])
 
 @router.post("")
 async def create_formula_job(payload: CreateFormulaJobRequest, request: Request):
-    return await service.create_formula_job(payload, request.app.state.conversations, request.app.state.formula_jobs)
+    async with request.app.state.conversations.request(
+        str(payload.conversation_id), str(payload.formula_job_id)
+    ):
+        return await service.create_formula_job(payload, request.app.state.conversations, request.app.state.formula_jobs)
 
 
 @router.get("/{formula_job_id}")
@@ -21,7 +24,11 @@ async def read_formula_job(formula_job_id: UUID, request: Request):
 
 @router.post("/{formula_job_id}/analyze")
 async def analyze_formula_job(formula_job_id: UUID, request: Request):
-    return await service.plan_formula_job(formula_job_id, request.app.state.formula_jobs, request.app.state.runtime)
+    job = service.find_formula_job(request.app.state.formula_jobs, formula_job_id)
+    async with request.app.state.conversations.request(
+        str(job.source.conversation_id), str(formula_job_id)
+    ):
+        return await service.plan_formula_job(formula_job_id, request.app.state.formula_jobs, request.app.state.runtime)
 
 
 @router.post("/{formula_job_id}/previews/{preview_id}/approve", response_model=FormulaPreview)

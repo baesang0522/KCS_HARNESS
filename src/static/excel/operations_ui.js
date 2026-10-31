@@ -13,7 +13,7 @@
         }
         function kind() {
             var value = el("kind").value;
-            ["preprocess", "split", "group", "replace", "map"].forEach(function (name) { el(name).hidden = name !== value; });
+            ["preprocess", "split", "group", "replace", "map", "extract"].forEach(function (name) { el(name).hidden = name !== value; });
             el("single").hidden = value === "group";
             var automatic = el("group-mode").value === "first_non_empty";
             el("group-manual").hidden = automatic;
@@ -23,7 +23,7 @@
         function targets() {
             return el("kind").value === "group" ? Array.from(new Set(keys().concat(el("value-column").value).filter(Boolean))) : [el("column").value];
         }
-        function clear() { el("settings").hidden = false; el("preview").hidden = false; el("finalize").hidden = false; hasPreview = false; el("result").hidden = true; el("final-review").hidden = true; el("apply").disabled = true; }
+        function clear() { el("extraction-preview").hidden = true; el("settings").hidden = false; el("preview").hidden = false; el("finalize").hidden = false; hasPreview = false; el("result").hidden = true; el("final-review").hidden = true; el("apply").disabled = true; }
         function rules() {
             return Array.from(el("rules").querySelectorAll("input:checked")).map(function (input) {
                 var words = input.value === "remove_words" ? el("words").value.split("\n").map(function (v) { return v.trim(); }).filter(Boolean) : [];
@@ -49,8 +49,9 @@
             },
             show: function (available, preferred, taskType, resetMode) {
                 columns = available; clear(); mapping.reset();
+                el("extraction-suggestions").textContent = "";
                 if (resetMode) {
-                    el("kind").value = "preprocess"; el("part").value = "all"; el("group-mode").value = "manual";
+                    el("kind").value = "preprocess"; el("part").value = "all"; el("group-mode").value = "manual"; el("extraction-mode").value = "";
                     el("rules").querySelectorAll("input").forEach(function (input) { input.checked = false; });
                     ["words", "find", "replacement", "delimiter", "source-row", "group-value"].forEach(function (id) { el(id).value = ""; });
                 }
@@ -108,6 +109,10 @@
                     operation.find = el("find").value; operation.replacement = el("replacement").value;
                 }
                 if (type === "map") operation.mappings = mapping.get();
+                if (type === "extract") {
+                    operation.extraction_mode = el("extraction-mode").value;
+                    if (!operation.extraction_mode) throw new Error("추천을 확인하고 추출 방식을 선택하세요.");
+                }
                 return operation;
             },
             configure: function (operation) {
@@ -120,6 +125,7 @@
                 el("source-row").value = operation.source_row || "";
                 el("group-value").value = operation.representative || "";
                 el("part").value = operation.part || "all";
+                el("extraction-mode").value = operation.extraction_mode || "";
                 // 모델이 제안한 적용 순서를 카드에도 그대로 반영한다.
                 operation.rules.forEach(function (rule) {
                     var input = Array.from(el("rules").querySelectorAll("input")).find(function (item) { return item.value === rule.operation; });
@@ -139,6 +145,23 @@
                 el("settings").hidden = el("preview").hidden = el("finalize").hidden = true;
                 var count = data.values.length.toLocaleString();
                 el("summary").textContent = count + "행 확인 · 결과 " + data.names.length + "열 · " + data.changed + "행 변경";
+                if (data.operation.kind === "extract") {
+                    var counts = {"단일 후보": 0, "미검출": 0, "확인 필요 · 복수 후보": 0};
+                    data.values.forEach(function (row) { counts[row[1]] += 1; });
+                    el("summary").textContent = count + "행 확인 · 결과 2열 · 단일 후보 " + counts["단일 후보"] +
+                        "행 · 미검출 " + counts["미검출"] + "행 · 복수 후보 " + counts["확인 필요 · 복수 후보"] + "행";
+                    var examples = el("extraction-preview");
+                    examples.textContent = "앞 10행 미리보기";
+                    examples.hidden = false;
+                    data.values.slice(0, 10).forEach(function (row, index) {
+                        var item = document.createElement("p");
+                        item.style.whiteSpace = "pre-wrap";
+                        item.textContent = data.snapshot.rows[index].excel_row + "행: " +
+                            data.snapshot.rows[index].values[0].slice(0, 160) + " → " +
+                            (row[0].slice(0, 160) || "(후보 없음)") + " · " + row[1];
+                        examples.appendChild(item);
+                    });
+                }
                 if (data.operation.kind === "group") {
                     var counts = {"변경": 0, "유지": 0, "확인 필요": 0};
 
@@ -168,13 +191,35 @@
                 }
                 var column = data.snapshot.columns[data.operation.kind === "group" ? data.snapshot.columns.length - 1 : 0];
                 fill(el("anchor"), [String(column.column_id)]);
-                el("name").value = column.header + ({split: data.operation.part === "last" ? " 마지막 단어" : " 단어", replace: " 치환", map: " 대표값", group: " 통일"}[data.operation.kind] || " 정제");
+                el("name").value = column.header + ({split: data.operation.part === "last" ? " 마지막 단어" : " 단어", replace: " 치환", map: " 대표값", group: " 통일", extract: " 모델명 후보"}[data.operation.kind] || " 정제");
                 el("side").value = "after";
             },
             output: function () {
                 var name = el("name").value.trim();
                 if (!name) throw new Error("결과 열 이름을 입력하세요.");
                 return {anchor: el("anchor").value, side: el("side").value, name: name};
+            },
+            extractionSuggestions: function (data) {
+                var box = el("extraction-suggestions");
+                box.textContent = "전체 대상 " + data.sample_count.toLocaleString() + "행 검사 완료 · " +
+                    (data.suggestions.length
+                        ? "추천은 자동 적용되지 않습니다."
+                        : "일치 패턴이 없습니다. 다른 범위나 추출 방식을 확인하세요.");
+                data.suggestions.forEach(function (suggestion) {
+                    var text = document.createElement("p");
+                    text.textContent = suggestion.label + " · 일치 " + suggestion.matched_rows + "행 · 복수 후보 " + suggestion.multiple_rows + "행";
+                    box.appendChild(text);
+                    suggestion.examples.forEach(function (example) {
+                        var line = document.createElement("p");
+                        line.textContent = example.before + " → " + example.after;
+                        box.appendChild(line);
+                    });
+                    var button = document.createElement("button");
+                    button.type = "button";
+                    button.textContent = "이 방식 선택";
+                    button.dataset.extractionMode = suggestion.mode;
+                    box.appendChild(button);
+                });
             },
             clear: clear,
             catalog: mapping.catalog,
@@ -191,9 +236,18 @@
             bind: function (handlers) {
                 ["preview", "apply", "cancel", "finalize", "confirm-final", "cancel-final", "load-values", "edit"].forEach(function (name) { el(name).addEventListener("click", handlers[name]); });
                 mapping.bind(function () { clear(); handlers.change(); }, handlers.status);
+                el("recommend-extraction").addEventListener("click", handlers.recommend);
+                el("extraction-suggestions").addEventListener("click", function (event) {
+                    var button = event.target.closest("button[data-extraction-mode]");
+                    if (!button || button.disabled) return;
+                    el("extraction-mode").value = button.dataset.extractionMode;
+                    clear(); handlers.change();
+                });
                 document.getElementById("op-settings").addEventListener("input", function (event) {
                     if (event.target.id === "op-column") mapping.reset();
+                    if (["op-kind", "op-column"].includes(event.target.id)) el("extraction-suggestions").textContent = "";
                     kind(); clear(); handlers.change();
+                    if (["op-kind", "op-column"].includes(event.target.id) && el("kind").value === "extract") handlers.recommend();
                 });
                 el("rules").addEventListener("click", function (event) {
                     var button = event.target.closest("button[data-move]");

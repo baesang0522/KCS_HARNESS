@@ -1,4 +1,4 @@
-from services.operations.rules import preprocess, split_value
+from services.operations.rules import preprocess, split_value, model_candidates
 from services.operations.schemas import OperationRequest, OperationResponse, Row, mapping_key
 
 
@@ -90,6 +90,15 @@ def execute(payload: OperationRequest) -> OperationResponse:
             else:
                 values = split_value(row.values[0], operation.delimiter)
 
+        elif operation.kind == "extract":
+            candidates = model_candidates(row.values[0], operation.extraction_mode)
+            values = ["\n".join(candidates)]
+            extraction_status = (
+                "미검출" if not candidates
+                else "단일 후보" if len(candidates) == 1
+                else "확인 필요 · 복수 후보"
+            )
+
         elif operation.kind == "replace":
             value = row.values[0]
             expected = len(value) + value.count(operation.find) * (
@@ -146,6 +155,9 @@ def execute(payload: OperationRequest) -> OperationResponse:
             )
             values.append(status)
 
+        if operation.kind == "extract":
+            values.append(extraction_status)
+
         result.append(Row(excel_row=row.excel_row, values=values))
 
     width = max(len(row.values) for row in result)
@@ -156,6 +168,7 @@ def execute(payload: OperationRequest) -> OperationResponse:
 
     headers = (
         ["정제"] if operation.kind == "preprocess"
+        else ["모델명 후보", "추출상태"] if operation.kind == "extract"
         else ["치환"] if operation.kind == "replace"
         else ["대표값"] if operation.kind == "map"
         else ["대표값", "변경여부"] if operation.kind == "group"

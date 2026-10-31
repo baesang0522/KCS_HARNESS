@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 
 from services.operations.schemas import OperationRequest, OperationResponse, ValueRequest
 from services.operations.service import execute, value_catalog
+from services.operations.rules import extraction_suggestions
 from services.similarity import SimilarityRequest, inspect_similarity
 
 router = APIRouter(prefix="/operations", tags=["operations"])
@@ -26,3 +27,8 @@ def compare_similarity(payload: SimilarityRequest):
         return inspect_similarity(payload)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.post("/extraction-suggestions")
+def suggest_extraction(payload: ValueRequest):
+    return extraction_suggestions(payload.values)

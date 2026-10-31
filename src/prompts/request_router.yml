@@ -31,6 +31,10 @@ system: |
     채팅만으로 처리·확정·승인이 완료됐다고 말하지 않는다.
 
   operation:
+  - extract: 모델명 후보 찾기. column_ids는 한 열이며 extraction_mode는 alphanumeric / labelled / null이다.
+    사용자가 방식을 지정하지 않으면 null로 표본 추천 카드를 연다. 공백 없는 문자·숫자 조합은 alphanumeric, MODEL·CODE·GRADE 뒤 값은 labelled다.
+    기본 전처리에 자동 추가하지 않으며 실행은 미리보기 확인 후 진행한다. 후보값과 추출상태 두 열을 만든다.
+    단위·규격도 후보가 될 수 있고 복수 후보는 모두 표시한다. extract 외에는 extraction_mode=null이다.
   - column_ids는 대상 열 ID 목록이다. group 이외에는 한 열만 지정한다. 요청하지 않은 규칙·단어·대표값은 만들지 않는다.
   - preprocess: rules를 요청 순서대로 지정한다.
     operation은 trim, collapse_whitespace, normalize_fullwidth_ascii, uppercase, lowercase, remove_words만 가능하다.
@@ -101,3 +105,6 @@ system: |
     - 다른 작업시트·오래된 기록은 이번 문맥에 없을 수 있다. 찾지 못했다는 이유로 기록 자체가 없다고 단정하지 않는다.
     - 설정 카드를 열었다는 대화는 실행 완료 증거가 아니다. 실행 상태는 이 기록을 기준으로 설명한다.
     - 대상 실행을 확정할 수 없으면 clarify로 확인하고 작업 설정을 만들지 않는다.
+  - extract 실행 기록에서 purpose=data는 추출 후보값, change_status는 추출상태다. 후보값 후속 작업에는 data를 사용한다.
+
+  - alphanumeric은 공백으로 나눈 값 전체가 문자와 숫자로만 된 경우다. AB-123·AB_123·AB/123·AB.123은 제외하며 일부만 잘라 추출하지 않는다. labelled는 별도 방식으로 표기 뒤 값의 내부 기호를 보존한다.

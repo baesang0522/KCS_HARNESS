@@ -15,7 +15,7 @@
         var writeAttempted = false;
         var startTimer = null;
 
-        async function useTarget(target) {
+        async function useTarget(target, run) {
             var revised = JSON.parse(JSON.stringify(preview));
             var ranges = target.target_ranges || [target.target_range];
             var anchors = target.anchor_cells || [target.anchor_cell];
@@ -24,6 +24,7 @@
                 action.anchor_cell = anchors[index];
             });
             await excel.validateFormulaPreview(revised, selection);
+            if (run) options.checkRequest(run);
             preview = revised;
             targetSnapshot = target;
             ui.showPreview(instruction, selection, preview, targetSnapshot);
@@ -31,6 +32,7 @@
 
         async function selectAndPlan() {
             if (options.isBusy() || !instruction) return;
+            var run = options.beginRequest();
             options.setBusy(true);
             ui.open();
             ui.setStatus("선택 범위를 확인하고 있습니다…");
@@ -39,19 +41,27 @@
                     throw new Error("엑셀 안에서 추가 기능을 열어주세요.");
                 }
                 selection = await excel.readFormulaContext(useWorkspace && options.getTarget ? await options.getTarget() : null);
+                options.checkRequest(run);
                 var payload = Object.assign({}, selection, {
                     conversation_id: options.getConversationId(),
                     formula_job_id: api.newRequestId(),
                     instruction: instruction
                 });
+                run.request = {
+                    conversation_id: payload.conversation_id,
+                    request_id: payload.formula_job_id
+                };
                 formulaJob = await api.requestJson("/formula-jobs", {
                     method: "POST",
                     headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify(payload),
+                    signal: run.controller.signal
                 });
+                options.checkRequest(run);
                 formulaJob = await api.requestJson("/formula-jobs/" + formulaJob.formula_job_id + "/analyze", {
-                    method: "POST"
+                    method: "POST", signal: run.controller.signal
                 });
+                options.checkRequest(run);
                 if (formulaJob.status === "NEEDS_INPUT") {
                     options.complete(formulaJob.clarification || "작업에 필요한 정보를 알려주세요.");
                     return;
@@ -60,11 +70,20 @@
                     throw new Error(formulaJob.error || "수식 계획을 만들지 못했습니다.");
                 }
                 preview = formulaJob.preview;
-                await useTarget(await excel.prepareFormulaPreview(preview, selection));
+                var prepared = await excel.prepareFormulaPreview(preview, selection);
+                options.checkRequest(run);
+                await useTarget(prepared, run);
             } catch (error) {
-                if (!targetSnapshot) preview = null;
-                options.complete(error.message);
+                if (run.cancelled) {
+                    preview = targetSnapshot = null;
+                    await options.reportStop(run);
+                    options.complete("수식 계획 생성을 중지했습니다. 셀은 변경하지 않았습니다.");
+                } else {
+                    if (!targetSnapshot) preview = null;
+                    options.complete(error.message);
+                }
             } finally {
+                options.endRequest(run);
                 options.setBusy(false);
             }
         }

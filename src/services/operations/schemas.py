@@ -48,7 +48,7 @@ class Rule(StrictModel):
 
 
 class Operation(StrictModel):
-    kind: Literal["preprocess", "split", "group", "replace", "map"]
+    kind: Literal["preprocess", "split", "group", "replace", "map", "extract"]
     column_ids: list[ColumnId] = Field(min_length=1, max_length=20)
     rules: list[Rule] = Field(default_factory=list, max_length=10)
     delimiter: str | None = Field(default=None, min_length=1, max_length=100)
@@ -60,6 +60,7 @@ class Operation(StrictModel):
     representative: Text | None = None
     part: Literal["all", "last"] = "all"
     group_mode: Literal["manual", "first_non_empty"] = "manual"
+    extraction_mode: Literal["alphanumeric", "labelled"] | None = None
 
     @property
     def input_column_ids(self) -> list[str]:
@@ -67,6 +68,8 @@ class Operation(StrictModel):
 
     @model_validator(mode="after")
     def validate_operation(self):
+        if self.kind != "extract" and self.extraction_mode is not None:
+            raise ValueError("추출 방식은 모델명 후보 찾기에서만 지정하세요.")
         if len(set(self.column_ids)) != len(self.column_ids):
             raise ValueError("대상 열이 중복되었습니다.")
         if self.kind == "group":
@@ -126,6 +129,8 @@ class OperationRequest(StrictModel):
 
     @model_validator(mode="after")
     def validate_rows(self):
+        if self.operation.kind == "extract" and self.operation.extraction_mode is None:
+            raise ValueError("추천을 확인하고 추출 방식을 선택하세요.")
         if self.operation.kind != "group" and len(self.rows) > 10000:
             raise ValueError("묶음 이외의 기능은 최대 10,000행씩 요청하세요.")
         if self.operation.kind == "replace" and self.operation.find is None:

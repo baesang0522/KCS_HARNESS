@@ -335,7 +335,9 @@
                         values: row.values.map(function (v) { return v.slice(0, 1000); }),
                         truncated: row.values.some(function (v) { return v.length > 1000; })}; })};
             },
-            readRecommendation: async function (columnIds, expected, progress) {
+            readRecommendation: async function (columnIds, expected, progress, check) {
+                check = check || function () {};
+                check();
                 if (!workspace || !expected) throw new Error("먼저 작업 시트를 준비하세요.");
                 await refresh();
                 if (workspace.worksheet_id !== expected.worksheet_id ||
@@ -359,7 +361,8 @@
                     var info = await window.operationsSheet.layout(context, workspace);
                     return {row_start: info.body.rowIndex, row_count: info.body.rowCount, stamp: info.stamp};
                 });
-                var snapshot = await window.operationsSheet.read(workspace, full, columnIds, progress, function () {});
+                var snapshot = await window.operationsSheet.read(workspace, full, columnIds, progress, check);
+                check();
                 if (snapshot.stamp !== full.stamp || snapshot.rows.length !== full.row_count) {
                     throw new Error("읽는 동안 작업 표가 바뀌었습니다. 다시 요청하세요.");
                 }
@@ -375,6 +378,7 @@
                 similarity.show(workspace, target, settings);
                 ui.status("검사 대상을 확인하고 실행하세요. 결과는 새 시트에 작성합니다.");
             },
+            recommendExtraction: function () { return operations.recommendExtraction(); },
             configure: async function (operation) {
                 if (!workspace) throw new Error("먼저 필수 세 열을 지정해 작업을 시작하세요.");
                 await refresh(); ui.open(workspace.task_type); display(operation.column_ids); operations.configure(operation);

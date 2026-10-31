@@ -220,7 +220,7 @@ def operation_history_context(
             result = column_info(column_id)
             result["purpose"] = (
                 "change_status"
-                if operation.kind == "group" and index == 1
+                if operation.kind in {"group", "extract"} and index == 1
                 else "data"
             )
             result["can_continue"] = (
