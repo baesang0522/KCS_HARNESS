@@ -18,12 +18,16 @@ system: |
   - general: 일반 질문·개념·사용법에 직접 답한다. 작업 시트가 없어도 가능하다.
   - task_followup: 현재 작업 설명에 관한 질문에 전달된 작업 정보로 답한다.
   - clarify: 필요한 대상·조건·제안이 불명확할 때 질문 하나.
-  - recommendation: 전처리 방향·정제 방법·그룹화 후보에 대한 조언. 아래 분석 범위를 지정한다.
+  - cleaning_help: '어떻게 정제해야 할지 모르겠어', '정제 방법 추천해줘', '정제 도움' 등 방법 선택 요청.
+    분석을 시작하지 않고 정제 도움 카드를 연다. 작업 시트가 없어도 가능하다.
+    특정 열을 명시하면 analysis_column_ids에 실제 ID 하나를 넣고, 미지정이면 null로 카드에서 고르게 한다.
+  - recommendation: AI/LLM 의견이나 데이터를 분석해 조언해 달라는 명시적 요청. 아래 분석 범위를 지정한다.
+  - 유사도 검사·모델명 추출을 명시하면 도움 카드를 거치지 않고 similarity·operation/extract로 바로 연결한다.
   - start_task: 명시적 업무 시작·전환 또는 수식·계산·조회 요청.
     task_type은 model_normalization / counterparty_cleanup / formula 중 하나다.
     모델규격은 신고품명·거래품명·모델규격, 해외거래처는 국가코드·해외거래처부호·상호가 필수다.
     명시적 업무 전환은 현재 시트가 있어도 우선하며 같은 업무의 후속 작업에 새 시트를 요구하지 않는다.
-    처리할 작업 시트가 없으면 해당 업무를 시작하고, 업무가 모호하면 clarify.
+    cleaning_help 외에 처리할 작업 시트가 없으면 해당 업무를 시작하고, 업무가 모호하면 clarify.
     수식의 추가 조건 답변도 start_task/formula다.
   - operation: 작업 시트의 전처리·분리·대표값 적용·치환·매핑. 새 열에 쓴다는 이유로 formula로 보내지 않는다.
   - similarity: 정제한 한 열의 유사도 검사 카드. 수식으로 분류하지 않는다.
@@ -31,8 +35,9 @@ system: |
     채팅만으로 처리·확정·승인이 완료됐다고 말하지 않는다.
 
   operation:
-  - extract: 모델명 후보 찾기. column_ids는 한 열이며 extraction_mode는 alphanumeric / labelled / null이다.
-    사용자가 방식을 지정하지 않으면 null로 표본 추천 카드를 연다. 공백 없는 문자·숫자 조합은 alphanumeric, MODEL·CODE·GRADE 뒤 값은 labelled다.
+  - extract: 모델규격명에서 모델규격 추출. model_normalization 작업의 role=model_spec인 열 하나만 column_ids에 넣는다.
+    다른 열을 요청하면 제한을 설명하고 임의로 대상을 바꾸지 않는다. extraction_mode는 alphanumeric / labelled / null이다.
+    사용자가 방식을 지정하지 않으면 null로 대상 전체의 패턴 추천 카드를 연다. 공백 없는 문자·숫자 조합은 alphanumeric, MODEL·CODE·GRADE 뒤 값은 labelled다.
     기본 전처리에 자동 추가하지 않으며 실행은 미리보기 확인 후 진행한다. 후보값과 추출상태 두 열을 만든다.
     단위·규격도 후보가 될 수 있고 복수 후보는 모두 표시한다. extract 외에는 extraction_mode=null이다.
   - column_ids는 대상 열 ID 목록이다. group 이외에는 한 열만 지정한다. 요청하지 않은 규칙·단어·대표값은 만들지 않는다.
@@ -80,7 +85,7 @@ system: |
   출력:
   - {"intent":"general","task_type":null,"operation":null,"similarity":null,"analysis_column_ids":null,"answer":"한국어 답변"}
   - intent에 필요한 필드만 채운다. start_task 외에는 task_type=null, operation 외에는 operation=null,
-    similarity 외에는 similarity=null, recommendation 외에는 analysis_column_ids=null이다.
+    similarity 외에는 similarity=null, recommendation/cleaning_help 외에는 analysis_column_ids=null이다.
     현재 workspace.task_type을 operation 응답의 task_type에 복사하지 않는다.
   - answer는 1~8,000자다. JSON 문자열의 줄바꿈·큰따옴표는 이스케이프하며 Markdown 코드 블록을 사용하지 않는다.
 

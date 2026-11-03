@@ -1,6 +1,6 @@
 from typing import Literal
 from langchain_core.tools import tool
-from services.operations.schemas import Mapping, Operation, Rule
+from services.operations.schemas import Mapping, Operation, Rule, extraction_column_id
 from services.similarity import SimilaritySelection
 from services.recommendation.service import resolve_columns
 
@@ -173,10 +173,13 @@ def build_request_tools(task_context: dict):
         column_id: str | None = None,
         extraction_mode: Literal["alphanumeric", "labelled"] | None = None,
     ) -> dict:
-        """모델명 후보 추출 카드를 연다. 방식 미지정이면 표본에서 추천하며 자동 적용하지 않는다."""
+        """지정된 모델규격명 열의 모델규격 추출 카드를 연다. 방식 미지정이면 대상 전체에서 추천하며 자동 적용하지 않는다."""
+        expected = extraction_column_id(workspace)
+        if column_id is not None and column_id != expected:
+            raise ValueError("모델규격 추출은 지정된 모델규격명 열에만 적용할 수 있습니다.")
         return card(
             kind="extract",
-            column_ids=[target(column_id)],
+            column_ids=[expected],
             extraction_mode=extraction_mode,
         )
 
@@ -201,10 +204,20 @@ def build_request_tools(task_context: dict):
         }
 
     @tool
+    def open_cleaning_help(column_id: str | None = None) -> dict:
+        """정제 방법을 모르거나 방법 선택을 요청하면 도움 카드를 연다. 분석은 시작하지 않는다."""
+        ids = resolve_columns(workspace, [column_id]) if column_id is not None else None
+        return {
+            "intent": "cleaning_help",
+            "analysis_column_ids": ids,
+            "answer": "정제 도움에서 유사도 검사, 모델명 추출, AI 의견 중 필요한 기능을 선택하세요.",
+        }
+
+    @tool
     def recommend_preprocessing(
             column_ids: list[str] | None = None,
     ) -> dict:
-        """전체 데이터 분석과 전처리 조언을 요청한다."""
+        """사용자가 AI/LLM 의견이나 데이터 분석 조언을 명시적으로 요청했을 때 사용한다."""
         ids = resolve_columns(workspace, column_ids)
 
         return {
@@ -216,7 +229,7 @@ def build_request_tools(task_context: dict):
             "answer": "대상 열의 전체 데이터를 읽어 조언을 준비하겠습니다.",
         }
 
-    tools = [answer_question, ask_user, start_task]
+    tools = [answer_question, ask_user, start_task, open_cleaning_help]
     if workspace:
         tools.extend([
             remove_words,

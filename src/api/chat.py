@@ -93,6 +93,7 @@ async def chat(payload: ChatRequest, request: Request):
                 request_id=ids["request_id"],
                 message=payload.message,
                 workspace=workspace,
+                advice_requested=payload.advice_requested,
             )
     except Exception as error:
         log_chat(

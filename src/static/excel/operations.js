@@ -47,6 +47,10 @@
 
                 var ids = ui.targets();
                 if (ids.length !== 1) throw new Error("추천할 열 하나를 선택하세요.");
+                var models = workspace.columns.filter(function (column) { return column.role === "model_spec"; });
+                if (workspace.task_type !== "model_normalization" || models.length !== 1 || String(models[0].column_id) !== ids[0]) {
+                    throw new Error("모델규격 추출은 지정된 모델규격명 열에만 적용할 수 있습니다.");
+                }
 
                 var snapshot = await sheet.read(
                     workspace, target, ids, progress, function () {}

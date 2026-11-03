@@ -2,7 +2,8 @@ import logging
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from agents.request_router import route_request
+from agents.request_router import RequestDecision, route_request
+from services.recommendation.service import resolve_columns
 from repositories.conversation_repository import StoredTurn
 from services.errors import ConflictError, ModelProcessingError
 from services.formula.service import formula_job_context
@@ -49,11 +50,12 @@ def build_task_context(state, formula_jobs: dict, *, operation_jobs: dict,
 
 
 async def process_chat(*, runtime, repository, formula_jobs: dict, operation_jobs: dict, conversation_id: str,
-                       request_id: str, message: str, workspace=None) -> dict:
+                       request_id: str, message: str, workspace=None, advice_requested: bool = False) -> dict:
     async with repository.edit(conversation_id) as conversation:
         for turn in conversation.turns:
             if turn.request_id == request_id:
-                if turn.question != message or turn.request_context != workspace:
+                if (turn.question != message or turn.request_context != workspace
+                        or turn.advice_requested != advice_requested):
                     raise ConflictError("같은 요청 ID에 다른 질문 또는 작업 대상이 전달됐습니다.")
 
                 return dict(conversation_id=conversation_id, request_id=request_id,
@@ -72,7 +74,14 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
         try:
             context = build_task_context(state, formula_jobs, operation_jobs=operation_jobs,
                                          conversation_id=conversation_id, workspace=workspace)
-            decision, reasoning = await route_request(runtime, messages, task_context=context)
+            if advice_requested:
+                decision = RequestDecision(
+                    intent="recommendation",
+                    analysis_column_ids=resolve_columns(workspace, None),
+                    answer="대상 열의 전체 데이터를 읽어 조언을 준비하겠습니다.",
+                )
+            else:
+                decision, reasoning = await route_request(runtime, messages, task_context=context)
             answer = decision.answer
             if decision.intent == "start_task":
                 action = {"type": "confirm_selection", "task_type": decision.task_type}
@@ -80,6 +89,8 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
                 action = {"type": "configure_operation", "operation": decision.operation.model_dump()}
             elif decision.intent == "similarity":
                 action = {"type": "configure_similarity", "similarity": decision.similarity.model_dump()}
+            elif decision.intent == "cleaning_help":
+                action = {"type": "open_cleaning_help", "column_ids": decision.analysis_column_ids}
             elif decision.intent == "recommendation":
                 action = {"type": "analyze_data", "column_ids": decision.analysis_column_ids}
         except Exception as error:
@@ -88,7 +99,7 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
 
         await conversation.save_turn(StoredTurn(
             request_id=request_id, question=message, answer=answer, reasoning=reasoning,
-            ui_action=action, request_context=workspace,
+            ui_action=action, request_context=workspace, advice_requested=advice_requested,
         ))
         if decision.intent == "start_task":
             state.task_type, state.pending_intent, state.phase = decision.task_type, None, "WAITING_SELECTION"

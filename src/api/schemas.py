@@ -10,6 +10,7 @@ class ChatRequest(BaseModel):
     request_id: UUID
     message: str = Field(min_length=1, max_length=8000)
     workspace: WorkspaceContext | None = None
+    advice_requested: bool = False
 
     @field_validator("message")
     @classmethod
@@ -46,11 +47,17 @@ class AnalyzeDataAction(BaseModel):
     column_ids: list[ColumnId] = Field(min_length=1, max_length=200)
 
 
+class OpenCleaningHelpAction(BaseModel):
+    type: Literal["open_cleaning_help"]
+    column_ids: list[ColumnId] | None = Field(default=None, min_length=1, max_length=1)
+
+
 UIAction = Annotated[
     ConfirmSelectionAction
     | ConfigureOperationAction
     | ConfigureSimilarityAction
-    | AnalyzeDataAction,
+    | AnalyzeDataAction
+    | OpenCleaningHelpAction,
     Field(discriminator="type"),
 ]
 

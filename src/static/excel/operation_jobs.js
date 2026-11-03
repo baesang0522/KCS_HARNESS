@@ -21,6 +21,7 @@
 
         return {
             create: function (workspace, target, operation) {
+                var models = workspace.columns.filter(function (column) { return column.role === "model_spec"; });
                 return post("/operation-jobs", {
                     operation_job_id: api.newRequestId(),
                     conversation_id: getConversationId(),
@@ -28,6 +29,7 @@
                     worksheet_id: workspace.worksheet_id,
                     table_id: String(workspace.table_id),
                     task_type: workspace.task_type,
+                    model_spec_column_id: models.length === 1 ? String(models[0].column_id) : null,
                     row_start: target.row_start,
                     row_count: target.row_count,
                     operation: operation

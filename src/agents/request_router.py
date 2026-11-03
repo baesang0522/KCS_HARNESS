@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validat
 
 from agents.request_graph import run_request_graph
 from models.llama_cpp import get_reasoning_content
-from services.operations.schemas import Operation
+from services.operations.schemas import Operation, extraction_column_id
 from services.chat_state import TaskType
 from services.similarity import SimilaritySelection
 from services.recommendation.service import resolve_columns
@@ -12,7 +12,7 @@ from services.recommendation.service import resolve_columns
 
 class RequestDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    intent: Literal["general", "start_task", "clarify", "task_followup", "operation", "similarity", "recommendation"]
+    intent: Literal["general", "start_task", "clarify", "task_followup", "operation", "similarity", "recommendation", "cleaning_help"]
     task_type: TaskType | None = None
     operation: Operation | None = None
     similarity: SimilaritySelection | None = None
@@ -41,8 +41,10 @@ class RequestDecision(BaseModel):
             raise ValueError("유사도 요청 외에는 similarity를 null로 반환해야 합니다.")
         if self.intent == "recommendation" and len(self.answer) > 6000:
             raise ValueError("추천 설명은 6,000자 이내로 작성하세요.")
-        if self.intent != "recommendation"and self.analysis_column_ids is not None:
-            raise ValueError("조언 요청 외에는 analysis_column_ids를 지정할 수 없습니다.")
+        if self.intent == "cleaning_help" and self.analysis_column_ids is not None and len(self.analysis_column_ids) != 1:
+            raise ValueError("정제 도움의 초기 대상은 한 열만 지정하세요.")
+        if self.intent not in {"recommendation", "cleaning_help"} and self.analysis_column_ids is not None:
+            raise ValueError("조언·정제 도움 요청 외에는 analysis_column_ids를 지정할 수 없습니다.")
         return self
 
 
@@ -91,6 +93,8 @@ async def route_request(runtime, messages, *, task_context: dict):
         }
         if not set(decision.operation.input_column_ids) <= columns:
             raise ValueError("현재 작업 시트에 없는 열을 요청했습니다.")
+        if decision.operation.kind == "extract" and decision.operation.column_ids != [extraction_column_id(workspace)]:
+            raise ValueError("모델규격 추출은 지정된 모델규격명 열에만 적용할 수 있습니다.")
 
     if decision.similarity:
         decision.similarity.check_workspace(workspace)
@@ -99,6 +103,9 @@ async def route_request(runtime, messages, *, task_context: dict):
         workspace or task_context.get("active_formula_job")
     ):
         raise ValueError("후속 질문을 연결할 현재 작업이 없습니다.")
+
+    if decision.intent == "cleaning_help" and decision.analysis_column_ids is not None:
+        resolve_columns(workspace, decision.analysis_column_ids)
 
     if decision.intent == "recommendation":
         if not workspace:

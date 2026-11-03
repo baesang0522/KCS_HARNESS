@@ -32,6 +32,15 @@ class ValueRequest(StrictModel):
         return self
 
 
+def extraction_column_id(workspace: dict | None) -> str:
+    if not workspace or workspace.get("task_type") != "model_normalization":
+        raise ValueError("모델규격 추출은 모델규격 정제 작업에서만 사용할 수 있습니다.")
+    columns = [column for column in workspace["columns"] if column.get("role") == "model_spec"]
+    if len(columns) != 1:
+        raise ValueError("작업 준비에서 모델규격명 열을 하나 지정하세요.")
+    return str(columns[0]["column_id"])
+
+
 class Rule(StrictModel):
     operation: Literal["trim", "collapse_whitespace", "normalize_fullwidth_ascii",
                        "uppercase", "lowercase", "remove_words"]

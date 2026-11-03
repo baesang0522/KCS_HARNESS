@@ -2,10 +2,15 @@
 (function () {
     window.createOperationsUI = function () {
         function el(id) { return document.getElementById("op-" + id); }
-        var columns = [], hasPreview = false, mapping = window.createMappingEditor();
+        var columns = [], currentTaskType = null, hasPreview = false, mapping = window.createMappingEditor();
+        function extractionColumn() {
+            var models = columns.filter(function (column) { return column.role === "model_spec"; });
+            return currentTaskType === "model_normalization" && models.length === 1 ? String(models[0].column_id) : "";
+        }
         function fill(select, selected) {
             select.textContent = "";
             columns.forEach(function (column) {
+                if (select === el("column") && el("kind").value === "extract" && String(column.column_id) !== extractionColumn()) return;
                 var option = document.createElement("option"); option.value = String(column.column_id);
                 option.textContent = column.header; option.selected = selected.indexOf(option.value) >= 0;
                 select.appendChild(option);
@@ -13,6 +18,8 @@
         }
         function kind() {
             var value = el("kind").value;
+            fill(el("column"), [el("column").value]);
+            el("column").disabled = value === "extract";
             ["preprocess", "split", "group", "replace", "map", "extract"].forEach(function (name) { el(name).hidden = name !== value; });
             el("single").hidden = value === "group";
             var automatic = el("group-mode").value === "first_non_empty";
@@ -34,6 +41,7 @@
         return {
             targets: targets,
             reconcile: function (available, fallback, taskType) {
+                currentTaskType = taskType;
                 var ids = new Set(available.map(function (column) { return String(column.column_id); }));
                 var lostTarget = targets().some(function (id) { return !ids.has(id); });
                 if (lostTarget) {
@@ -48,7 +56,7 @@
                 return lostTarget;
             },
             show: function (available, preferred, taskType, resetMode) {
-                columns = available; clear(); mapping.reset();
+                columns = available; currentTaskType = taskType; clear(); mapping.reset();
                 el("extraction-suggestions").textContent = "";
                 if (resetMode) {
                     el("kind").value = "preprocess"; el("part").value = "all"; el("group-mode").value = "manual"; el("extraction-mode").value = "";
@@ -110,12 +118,16 @@
                 }
                 if (type === "map") operation.mappings = mapping.get();
                 if (type === "extract") {
+                    if (!extractionColumn() || ids[0] !== extractionColumn()) throw new Error("모델규격 추출은 지정된 모델규격명 열에만 적용할 수 있습니다.");
                     operation.extraction_mode = el("extraction-mode").value;
                     if (!operation.extraction_mode) throw new Error("추천을 확인하고 추출 방식을 선택하세요.");
                 }
                 return operation;
             },
             configure: function (operation) {
+                if (operation.kind === "extract" && (!extractionColumn() || operation.column_ids.length !== 1 || operation.column_ids[0] !== extractionColumn())) {
+                    throw new Error("모델규격 추출은 지정된 모델규격명 열에만 적용할 수 있습니다.");
+                }
                 if (!operation.column_ids.concat(operation.value_column_id || []).every(function (id) { return columns.some(function (c) { return String(c.column_id) === id; }); })) {
                     throw new Error("현재 작업에 없는 열입니다. 범위를 다시 확인하세요.");
                 }
@@ -230,6 +242,7 @@
             },
             busy: function (busy, processing) {
                 document.getElementById("operations").querySelectorAll("button,select,input,textarea").forEach(function (control) { control.disabled = busy; });
+                el("column").disabled = busy || el("kind").value === "extract";
                 el("apply").disabled = busy || !hasPreview;
                 el("cancel").hidden = !processing; el("cancel").disabled = !processing;
             },

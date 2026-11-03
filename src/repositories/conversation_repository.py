@@ -19,6 +19,7 @@ class StoredTurn:
     reasoning: list[str]
     ui_action: dict | None = None
     request_context: dict | None = None
+    advice_requested: bool = False
 
 
 @dataclass

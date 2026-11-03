@@ -37,9 +37,15 @@ class CreateOperationJob(StrictModel):
     row_start: int = Field(ge=0, lt=1048576)
     row_count: int = Field(ge=1, lt=400000)
     operation: Operation
+    model_spec_column_id: ColumnId | None = None
 
     @model_validator(mode="after")
     def validate_scope(self):
+        if self.operation.kind == "extract" and (
+            self.task_type != "model_normalization" or self.model_spec_column_id is None
+            or self.operation.column_ids != [self.model_spec_column_id]
+        ):
+            raise ValueError("모델규격 추출은 지정된 모델규격명 열에만 적용할 수 있습니다.")
         if self.row_start + self.row_count > 1048576:
             raise ValueError("처리 범위가 Excel 행 경계를 벗어납니다.")
         if len(self.model_dump_json().encode("utf-8")) > 262144:

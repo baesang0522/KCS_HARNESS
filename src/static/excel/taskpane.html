@@ -57,9 +57,26 @@
         <button class="suggestion" data-prompt="이 작업에 필요한 엑셀 수식을 제안해줘."><span class="card-icon teal" aria-hidden="true">ƒ</span><span><strong>수식 작성 도움받기</strong><small>하고 싶은 작업을 말로 설명하기</small></span><span class="arrow" aria-hidden="true">↗</span></button>
       </section>
       <p class="preview-note">필요한 열을 골라 작업 시트에서 정리합니다.<br>원본 셀은 수정하지 않습니다.</p>
-      <button type="button" class="suggestion" data-prompt="거래품명에서 모델명 후보를 찾아줘.">거래품명에서 모델명 후보 찾아줘</button>
+      <button type="button" class="suggestion" data-open-cleaning-help>정제 방법 찾기 · 유사도 / 모델명 추출 / AI 의견</button>
       </div>
       <section id="conversation" role="log" aria-label="대화 내용" aria-live="polite" hidden></section>
+      <section class="normalization-panel" id="cleaning-help" aria-labelledby="cleaning-help-title" hidden>
+        <h2 id="cleaning-help-title" tabindex="-1">정제 도움</h2>
+        <button type="button" data-close-task>도움 카드 닫기</button>
+        <p id="cleaning-help-scope" role="status"></p>
+        <button type="button" id="cleaning-help-setup">작업 시트 준비하기</button>
+        <p id="cleaning-help-similarity-note"><strong>문자열 유사도 계산</strong><br>기준열 값이 같은 행끼리 계산 대상열의 문자열을 비교합니다.</p>
+        <label>기준열 <select id="cleaning-help-group"></select></label>
+        <label>계산 대상열 <select id="cleaning-help-similarity-column"></select></label>
+        <p id="cleaning-help-similarity-status" role="status"></p>
+        <button type="button" data-cleaning-help="similarity" aria-describedby="cleaning-help-similarity-note">문자열 유사도 검사</button>
+        <p id="cleaning-help-extract-note"><strong>모델규격명에서 모델규격 추출</strong><br>문자·숫자 조합이나 MODEL·CODE·GRADE 뒤의 값을 찾습니다.</p>
+        <label>추출 대상 <select id="cleaning-help-extract-column" aria-describedby="cleaning-help-extract-scope"></select></label>
+        <p id="cleaning-help-extract-scope">작업 준비에서 모델규격명으로 지정한 열만 사용합니다.</p>
+        <button type="button" data-cleaning-help="extract" aria-describedby="cleaning-help-extract-note">추출 패턴 찾기</button>
+        <p id="cleaning-help-advice-note"><strong>AI에게 정제 방향 물어보기</strong><br>추가 열을 포함한 모든 데이터 열의 설명과 전체 행을 함께 검토합니다. 의견은 대화에 표시합니다.</p>
+        <button type="button" data-cleaning-help="advice" aria-describedby="cleaning-help-advice-note">AI 의견 받기</button>
+      </section>
       <section class="normalization-panel" id="work-panel" hidden>
         <h2 id="work-title">작업 데이터 준비</h2><button type="button" data-close-task>작업 카드 닫기</button>
         <div id="work-setup">
@@ -83,6 +100,7 @@
           <p id="work-current-summary"></p>
           <details><summary>열 구성 보기</summary><pre id="work-column-summary"></pre></details>
           <div class="work-actions">
+            <button type="button" data-open-cleaning-help>정제 도움</button>
             <button type="button" id="work-target">Excel 선택 범위로 대상 변경</button>
             <button type="button" id="work-return">작업 표 전체로 돌아가기</button>
             <button type="button" id="work-new">새 원본으로 시작</button>
@@ -105,7 +123,7 @@
                 <p>대소문자를 구분합니다. 단어는 완전히 일치할 때, 기호는 포함된 위치에서 제거합니다.</p>
               </div>
               <div id="op-extract" hidden>
-                <p>선택한 대상 열의 전체 행을 검사해 추출 방식을 추천합니다. 발견한 값은 모델명 후보이며, 적용 전 결과를 확인하세요.</p>
+                <p>모델규격명으로 지정한 열의 현재 대상 전체 행을 검사해 추출 방식을 추천합니다. 발견한 값은 모델명 후보이며, 적용 전 결과를 확인하세요.</p>
                 <button type="button" id="op-recommend-extraction">전체 대상에서 추출 방식 추천받기</button>
                 <div id="op-extraction-suggestions" aria-live="polite"></div>
                 <label>추출 방식 <select id="op-extraction-mode">

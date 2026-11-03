@@ -5,6 +5,11 @@
     var api = window.apiClient;
     var workspace = null;
     var formula = null;
+    var helpContext = null;
+    var helpPanel = document.getElementById("cleaning-help");
+    var helpSimilarityColumn = document.getElementById("cleaning-help-similarity-column");
+    var helpGroup = document.getElementById("cleaning-help-group");
+    var helpExtractColumn = document.getElementById("cleaning-help-extract-column");
     var connection = document.getElementById('connection');
     var message = document.getElementById('message');
     var notice = document.getElementById('notice');
@@ -59,6 +64,8 @@
     }
 
     function closeTaskCards() {
+        helpPanel.hidden = true;
+        helpContext = null;
         if (workspace) workspace.dismiss();
         if (formula) formula.dismiss();
     }
@@ -153,6 +160,10 @@
         document.querySelectorAll('[data-prompt], [data-task]').forEach(function (button) {
             button.disabled = value;
         });
+        document.querySelectorAll('[data-open-cleaning-help]').forEach(function (button) {
+            button.disabled = value;
+        });
+        updateHelpControls();
         if (workspace) workspace.setBusy(value);
         if (formula) formula.setBusy(value);
     }
@@ -168,6 +179,7 @@
     }
 
     function renderMessages(messages) {
+        closeTaskCards();
         workspace.reset();
         formula.reset();
         pendingBubble = null;
@@ -236,10 +248,139 @@
         }
     }
 
+    function updateHelpControls() {
+        helpSimilarityColumn.disabled = helpGroup.disabled = sending || !helpContext;
+        helpExtractColumn.disabled = true;
+        document.getElementById("cleaning-help-setup").disabled = sending;
+        var sameColumn = helpGroup.value && helpGroup.value === helpSimilarityColumn.value;
+        document.getElementById("cleaning-help-similarity-status").textContent = sameColumn
+            ? "기준열과 계산 대상열은 서로 다르게 선택하세요." : "";
+        document.querySelectorAll('[data-cleaning-help]').forEach(function (button) {
+            var kind = button.getAttribute("data-cleaning-help");
+            button.disabled = sending || !helpContext ||
+                (kind === "similarity" && (!helpSimilarityColumn.value || !!sameColumn)) ||
+                (kind === "extract" && !helpExtractColumn.value);
+        });
+    }
+
+    function fillHelpColumns(select, columns, emptyLabel, preferred) {
+        select.textContent = "";
+        var placeholder = document.createElement("option");
+        placeholder.value = ""; placeholder.textContent = emptyLabel;
+        select.appendChild(placeholder);
+        columns.forEach(function (column, index) {
+            var option = document.createElement("option");
+            option.value = column.column_id;
+            option.textContent = (index + 1) + ". " + column.header;
+            select.appendChild(option);
+        });
+        select.value = preferred || "";
+    }
+
+    async function showCleaningHelp(columnIds) {
+        closeTaskCards();
+        var context = await workspace.context();
+        var columns = context ? context.columns : [];
+        var preferred = columnIds || (context ? context.target_column_ids : []);
+        var selected = preferred && preferred.length === 1 ? preferred[0] : "";
+        if (selected && !columns.some(function (column) { return column.column_id === selected; })) {
+            throw new Error("요청한 열이 없어졌습니다. 정제 도움을 다시 열어 주세요.");
+        }
+        fillHelpColumns(helpSimilarityColumn, columns, "계산 대상열을 선택하세요", selected);
+        fillHelpColumns(helpGroup, columns, "제한 없음 · 대상 범위 전체에서 비교", "");
+        var models = context && context.task_type === "model_normalization"
+            ? columns.filter(function (column) { return column.role === "model_spec"; }) : [];
+        if (models.length !== 1) models = [];
+        fillHelpColumns(helpExtractColumn, models, "지정된 모델규격명 열 없음", models.length ? models[0].column_id : "");
+        document.getElementById("cleaning-help-extract-scope").textContent = models.length
+            ? "작업 준비에서 모델규격명으로 지정한 열만 사용합니다."
+            : "모델규격 정제 작업에서 모델규격명 열을 지정해야 사용할 수 있습니다.";
+        helpContext = context;
+        document.getElementById("cleaning-help-setup").hidden = !!context;
+        document.getElementById("cleaning-help-scope").textContent = context
+            ? context.sheet_name + " · 유사도·추출: 현재 대상 " + context.row_count.toLocaleString() +
+              "행 / AI 의견: 작업 표의 모든 데이터 열·설명·전체 행"
+            : "작업 시트를 먼저 준비하세요. 준비 후 작업 화면의 ‘정제 도움’을 누르면 됩니다.";
+        enterConversation();
+        helpPanel.hidden = false;
+        updateHelpControls();
+        document.getElementById("cleaning-help-title").focus();
+    }
+
+    async function currentHelpSelection(kind) {
+        var expected = helpContext;
+        if (!expected) throw new Error("먼저 작업 시트를 준비하세요.");
+        var current = await workspace.context();
+        if (!current || current.workspace_id !== expected.workspace_id ||
+            current.worksheet_id !== expected.worksheet_id || current.table_id !== expected.table_id) {
+            throw new Error("작업 표가 바뀌었습니다. 정제 도움을 다시 열어 주세요.");
+        }
+        if (kind === "advice") return {workspace_id: current.workspace_id};
+        var id = kind === "extract" ? helpExtractColumn.value : helpSimilarityColumn.value;
+        var column = current.columns.find(function (item) { return item.column_id === id; });
+        if (!column) throw new Error("대상 열이 없습니다. 정제 도움을 다시 열어 주세요.");
+        var groupId = kind === "similarity" ? helpGroup.value : "";
+        if (groupId && (groupId === id || !current.columns.some(function (item) { return item.column_id === groupId; }))) {
+            throw new Error("유사도 기준열을 확인하고 정제 도움을 다시 열어 주세요.");
+        }
+        if (kind === "extract") {
+            var models = current.columns.filter(function (item) { return item.role === "model_spec"; });
+            if (current.task_type !== "model_normalization" || models.length !== 1 || models[0].column_id !== id) {
+                throw new Error("모델규격명 대상이 바뀌었습니다. 정제 도움을 다시 열어 주세요.");
+            }
+        }
+        return {column: column, group_column_id: groupId || null, workspace_id: current.workspace_id};
+    }
+
+    document.querySelectorAll('[data-open-cleaning-help]').forEach(function (button) {
+        button.addEventListener('click', async function () {
+            if (sending) return;
+            setBusy(true);
+            try { await showCleaningHelp(); }
+            catch (error) { notice.textContent = error.message; }
+            finally { setBusy(false); }
+        });
+    });
+    helpSimilarityColumn.addEventListener('change', updateHelpControls);
+    helpGroup.addEventListener('change', updateHelpControls);
+    document.getElementById("cleaning-help-setup").addEventListener('click', async function () {
+        if (sending) return;
+        closeTaskCards();
+        await workspace.open();
+    });
+    document.querySelectorAll('[data-cleaning-help]').forEach(function (button) {
+        button.addEventListener('click', async function () {
+            if (sending) return;
+            setBusy(true);
+            try {
+                var kind = button.getAttribute('data-cleaning-help');
+                var selection = await currentHelpSelection(kind);
+                if (kind === "advice") {
+                    setBusy(false);
+                    await sendMessage(selection);
+                } else {
+                    closeTaskCards();
+                    if (kind === "similarity") {
+                        await workspace.configureSimilarity({column_id: selection.column.column_id, group_column_id: selection.group_column_id});
+                    } else if (kind === "extract") {
+                        await workspace.configure({kind: "extract", column_ids: [selection.column.column_id], extraction_mode: null, rules: [], delimiter: null, mappings: []});
+                        setBusy(false);
+                        await workspace.recommendExtraction();
+                    }
+                }
+            } catch (error) { notice.textContent = error.message; }
+            finally { setBusy(false); }
+        });
+    });
+
     async function handleUIAction(action, instruction) {
         closeTaskCards();
         if (!action) return;
 
+        if (action.type === "open_cleaning_help") {
+            await showCleaningHelp(action.column_ids);
+            return;
+        }
         if (action.type === "configure_similarity") {
             await workspace.configureSimilarity(action.similarity);
             return;
@@ -256,10 +397,13 @@
         }
     }
 
-    async function sendMessage() {
+    async function sendMessage(advice) {
         if (sending) return false;
 
-        var value = message.value.trim();
+        var draft = advice ? message.value : null;
+        var value = advice
+            ? "추가 열을 포함한 작업 표의 모든 데이터 열과 열 설명, 전체 행을 함께 보고 AI 정제 의견을 줘."
+            : message.value.trim();
 
         if (!value) {
             notice.textContent = '메시지를 입력해 주세요.';
@@ -267,7 +411,8 @@
         }
 
         // 같은 질문은 기존 ID로 재시도하고, 다른 질문은 새 ID로 진행한다.
-        if (pendingRequest && pendingRequest.message !== value) {
+        if (pendingRequest && (pendingRequest.message !== value ||
+            (advice && !pendingRequest.advice_requested))) {
             pendingRequest = null;
             pendingBubble = null;
             saveSession();
@@ -294,7 +439,11 @@
                 };
                 var context = await workspace.context();
                 checkChat(run);
+                if (advice && (!context || context.workspace_id !== advice.workspace_id)) {
+                    throw new Error("분석 대상이 바뀌었습니다. 정제 도움을 다시 열어 주세요.");
+                }
                 pendingRequest = Object.assign({}, run.request, {
+                    advice_requested: !!advice,
                     message: value, workspace: context
                 });
                 saveSession();
@@ -381,6 +530,7 @@
         } finally {
             endRequest(run);
             setBusy(false);
+            if (draft !== null) message.value = draft;
             message.focus();
         }
     }
