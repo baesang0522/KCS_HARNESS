@@ -151,3 +151,24 @@ input:focus-visible,select:focus-visible{outline:2px solid #75609d;outline-offse
 
 .workspace-launch{margin-left:auto;white-space:nowrap;background:#f5f1fb;color:#70598b;border:1px solid #ddd4eb;border-radius:7px;padding:6px 8px;font-size:11px}
 @media(max-width:340px){.brand{font-size:12px;gap:5px}.topbar{gap:5px}}
+
+/* 정제 도움에서는 기존 작업 설정을 같은 카드 안에 표시한다. */
+#cleaning-help #work-panel {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+}
+#cleaning-help #work-title,
+#cleaning-help #work-panel > [data-close-task],
+#cleaning-help #work-current-summary,
+#cleaning-help #work-current > details,
+#cleaning-help .work-actions,
+#cleaning-help #op-finalize,
+#cleaning-help #sim-back {
+    display: none;
+}
+#cleaning-help[data-mode="extract"] #op-settings > label:first-child,
+#cleaning-help[data-mode="similarity"] #operations {
+    display: none;
+}

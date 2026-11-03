@@ -40,8 +40,6 @@ def split_value(value: str, delimiter: str | None) -> list[str]:
     return parts or [""]
 
 
-# shortcut: 후보는 공백 없는 토큰이다. 공백이 포함된 모델명이 확인되면 경계 규칙을 확장한다.
-MODEL_TOKEN = re.compile(r"[^\W_]+(?:[-_/.][^\W_]+)*", re.UNICODE)
 MODEL_LABEL = re.compile(r"(?<!\w)(?:MODEL|CODE|GRADE)\s*[:：]", re.IGNORECASE)
 
 
@@ -55,16 +53,13 @@ def model_candidates(value: str, mode: str) -> list[str]:
         ]
     elif mode == "labelled":
         found = []
-        for label in MODEL_LABEL.finditer(value):
-            start = label.end()
-            # 줄을 넘겨 다음 항목을 모델명으로 가져오지 않는다.
-            while start < len(value) and value[start] in " \t":
-                start += 1
-            if MODEL_LABEL.match(value, start):
-                continue
-            match = MODEL_TOKEN.match(value, start)
-            if match:
-                found.append(match.group())
+        labels = list(MODEL_LABEL.finditer(value))
+        for index, label in enumerate(labels):
+            # 다음 표기 이름(CODE 등)이 앞 후보에 섞이지 않도록 먼저 범위를 나눈다.
+            end = labels[index + 1].start() if index + 1 < len(labels) else len(value)
+            candidate = re.split(r"[,，:：\r\n]", value[label.end():end], maxsplit=1)[0].strip()
+            if candidate:
+                found.append(candidate)
     else:
         raise ValueError("지원하지 않는 추출 방식입니다.")
     return list(dict.fromkeys(found))

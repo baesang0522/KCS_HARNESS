@@ -6,7 +6,9 @@
             options.status(label + " · " + done.toLocaleString() + "/" + total.toLocaleString());
         }
         function updateRun() {
-            el("run").disabled = options.isBusy() || !["sequence", "levenshtein"].includes(el("method").value);
+            el("run").disabled = options.isBusy() || !el("column").value ||
+                el("column").value === el("group").value ||
+                !["sequence", "levenshtein"].includes(el("method").value);
         }
         function reset() {
             el("panel").hidden = true;
@@ -25,17 +27,17 @@
                 : "글자 추가·삭제·교체 횟수를 문자열 길이에 맞춰 0~100점으로 계산합니다. 작은 철자 차이를 찾는 데 사용합니다.";
         }
         function show(workspace, target, settings) {
-            var ids = [settings.column_id].concat(settings.group_column_id ? [settings.group_column_id] : []);
+            var ids = [settings.column_id, settings.group_column_id].filter(Boolean);
             if (ids.some(function (id) { return !workspace.columns.some(function (c) { return String(c.column_id) === id; }); })) {
                 throw new Error("유사도 검사 대상 열이 없습니다. 다시 요청하세요.");
             }
-            el("column").replaceChildren();
+            el("column").replaceChildren(new Option("계산 대상열을 선택하세요", ""));
             el("group").replaceChildren(new Option("제한 없음", ""));
             workspace.columns.forEach(function (column) {
                 el("column").add(new Option(column.header, String(column.column_id)));
                 el("group").add(new Option(column.header, String(column.column_id)));
             });
-            el("column").value = settings.column_id;
+            el("column").value = settings.column_id || "";
             el("group").value = settings.group_column_id || "";
             el("method").value = "";
             el("scope").textContent = workspace.sheet_name + " · 현재 범위 " + target.row_count.toLocaleString() + "행. 숨긴 행도 포함합니다.";
@@ -44,6 +46,8 @@
             describe();
         }
         el("method").addEventListener("change", describe);
+        el("column").addEventListener("change", updateRun);
+        el("group").addEventListener("change", updateRun);
         el("back").addEventListener("click", function () { if (!options.isBusy()) reset(); });
         el("run").addEventListener("click", async function () {
             if (options.isBusy()) return;

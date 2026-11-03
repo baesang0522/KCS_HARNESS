@@ -7,9 +7,11 @@
     var formula = null;
     var helpContext = null;
     var helpPanel = document.getElementById("cleaning-help");
-    var helpSimilarityColumn = document.getElementById("cleaning-help-similarity-column");
-    var helpGroup = document.getElementById("cleaning-help-group");
-    var helpExtractColumn = document.getElementById("cleaning-help-extract-column");
+    var helpKind = document.getElementById("cleaning-help-kind");
+    var helpPreferredId = null;
+    var workPanel = document.getElementById("work-panel");
+    var workHome = workPanel.parentNode;
+    var workNext = workPanel.nextSibling;
     var connection = document.getElementById('connection');
     var message = document.getElementById('message');
     var notice = document.getElementById('notice');
@@ -64,6 +66,7 @@
     }
 
     function closeTaskCards() {
+        restoreHelpWorkspace();
         helpPanel.hidden = true;
         helpContext = null;
         if (workspace) workspace.dismiss();
@@ -248,66 +251,23 @@
         }
     }
 
-    function updateHelpControls() {
-        helpSimilarityColumn.disabled = helpGroup.disabled = sending || !helpContext;
-        helpExtractColumn.disabled = true;
-        document.getElementById("cleaning-help-setup").disabled = sending;
-        var sameColumn = helpGroup.value && helpGroup.value === helpSimilarityColumn.value;
-        document.getElementById("cleaning-help-similarity-status").textContent = sameColumn
-            ? "기준열과 계산 대상열은 서로 다르게 선택하세요." : "";
-        document.querySelectorAll('[data-cleaning-help]').forEach(function (button) {
-            var kind = button.getAttribute("data-cleaning-help");
-            button.disabled = sending || !helpContext ||
-                (kind === "similarity" && (!helpSimilarityColumn.value || !!sameColumn)) ||
-                (kind === "extract" && !helpExtractColumn.value);
-        });
-    }
-
-    function fillHelpColumns(select, columns, emptyLabel, preferred) {
-        select.textContent = "";
-        var placeholder = document.createElement("option");
-        placeholder.value = ""; placeholder.textContent = emptyLabel;
-        select.appendChild(placeholder);
-        columns.forEach(function (column, index) {
-            var option = document.createElement("option");
-            option.value = column.column_id;
-            option.textContent = (index + 1) + ". " + column.header;
-            select.appendChild(option);
-        });
-        select.value = preferred || "";
-    }
-
-    async function showCleaningHelp(columnIds) {
-        closeTaskCards();
-        var context = await workspace.context();
-        var columns = context ? context.columns : [];
-        var preferred = columnIds || (context ? context.target_column_ids : []);
-        var selected = preferred && preferred.length === 1 ? preferred[0] : "";
-        if (selected && !columns.some(function (column) { return column.column_id === selected; })) {
-            throw new Error("요청한 열이 없어졌습니다. 정제 도움을 다시 열어 주세요.");
+    function restoreHelpWorkspace() {
+        if (workPanel.parentNode !== workHome) {
+            workHome.insertBefore(workPanel, workNext);
         }
-        fillHelpColumns(helpSimilarityColumn, columns, "계산 대상열을 선택하세요", selected);
-        fillHelpColumns(helpGroup, columns, "제한 없음 · 대상 범위 전체에서 비교", "");
-        var models = context && context.task_type === "model_normalization"
-            ? columns.filter(function (column) { return column.role === "model_spec"; }) : [];
-        if (models.length !== 1) models = [];
-        fillHelpColumns(helpExtractColumn, models, "지정된 모델규격명 열 없음", models.length ? models[0].column_id : "");
-        document.getElementById("cleaning-help-extract-scope").textContent = models.length
-            ? "작업 준비에서 모델규격명으로 지정한 열만 사용합니다."
-            : "모델규격 정제 작업에서 모델규격명 열을 지정해야 사용할 수 있습니다.";
-        helpContext = context;
-        document.getElementById("cleaning-help-setup").hidden = !!context;
-        document.getElementById("cleaning-help-scope").textContent = context
-            ? context.sheet_name + " · 유사도·추출: 현재 대상 " + context.row_count.toLocaleString() +
-              "행 / AI 의견: 작업 표의 모든 데이터 열·설명·전체 행"
-            : "작업 시트를 먼저 준비하세요. 준비 후 작업 화면의 ‘정제 도움’을 누르면 됩니다.";
-        enterConversation();
-        helpPanel.hidden = false;
-        updateHelpControls();
-        document.getElementById("cleaning-help-title").focus();
     }
 
-    async function currentHelpSelection(kind) {
+    function updateHelpControls() {
+        helpKind.disabled = sending || !helpContext;
+        document.getElementById("cleaning-help-setup").disabled = sending;
+        document.getElementById("cleaning-help-advice").disabled =
+            sending || !helpContext || helpKind.value !== "advice";
+        var models = helpContext && helpContext.task_type === "model_normalization"
+            ? helpContext.columns.filter(function (column) { return column.role === "model_spec"; }) : [];
+        helpKind.querySelector('option[value="extract"]').disabled = models.length !== 1;
+    }
+
+    async function currentHelpContext() {
         var expected = helpContext;
         if (!expected) throw new Error("먼저 작업 시트를 준비하세요.");
         var current = await workspace.context();
@@ -315,21 +275,67 @@
             current.worksheet_id !== expected.worksheet_id || current.table_id !== expected.table_id) {
             throw new Error("작업 표가 바뀌었습니다. 정제 도움을 다시 열어 주세요.");
         }
-        if (kind === "advice") return {workspace_id: current.workspace_id};
-        var id = kind === "extract" ? helpExtractColumn.value : helpSimilarityColumn.value;
-        var column = current.columns.find(function (item) { return item.column_id === id; });
-        if (!column) throw new Error("대상 열이 없습니다. 정제 도움을 다시 열어 주세요.");
-        var groupId = kind === "similarity" ? helpGroup.value : "";
-        if (groupId && (groupId === id || !current.columns.some(function (item) { return item.column_id === groupId; }))) {
-            throw new Error("유사도 기준열을 확인하고 정제 도움을 다시 열어 주세요.");
-        }
-        if (kind === "extract") {
-            var models = current.columns.filter(function (item) { return item.role === "model_spec"; });
-            if (current.task_type !== "model_normalization" || models.length !== 1 || models[0].column_id !== id) {
-                throw new Error("모델규격명 대상이 바뀌었습니다. 정제 도움을 다시 열어 주세요.");
+        return current;
+    }
+
+    async function showCleaningHelp(columnIds) {
+        closeTaskCards();
+        var context = await workspace.context();
+        var preferred = columnIds || (context ? context.target_column_ids : []);
+        helpPreferredId = preferred && preferred.length === 1 ? preferred[0] : null;
+        if (helpPreferredId && (!context || !context.columns.some(function (column) {
+            return column.column_id === helpPreferredId;
+        }))) throw new Error("요청한 열이 없습니다. 정제 도움을 다시 열어 주세요.");
+        helpContext = context;
+        helpKind.value = "";
+        helpPanel.dataset.mode = "";
+        document.getElementById("cleaning-help-hint").hidden = false;
+        document.getElementById("cleaning-help-advice-panel").hidden = true;
+        document.getElementById("cleaning-help-setup").hidden = !!context;
+        document.getElementById("cleaning-help-scope").textContent = context
+            ? context.sheet_name + " · 도움 방식을 선택하세요."
+            : "작업 시트를 먼저 준비한 뒤 작업 화면의 ‘정제 도움’을 누르세요.";
+        enterConversation();
+        helpPanel.hidden = false;
+        updateHelpControls();
+        document.getElementById("cleaning-help-title").focus();
+    }
+
+    async function chooseHelpMode() {
+        if (sending) return;
+        var mode = helpKind.value;
+        setBusy(true);
+        workspace.dismiss();
+        helpPanel.dataset.mode = mode;
+        document.getElementById("cleaning-help-hint").hidden = !!mode;
+        document.getElementById("cleaning-help-advice-panel").hidden = mode !== "advice";
+        try {
+            if (!mode) return;
+            var current = await currentHelpContext();
+            document.getElementById("cleaning-help-scope").textContent = current.sheet_name +
+                (mode === "advice" ? " · 모든 데이터 열·설명·전체 행"
+                    : " · 현재 대상 " + current.row_count.toLocaleString() + "행");
+            if (mode === "advice") return;
+            document.getElementById("cleaning-help-work").appendChild(workPanel);
+            if (mode === "similarity") {
+                var id = current.columns.some(function (column) {
+                    return column.column_id === helpPreferredId;
+                }) ? helpPreferredId : null;
+                await workspace.configureSimilarity({column_id: id, group_column_id: null});
+            } else if (mode === "extract") {
+                var models = current.columns.filter(function (column) { return column.role === "model_spec"; });
+                if (current.task_type !== "model_normalization" || models.length !== 1) {
+                    throw new Error("작업 준비에서 모델규격명 열을 지정하세요.");
+                }
+                await workspace.configure({kind: "extract", column_ids: [models[0].column_id],
+                    extraction_mode: null, rules: [], delimiter: null, mappings: []});
             }
+        } catch (error) {
+            workPanel.hidden = true;
+            notice.textContent = error.message;
+        } finally {
+            setBusy(false);
         }
-        return {column: column, group_column_id: groupId || null, workspace_id: current.workspace_id};
     }
 
     document.querySelectorAll('[data-open-cleaning-help]').forEach(function (button) {
@@ -341,36 +347,24 @@
             finally { setBusy(false); }
         });
     });
-    helpSimilarityColumn.addEventListener('change', updateHelpControls);
-    helpGroup.addEventListener('change', updateHelpControls);
+    helpKind.addEventListener('change', chooseHelpMode);
     document.getElementById("cleaning-help-setup").addEventListener('click', async function () {
         if (sending) return;
         closeTaskCards();
         await workspace.open();
     });
-    document.querySelectorAll('[data-cleaning-help]').forEach(function (button) {
-        button.addEventListener('click', async function () {
-            if (sending) return;
-            setBusy(true);
-            try {
-                var kind = button.getAttribute('data-cleaning-help');
-                var selection = await currentHelpSelection(kind);
-                if (kind === "advice") {
-                    setBusy(false);
-                    await sendMessage(selection);
-                } else {
-                    closeTaskCards();
-                    if (kind === "similarity") {
-                        await workspace.configureSimilarity({column_id: selection.column.column_id, group_column_id: selection.group_column_id});
-                    } else if (kind === "extract") {
-                        await workspace.configure({kind: "extract", column_ids: [selection.column.column_id], extraction_mode: null, rules: [], delimiter: null, mappings: []});
-                        setBusy(false);
-                        await workspace.recommendExtraction();
-                    }
-                }
-            } catch (error) { notice.textContent = error.message; }
-            finally { setBusy(false); }
-        });
+    document.getElementById("cleaning-help-advice").addEventListener('click', async function () {
+        if (sending || helpKind.value !== "advice") return;
+        setBusy(true);
+        try {
+            var current = await currentHelpContext();
+            setBusy(false);
+            await sendMessage({workspace_id: current.workspace_id});
+        } catch (error) {
+            notice.textContent = error.message;
+        } finally {
+            setBusy(false);
+        }
     });
 
     async function handleUIAction(action, instruction) {

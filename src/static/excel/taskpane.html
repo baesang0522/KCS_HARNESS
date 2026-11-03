@@ -65,17 +65,20 @@
         <button type="button" data-close-task>도움 카드 닫기</button>
         <p id="cleaning-help-scope" role="status"></p>
         <button type="button" id="cleaning-help-setup">작업 시트 준비하기</button>
-        <p id="cleaning-help-similarity-note"><strong>문자열 유사도 계산</strong><br>기준열 값이 같은 행끼리 계산 대상열의 문자열을 비교합니다.</p>
-        <label>기준열 <select id="cleaning-help-group"></select></label>
-        <label>계산 대상열 <select id="cleaning-help-similarity-column"></select></label>
-        <p id="cleaning-help-similarity-status" role="status"></p>
-        <button type="button" data-cleaning-help="similarity" aria-describedby="cleaning-help-similarity-note">문자열 유사도 검사</button>
-        <p id="cleaning-help-extract-note"><strong>모델규격명에서 모델규격 추출</strong><br>문자·숫자 조합이나 MODEL·CODE·GRADE 뒤의 값을 찾습니다.</p>
-        <label>추출 대상 <select id="cleaning-help-extract-column" aria-describedby="cleaning-help-extract-scope"></select></label>
-        <p id="cleaning-help-extract-scope">작업 준비에서 모델규격명으로 지정한 열만 사용합니다.</p>
-        <button type="button" data-cleaning-help="extract" aria-describedby="cleaning-help-extract-note">추출 패턴 찾기</button>
-        <p id="cleaning-help-advice-note"><strong>AI에게 정제 방향 물어보기</strong><br>추가 열을 포함한 모든 데이터 열의 설명과 전체 행을 함께 검토합니다. 의견은 대화에 표시합니다.</p>
-        <button type="button" data-cleaning-help="advice" aria-describedby="cleaning-help-advice-note">AI 의견 받기</button>
+        <label>도움 방식
+          <select id="cleaning-help-kind">
+            <option value="">선택하세요</option>
+            <option value="similarity">문자열 유사도 계산</option>
+            <option value="extract">모델규격명에서 모델규격 추출</option>
+            <option value="advice">AI 정제 의견 받기</option>
+          </select>
+        </label>
+        <p id="cleaning-help-hint">방식을 선택하면 해당 기능의 설정이 표시됩니다.</p>
+        <div id="cleaning-help-work"></div>
+        <div id="cleaning-help-advice-panel" hidden>
+          <p>추가 열과 결과 열을 포함한 모든 데이터 열·열 설명·전체 행을 나눠 검토하고, 결과를 합쳐 정제 방향을 제안합니다.</p>
+          <button type="button" id="cleaning-help-advice">AI 의견 받기</button>
+        </div>
       </section>
       <section class="normalization-panel" id="work-panel" hidden>
         <h2 id="work-title">작업 데이터 준비</h2><button type="button" data-close-task>작업 카드 닫기</button>
@@ -132,7 +135,7 @@
                   <option value="labelled">MODEL·CODE·GRADE 뒤의 값 추출</option>
                 </select></label>
                 <p>문자·숫자 조합은 공백으로 나눈 값 중 문자와 숫자로만 된 값을 찾습니다. AB-123·AB_123·AB/123·AB.123은 제외하며, 220V·10KG는 후보가 될 수 있습니다.</p>
-                <p>표기 뒤 값은 공백·콜론·쉼표 등 구분자 앞까지 가져옵니다. 후보가 여러 개면 줄바꿈으로 모두 표시하고 ‘확인 필요’로 남깁니다. 결과와 추출상태는 새 열에 작성합니다.</p>
+                <p>표기 뒤 값은 공백을 포함해 다음 쉼표·콜론 앞까지 가져옵니다. 줄바꿈이나 다음 MODEL·CODE·GRADE 표기가 나오면 그 앞에서 끝냅니다. 후보가 여러 개면 줄바꿈으로 모두 표시하고 ‘확인 필요’로 남깁니다. 결과와 추출상태는 새 열에 작성합니다.</p>
               </div>
               <div id="op-split" hidden>
                 <label>가져올 부분 <select id="op-part"><option value="all">모든 단어</option><option value="last">마지막 단어만 (두 단어 이상일 때)</option></select></label>
