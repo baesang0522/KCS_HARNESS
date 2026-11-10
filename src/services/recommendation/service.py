@@ -2,7 +2,9 @@ import hashlib
 import logging
 
 from services.errors import ConflictError, ModelProcessingError, NotFoundError
-from services.recommendation.analysis import MODEL_GROUP_ROLES, dumps, generate_advice
+from services.recommendation.analysis import generate_advice
+from services.recommendation.model_io import dumps
+from services.recommendation.selection import MODEL_GROUP_ROLES
 from services.recommendation.schemas import AdviceRequest
 
 
