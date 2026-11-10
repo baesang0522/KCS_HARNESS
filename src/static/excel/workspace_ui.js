@@ -57,8 +57,6 @@
                     "select",
                     "start",
                     "restore",
-                    "target",
-                    "return",
                     "new"
                 ].forEach(function (name) {
                     el(name).addEventListener("click", handlers[name]);

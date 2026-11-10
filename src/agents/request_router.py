@@ -7,7 +7,7 @@ from models.llama_cpp import get_reasoning_content
 from services.operations.schemas import Operation, extraction_column_id
 from services.chat_state import TaskType
 from services.similarity import SimilaritySelection
-from services.recommendation.service import resolve_columns
+from services.recommendation.service import resolve_advice_columns, resolve_columns
 
 
 class RequestDecision(BaseModel):
@@ -114,7 +114,7 @@ async def route_request(runtime, messages, *, task_context: dict):
                 answer="먼저 분석할 작업 시트를 준비해 주세요.",
             ), reasons
 
-        ids = resolve_columns(workspace, decision.analysis_column_ids)
+        ids = resolve_advice_columns(workspace, decision.analysis_column_ids)
         decision = decision.model_copy(update={
             "analysis_column_ids": ids,
             "answer": "대상 열의 전체 데이터를 읽어 조언을 준비하겠습니다.",

@@ -6,11 +6,15 @@ import unicodedata
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import ValidationError
 
+from services.errors import MODEL_RESPONSE_ERROR
 from services.recommendation.schemas import AdviceRequest, CheckedFinding, ComparisonPlan, Review
 
 
 # shortcut: 입력 예산은 바이트 기준, 서버 tokenizer 연결 시 실제 토큰 기준으로 교체.
-INPUT_BYTES = 24000
+INPUT_BYTES = 48000
+SCAN_MAX_ROWS = 100
+MODEL_GROUP_ROLES = ("declared_name", "trade_name", "model_spec")
+TOP_COMBINATIONS = 500
 logger = logging.getLogger(__name__)
 
 
@@ -37,7 +41,7 @@ def available_bytes(prompt: str, base: dict, schema) -> int:
     return remaining
 
 
-def batches(items, limit: int, *, overlap: bool = False):
+def batches(items, limit: int, *, overlap: bool = False, max_items: int | None = None):
     batch = []
     size = 2
 
@@ -47,7 +51,7 @@ def batches(items, limit: int, *, overlap: bool = False):
         if cost + 2 > limit:
             raise ValueError("한 행 또는 검토 결과가 입력 예산을 초과했습니다.")
 
-        if batch and size + cost > limit:
+        if batch and (size + cost > limit or (max_items is not None and len(batch) >= max_items)):
             yield batch
 
             batch = batch[-1:] if overlap else []
@@ -85,7 +89,7 @@ async def ask(model, prompt: str, stage: str, payload: dict, schema):
         ])
 
         if not isinstance(reply, AIMessage):
-            raise ValueError("분석 모델 응답 형식이 올바르지 않습니다.")
+            raise ValueError(MODEL_RESPONSE_ERROR)
 
         reason = reply.response_metadata.get("finish_reason")
         if reason == "length":
@@ -106,10 +110,10 @@ async def ask(model, prompt: str, stage: str, payload: dict, schema):
             raise ValueError(f"조언 생성이 정상 종료되지 않았습니다: {reason}")
 
         if reply.tool_calls or reply.invalid_tool_calls:
-            raise ValueError("조언 모델이 예상하지 않은 도구 호출을 반환했습니다.")
+            raise ValueError(MODEL_RESPONSE_ERROR)
 
         if not isinstance(reply.content, str) or not reply.content.strip():
-            raise ValueError("조언 모델의 최종 답변이 비어 있습니다.")
+            raise ValueError(MODEL_RESPONSE_ERROR)
 
         text = reply.content.strip()
         fenced = re.fullmatch(
@@ -127,8 +131,7 @@ async def ask(model, prompt: str, stage: str, payload: dict, schema):
             logger.warning("조언 응답 검증 실패: stage=%s attempt=%s errors=%s", stage, attempt + 1, errors)
             if attempt == 1:
                 raise ValueError(
-                    "모델이 조언 응답 형식을 지키지 못해 한 번 다시 요청했지만 실패했습니다. "
-                    "다시 시도하거나 분석할 열을 지정해 주세요."
+                    MODEL_RESPONSE_ERROR
                 ) from error
             request_payload["validation_errors"] = errors
 
@@ -136,7 +139,7 @@ async def ask(model, prompt: str, stage: str, payload: dict, schema):
 def check_evidence(review: Review, allowed: set[int]):
     for finding in review.findings:
         if not set(finding.excel_rows) <= allowed:
-            raise ValueError("제공되지 않은 행을 근거로 인용했습니다.")
+            raise ValueError(MODEL_RESPONSE_ERROR)
 
 
 def comparison_key(value: str) -> str:
@@ -146,6 +149,40 @@ def comparison_key(value: str) -> str:
         "",
         unicodedata.normalize("NFKC", value).casefold(),
     )
+
+
+def top_model_combinations(data: AdviceRequest, columns: list[dict]) -> tuple[list[dict], dict]:
+    indexes = []
+    for role in MODEL_GROUP_ROLES:
+        matches = [i for i, column in enumerate(columns) if column.get("role") == role]
+        if len(matches) != 1:
+            raise ValueError("빈도 집계에는 신고품명·거래품명·모델규격명 열이 필요합니다.")
+        indexes.append(matches[0])
+
+    groups = {}
+    for row in data.rows:
+        key = tuple(row.values[i].upper() for i in indexes)
+        if key not in groups:
+            groups[key] = {"row": row, "count": 0}
+        groups[key]["count"] += 1
+
+    selected = sorted(groups.values(), key=lambda item: (-item["count"], item["row"].excel_row))[:TOP_COMBINATIONS]
+    # shortcut: 추가 열은 첫 실제 행의 예시만 제공한다. 그룹 내 차이 분석이 필요하면 별도 집계를 추가한다.
+    rows = [
+        {"excel_row": item["row"].excel_row,
+         "values": [value.upper() for value in item["row"].values],
+         "count": item["count"]}
+        for item in selected
+    ]
+    return rows, {
+        "mode": "uppercase_top_combinations",
+        "group_column_ids": [columns[i]["column_id"] for i in indexes],
+        "total_rows": data.row_count,
+        "total_combinations": len(groups),
+        "selected_combinations": len(rows),
+        "represented_rows": sum(row["count"] for row in rows),
+        "additional_values": "first_row_example_only",
+    }
 
 
 async def generate_advice(
@@ -165,7 +202,11 @@ async def generate_advice(
         for column in workspace["columns"]
     }
     columns = [by_id[column_id] for column_id in data.column_ids]
-    rows = [row.model_dump() for row in data.rows]
+    selection = None
+    if workspace["task_type"] == "model_normalization":
+        rows, selection = top_model_combinations(data, columns)
+    else:
+        rows = [row.model_dump() for row in data.rows]
     by_row = {row["excel_row"]: row for row in rows}
 
     base = {
@@ -173,19 +214,21 @@ async def generate_advice(
         "task_type": workspace["task_type"],
         "columns": columns,
     }
+    if selection is not None:
+        base["selection"] = selection
 
     plan = await ask(model, prompt, "plan", base, ComparisonPlan)
     if (
         len(set(plan.column_ids)) != len(plan.column_ids)
         or not set(plan.column_ids) <= set(data.column_ids)
     ):
-        raise ValueError("모델이 잘못된 비교 열을 선택했습니다.")
+        raise ValueError(MODEL_RESPONSE_ERROR)
 
     scan_limit = available_bytes(prompt, base, Review)
     reports = []
 
     async def scan(ordered_rows, ordering: str):
-        for part in batches(ordered_rows, scan_limit, overlap=True):
+        for part in batches(ordered_rows, scan_limit, overlap=True, max_items=SCAN_MAX_ROWS):
             review = await ask(
                 model,
                 prompt,
@@ -197,7 +240,7 @@ async def generate_advice(
             if review.findings:
                 reports.append(review.model_dump())
 
-    await scan(rows, "excel_row")
+    await scan(rows, "frequency_desc" if selection else "excel_row")
 
     for column_id in plan.column_ids:
         index = data.column_ids.index(column_id)
@@ -265,9 +308,16 @@ async def generate_advice(
             checked.append(result.finding)
 
     names = ", ".join(column["header"] for column in columns)
+    scope = (
+        f"전체 {data.row_count:,}행을 대문자로 변환해 신고품명·거래품명·모델규격명 조합별로 집계하고, "
+        f"{selection['total_combinations']:,}개 조합 중 빈도 상위 {len(rows):,}개를 검토했습니다.\n"
+        f"선정 조합에 해당하는 원본은 {selection['represented_rows']:,}행입니다. "
+        "추가 열·결과 열은 조합별 첫 행의 대문자 변환 예시이며 그룹 전체를 대표하지 않습니다."
+        if selection else f"전체 {data.row_count:,}행의 원문과 열 설명을 검토했습니다."
+    )
     lines = [
         f"분석 대상: {names}",
-        f"전체 {data.row_count:,}행의 원문과 열 설명을 검토했습니다.",
+        scope,
         f"{len(plan.column_ids)}개 열 기준으로 정렬하여 그룹화 후보도 검토했습니다.",
         "아래는 우선 확인할 제안이며 모든 행 쌍의 비교 결과는 아닙니다. "
         "셀은 변경하지 않았습니다.",

@@ -3,9 +3,9 @@ import logging
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agents.request_router import RequestDecision, route_request
-from services.recommendation.service import resolve_columns
+from services.recommendation.service import resolve_advice_columns
 from repositories.conversation_repository import StoredTurn
-from services.errors import ConflictError, ModelProcessingError
+from services.errors import MODEL_RESPONSE_ERROR, ConflictError, ModelProcessingError
 from services.formula.service import formula_job_context
 from services.operations.jobs import operation_history_context
 
@@ -77,7 +77,7 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
             if advice_requested:
                 decision = RequestDecision(
                     intent="recommendation",
-                    analysis_column_ids=resolve_columns(workspace, None),
+                    analysis_column_ids=resolve_advice_columns(workspace, None),
                     answer="대상 열의 전체 데이터를 읽어 조언을 준비하겠습니다.",
                 )
             else:
@@ -95,7 +95,7 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
                 action = {"type": "analyze_data", "column_ids": decision.analysis_column_ids}
         except Exception as error:
             logger.exception("채팅 처리 실패: conversation_id=%s", conversation_id)
-            raise ModelProcessingError("요청을 해석하지 못했습니다. 대상과 조건을 구체적으로 알려주세요.") from error
+            raise ModelProcessingError(MODEL_RESPONSE_ERROR) from error
 
         await conversation.save_turn(StoredTurn(
             request_id=request_id, question=message, answer=answer, reasoning=reasoning,

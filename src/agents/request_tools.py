@@ -2,7 +2,7 @@ from typing import Literal
 from langchain_core.tools import tool
 from services.operations.schemas import Mapping, Operation, Rule, extraction_column_id
 from services.similarity import SimilaritySelection
-from services.recommendation.service import resolve_columns
+from services.recommendation.service import resolve_advice_columns, resolve_columns
 
 
 def build_request_tools(task_context: dict):
@@ -218,7 +218,7 @@ def build_request_tools(task_context: dict):
             column_ids: list[str] | None = None,
     ) -> dict:
         """사용자가 AI/LLM 의견이나 데이터 분석 조언을 명시적으로 요청했을 때 사용한다."""
-        ids = resolve_columns(workspace, column_ids)
+        ids = resolve_advice_columns(workspace, column_ids)
 
         return {
             "intent": "recommendation",

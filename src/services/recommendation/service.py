@@ -1,7 +1,7 @@
 import hashlib
 
 from services.errors import ConflictError, ModelProcessingError, NotFoundError
-from services.recommendation.analysis import dumps, generate_advice
+from services.recommendation.analysis import MODEL_GROUP_ROLES, dumps, generate_advice
 from services.recommendation.schemas import AdviceRequest
 
 
@@ -22,6 +22,19 @@ def resolve_columns(
     if not set(selected) <= set(known):
         raise ValueError("현재 작업 표에 없는 열입니다.")
 
+    return selected
+
+
+def resolve_advice_columns(workspace: dict | None, ids: list[str] | None) -> list[str]:
+    selected = list(resolve_columns(workspace, ids))
+    if workspace["task_type"] == "model_normalization":
+        for role in MODEL_GROUP_ROLES:
+            columns = [column for column in workspace["columns"] if column.get("role") == role]
+            if len(columns) != 1:
+                raise ValueError("빈도 집계에는 신고품명·거래품명·모델규격명 열이 필요합니다.")
+            column_id = str(columns[0]["column_id"])
+            if column_id not in selected:
+                selected.append(column_id)
     return selected
 
 

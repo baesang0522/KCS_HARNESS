@@ -76,7 +76,7 @@
         <p id="cleaning-help-hint">방식을 선택하면 해당 기능의 설정이 표시됩니다.</p>
         <div id="cleaning-help-work"></div>
         <div id="cleaning-help-advice-panel" hidden>
-          <p>추가 열과 결과 열을 포함한 모든 데이터 열·열 설명·전체 행을 나눠 검토하고, 결과를 합쳐 정제 방향을 제안합니다.</p>
+          <p>모델규격 정제는 데이터를 대문자로 바꿔 신고품명·거래품명·모델규격명 조합별 빈도 상위 500개를 검토합니다. 추가 열·결과 열은 조합별 첫 행의 예시와 열 설명을 참고합니다. 해외거래처 정제는 전체 행을 검토합니다. 원본 셀은 변경하지 않습니다.</p>
           <button type="button" id="cleaning-help-advice">AI 의견 받기</button>
         </div>
       </section>
@@ -103,9 +103,6 @@
           <p id="work-current-summary"></p>
           <details><summary>열 구성 보기</summary><pre id="work-column-summary"></pre></details>
           <div class="work-actions">
-            <button type="button" data-open-cleaning-help>정제 도움</button>
-            <button type="button" id="work-target">Excel 선택 범위로 대상 변경</button>
-            <button type="button" id="work-return">작업 표 전체로 돌아가기</button>
             <button type="button" id="work-new">새 원본으로 시작</button>
           </div>
           <section id="operations" aria-label="데이터 처리">
