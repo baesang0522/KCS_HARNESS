@@ -4,6 +4,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 
+from api.errors import validation_message
+
 from services.operations import jobs as service
 from services.operations.jobs import (
     CreateOperationJob,
@@ -44,7 +46,7 @@ async def preview_job(job_id: UUID, conversation_id: UUID, payload: JobPreview, 
         try:
             return service.preview_job(job, payload)
         except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
+            raise HTTPException(status_code=422, detail=validation_message(error)) from error
 
 
 @router.post("/{job_id}/apply", response_model=OperationJob)

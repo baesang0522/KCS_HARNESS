@@ -76,6 +76,14 @@ Excel Add-in에서 모델규격·해외거래처 데이터를 작업 시트로 �
 - `services/recommendation/service.py`: 대화 요청과 분석 연결, 작업 문맥 검증, 오류 처리.
 - `repositories/`: 대화 저장소. `runtime.py`, `models/`: 모델 연결.
 
+### 오류 문구의 책임
+
+- 업무·설정 오류는 서버에서 결정하고 `detail` 문자열로 응답합니다. `api/errors.py`가 입력 검증 오류를 정리하며, 프론트는 서버 문구에 일반적인 실패 문구를 덧붙이지 않습니다.
+- 정제 옵션의 실행 가능 여부는 `Operation.validate_ready()`에서 검사합니다. 작업 생성 때 먼저 검사하므로 잘못된 설정으로 Excel 전체 데이터를 읽지 않습니다. 자연어 라우터용 미완성 설정은 계속 허용합니다.
+- Excel에서 다시 확인해야 하는 작업표·모델규격명 열 오류의 공통 문구는 `services/error_messages.json`에만 둡니다. 서버가 HTML에 안전한 JSON으로 포함하고 `common/error_messages.js`가 읽습니다. 같은 문구를 프론트 소스에 복사하지 않습니다.
+- Excel 연결·범위 변경·쓰기 실패 등 클라이언트만 판단할 수 있는 검사는 유지합니다. 일부 작성·완료 미확인 경고는 재실행에 따른 중복 쓰기를 막기 위해 유지합니다.
+- 서버 응답을 받을 수 없는 연결 실패·프록시 오류·잘못된 응답은 `common/api_client.js`에서 안내합니다. 요청 중지의 `AbortError`는 변환하지 않습니다.
+
 ### 향후 PDF 첨부 경계
 
 PDF 첨부는 아직 구현하지 않았습니다. 추가할 때 프론트 `attachments/`와 백엔드

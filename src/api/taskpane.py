@@ -1,11 +1,14 @@
 """Excel이 이전 화면 파일을 재사용하지 않도록 버전이 붙은 자산을 전달한다."""
 import hashlib
+import json
 import re
 from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
+
+from services.errors import SHARED_MESSAGES
 router = APIRouter()
 ROOT = Path(__file__).resolve().parents[1] / "static" / "excel"
 
@@ -20,6 +23,8 @@ def taskpane():
 
     html = re.sub(r'(src|href)="([^"?]+\.(?:js|css))"', versioned,
                   (ROOT / "taskpane.html").read_text())
+    messages = json.dumps(SHARED_MESSAGES, ensure_ascii=True).replace("<", "\\u003c")
+    html = html.replace("__SERVER_ERROR_MESSAGES__", messages)
     build = hashlib.sha256(html.encode()).hexdigest()[:12]
     html = html.replace('name="kcs-ui-version" content="local"', f'name="kcs-ui-version" content="{build}"')
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})

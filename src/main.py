@@ -4,7 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from api.router import router, service_error_response
+from api.router import router
+from api.errors import service_error_response, request_validation_response
+from fastapi.exceptions import RequestValidationError
 from repositories.conversation_repository import ConversationNotFound, MemoryConversationRepository
 from services.errors import ServiceError
 from runtime import create_runtime
@@ -35,3 +37,5 @@ app.mount(
 
 app.add_exception_handler(ServiceError, service_error_response)
 app.add_exception_handler(ConversationNotFound, service_error_response)
+
+app.add_exception_handler(RequestValidationError, request_validation_response)

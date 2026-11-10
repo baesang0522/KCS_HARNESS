@@ -3,6 +3,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 
+from api.errors import validation_message
+
 from services.formula import service
 from services.formula.schemas import CreateFormulaJobRequest, FormulaApprovalRequest, FormulaPreview, FormulaCompletion
 
@@ -37,7 +39,7 @@ async def approve_preview(formula_job_id: UUID, preview_id: UUID, request: Reque
     try:
         return service.approve_preview(formula_job_id, preview_id, payload, request.app.state.formula_jobs)
     except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
+        raise HTTPException(status_code=422, detail=validation_message(error)) from error
 
 
 @router.post("/{formula_job_id}/previews/{preview_id}/complete")

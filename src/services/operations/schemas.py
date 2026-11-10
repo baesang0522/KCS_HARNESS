@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 Text = Annotated[str, Field(max_length=32767)]
 ColumnId = Annotated[str, Field(min_length=1, max_length=256)]
 TaskType = Literal["model_normalization", "counterparty_cleanup"]
+FIND_REQUIRED = "찾을 문자열을 입력하세요."
 
 
 class StrictModel(BaseModel):
@@ -116,7 +117,7 @@ class Operation(StrictModel):
         if self.kind != "replace" and (self.find is not None or self.replacement):
             raise ValueError("찾을 문자열과 바꿀 값은 치환에서만 사용합니다.")
         if self.find == "":
-            raise ValueError("찾을 문자열이 비어 있습니다.")
+            raise ValueError(FIND_REQUIRED)
         if self.kind != "map" and self.mappings:
             raise ValueError("대표값 목록은 자동 매핑에서만 사용합니다.")
         keys = [mapping_key(item.source) for item in self.mappings]
@@ -125,6 +126,16 @@ class Operation(StrictModel):
         if any(not key for key in keys) or len(set(keys)) != len(keys):
             raise ValueError("공백·대소문자 정리 후 같은 원본 값은 한 번만 매핑하세요. 빈 값은 매핑하지 않습니다.")
         return self
+
+    def validate_ready(self):
+        if self.kind == "extract" and self.extraction_mode is None:
+            raise ValueError("추천을 확인하고 추출 방식을 선택하세요.")
+        if self.kind == "replace" and self.find is None:
+            raise ValueError(FIND_REQUIRED)
+        if self.kind == "map" and not self.mappings:
+            raise ValueError("원본 값과 대표값을 지정하세요.")
+        if self.kind == "group" and self.group_mode == "manual" and self.source_row is None:
+            raise ValueError("대표값의 기준이 되는 행을 지정하세요.")
 
 
 class Row(StrictModel):
@@ -138,17 +149,9 @@ class OperationRequest(StrictModel):
 
     @model_validator(mode="after")
     def validate_rows(self):
-        if self.operation.kind == "extract" and self.operation.extraction_mode is None:
-            raise ValueError("추천을 확인하고 추출 방식을 선택하세요.")
+        self.operation.validate_ready()
         if self.operation.kind != "group" and len(self.rows) > 10000:
             raise ValueError("묶음 이외의 기능은 최대 10,000행씩 요청하세요.")
-        if self.operation.kind == "replace" and self.operation.find is None:
-            raise ValueError("찾을 문자열을 입력하세요.")
-        if self.operation.kind == "map" and not self.operation.mappings:
-            raise ValueError("원본 값과 대표값을 지정하세요.")
-        if (self.operation.kind =="group" and self.operation.group_mode == "manual"
-                and self.operation.source_row is None):
-            raise ValueError("대표값의 기준이 되는 행을 지정하세요.")
         if len({row.excel_row for row in self.rows}) != len(self.rows):
             raise ValueError("행 번호가 중복되었습니다.")
         if any(len(row.values) != len(self.operation.input_column_ids) for row in self.rows):
