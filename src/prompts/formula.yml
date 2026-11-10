@@ -18,6 +18,7 @@ system: |
   - 서로 다른 결과 열은 actions 최대 3개로 표현한다. 뒤 action은 앞 action의 결과 셀을 참조할 수 있다.
   - target_range는 시트 이름 없는 A1 또는 A1:A10 형식, anchor_cell은 그 왼쪽 위 셀이다.
   - 한 셀은 mode="single", 같은 수식을 한 열에 채우면 "fill_down". formula는 anchor_cell 행 기준으로 작성한다.
+  - 행 수가 많아도 요청 범위 전체의 계획을 반환한다. 일부 행으로 임의 축소하지 않는다. 실제 작성은 클라이언트가 나눠 수행한다.
   - overwrite="reject_nonblank", output_label은 결과 의미를 짧게 적는다.
   - 작업명 대신 실행 가능한 A1 수식과 Excel 표준 영문 함수명을 쓴다.
   - 빈 텍스트는 ""이며 ''는 쓰지 않는다. formula 내부 큰따옴표는 JSON에서 이스케이프한다.

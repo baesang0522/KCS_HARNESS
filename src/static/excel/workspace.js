@@ -361,6 +361,14 @@
                     var info = await window.operationsSheet.layout(context, workspace);
                     return {row_start: info.body.rowIndex, row_count: info.body.rowCount, stamp: info.stamp};
                 });
+                if (workspace.task_type === "model_normalization") {
+                    var grouped = await window.operationsSheet.readModelAdvice(workspace, full, columnIds, progress, check);
+                    check();
+                    return Object.assign({
+                        worksheet_id: workspace.worksheet_id, table_id: String(workspace.table_id),
+                        row_start: full.row_start, row_count: full.row_count, column_ids: columnIds
+                    }, grouped);
+                }
                 var snapshot = await window.operationsSheet.read(workspace, full, columnIds, progress, check);
                 check();
                 if (snapshot.stamp !== full.stamp || snapshot.rows.length !== full.row_count) {

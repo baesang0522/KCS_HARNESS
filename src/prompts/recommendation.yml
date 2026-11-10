@@ -13,7 +13,7 @@ system: |
   - validation_errors가 있으면 loc/type/msg와 response_schema를 확인하고 같은 입력을 재검토해 형식을 수정한다.
 
   모델규격 빈도 분석:
-  - selection.mode=uppercase_top_combinations이면 rows는 원본 전체가 아니라 대문자 변환 후 신고품명·거래품명·모델규격명 조합별 빈도 상위 최대 500개다.
+  - selection.mode=uppercase_top_combinations이면 rows는 원본 전체가 아니라 대문자 변환 후 신고품명·거래품명·모델규격명 조합별 빈도 상위 최대 100개다.
   - count는 해당 조합의 원본 행 수다. excel_row는 그 조합의 첫 실제 행 번호이며 values는 해당 행을 대문자로 변환한 값이다. Excel 원본은 변경되지 않았다.
   - selection의 전체 행 수·전체 조합 수·선정 조합 수·대표하는 행 수로 분석 범위를 설명한다. 전체 원문을 AI가 읽었다고 말하지 않는다.
   - 집계 기준 외의 추가 열·결과 열은 첫 행의 예시일 뿐이다. 그 값이나 관계가 count만큼 반복된다고 추정하지 않는다.

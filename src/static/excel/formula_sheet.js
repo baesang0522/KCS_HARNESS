@@ -1,5 +1,6 @@
 "use strict";
 (function () {
+    var batchSize = 1000;
     function requireFormulaHost() {
         if (typeof Excel === "undefined" || typeof Office === "undefined") {
             throw new Error("엑셀 안에서 추가 기능을 열어주세요.");
@@ -21,8 +22,8 @@
             sheet.load("id,name");
             await context.sync();
 
-            if (range.rowCount > 10000 || range.columnCount > 20) {
-                throw new Error("수식 작업은 최대 10,000행·20열 범위를 선택하세요.");
+            if (range.columnCount > 20) {
+                throw new Error("수식 작업은 최대 20열 범위를 선택하세요.");
             }
 
             var sampleSize = Math.min(20, range.rowCount);
@@ -64,13 +65,17 @@
         });
     }
 
-    function formulaTargetSnapshot(target, formula, sourceAddress, reason) {
-        var occupied = target.values.some(function (row, rowIndex) {
-            return row.some(function (value, columnIndex) {
-                return value !== "" || target.formulas[rowIndex][columnIndex] !== "";
-            });
-        });
-        if (occupied) return null;
+    function inspectFormulaTarget(target) {
+        target.load("address,rowCount,columnCount,rowIndex,columnIndex");
+        // 전체 셀 값을 전송하지 않고 빈 문자열을 반환하는 수식까지 검사한다.
+        return {range: target,
+            constants: target.getSpecialCellsOrNullObject("Constants"),
+            formulas: target.getSpecialCellsOrNullObject("Formulas")};
+    }
+
+    function formulaTargetSnapshot(inspection, formula, sourceAddress, reason) {
+        if (!inspection.constants.isNullObject || !inspection.formulas.isNullObject) return null;
+        var target = inspection.range;
         return {
             address: target.address,
             target_range: target.address.slice(target.address.lastIndexOf("!") + 1)
@@ -101,13 +106,12 @@
             var sheet = context.workbook.worksheets.getItem(selection.worksheet_id);
             var planned = actions.map(function (action) {
                 var target = sheet.getRange(action.target_range);
-                target.load("address,rowCount,columnCount,rowIndex,columnIndex,values,formulas");
-                return target;
+                return inspectFormulaTarget(target);
             });
             await context.sync();
 
             var snapshots = planned.map(function (target, index) {
-                if (formulaTargetOverlaps(target, selection)) {
+                if (formulaTargetOverlaps(target.range, selection)) {
                     throw new Error("결과 범위가 원본 선택 범위와 겹칩니다.");
                 }
                 return formulaTargetSnapshot(
@@ -136,8 +140,7 @@
                     selection.row_count,
                     1
                 );
-                candidate.load("address,rowCount,columnCount,rowIndex,columnIndex,values,formulas");
-                candidates.push(candidate);
+                candidates.push(inspectFormulaTarget(candidate));
             }
             await context.sync();
             var result;
@@ -171,13 +174,13 @@
                 selection.row_count,
                 1
             );
-            target.load("address,rowCount,columnCount,rowIndex,columnIndex,values,formulas");
+            var inspection = inspectFormulaTarget(target);
             await context.sync();
             if (formulaTargetOverlaps(target, selection)) {
                 throw new Error("결과 열은 원본 선택 범위와 겹칠 수 없습니다.");
             }
             var result = formulaTargetSnapshot(
-                target, preview.plan.actions[0].formula, selection.address, "manual"
+                inspection, preview.plan.actions[0].formula, selection.address, "manual"
             );
             if (!result) {
                 throw new Error("선택한 결과 범위에 기존 값이나 수식이 있습니다.");
@@ -195,36 +198,53 @@
         }
     }
 
-    async function applyFormulaPreview(preview, selection) {
+    async function applyFormulaPreview(preview, selection, progress) {
         await validateFormulaPreview(preview, selection);
         var actions = preview.plan.actions;
+        var completed = 0, attempted = false, activeRange = "";
         try {
             return await Excel.run(async function (context) {
                 var sheet = context.workbook.worksheets.getItem(selection.worksheet_id);
                 var targets = actions.map(function (action) {
                     var target = sheet.getRange(action.target_range);
-                    var anchor = sheet.getRange(action.anchor_cell);
-                    // 텍스트 서식이 상속된 열도 수식으로 계산되도록 먼저 변경한다.
-                    target.numberFormat = [["General"]];
-                    anchor.formulas = [[action.formula]];
-                    if (action.mode === "fill_down") {
-                        anchor.autoFill(action.target_range, "FillCopy");
-                    }
-                    target.calculate();
-                    target.load("address,rowCount,columnCount,rowIndex,columnIndex,text");
+                    target.load("address,rowCount,columnCount,rowIndex,columnIndex");
                     return target;
                 });
                 await context.sync();
-
-                var errors = targets.reduce(function (count, target) {
-                    return count + target.text.reduce(function (targetCount, row) {
-                        return targetCount + row.filter(function (value) {
-                            return typeof value === "string" && value.startsWith("#");
-                        }).length;
-                    }, 0);
-                }, 0);
-                if (errors) {
-                    throw new Error("계산 결과에 Excel 오류가 " + errors + "개 있습니다.");
+                var total = targets.reduce(function (sum, target) { return sum + target.rowCount; }, 0);
+                // 뒤 결과가 앞 결과를 참조할 수 있으므로 결과 열 순서대로 완료한다.
+                for (var index = 0; index < targets.length; index++) {
+                    var target = targets[index], action = actions[index];
+                    var anchor = sheet.getRange(action.anchor_cell);
+                    for (var offset = 0; offset < target.rowCount; offset += batchSize) {
+                        var count = Math.min(batchSize, target.rowCount - offset);
+                        var part = sheet.getRangeByIndexes(target.rowIndex + offset, target.columnIndex, count, 1);
+                        activeRange = action.target_range + " 중 " + (target.rowIndex + offset + 1) +
+                            "~" + (target.rowIndex + offset + count) + "행";
+                        var inspection = inspectFormulaTarget(part);
+                        await context.sync();
+                        activeRange = part.address;
+                        if (!inspection.constants.isNullObject || !inspection.formulas.isNullObject) {
+                            throw new Error("작성할 범위에 기존 값이나 수식이 있습니다.");
+                        }
+                        if (progress) progress("수식 작성", completed, total);
+                        attempted = true;
+                        part.numberFormat = Array.from({length: count}, function () { return ["General"]; });
+                        if (offset === 0) {
+                            anchor.formulas = [[action.formula]];
+                            if (count > 1) anchor.autoFill(part, "FillCopy");
+                        } else {
+                            // Excel의 복사를 사용해 상대·절대·혼합 참조를 그대로 유지한다.
+                            part.copyFrom(anchor, "Formulas");
+                        }
+                        part.calculate();
+                        part.load("valueTypes");
+                        await context.sync();
+                        var errors = part.valueTypes.filter(function (row) { return row[0] === "Error"; }).length;
+                        if (errors) throw new Error("계산 결과에 Excel 오류가 " + errors + "개 있습니다.");
+                        completed += count;
+                        if (progress) progress("수식 계산 확인", completed, total);
+                    }
                 }
                 return {
                     address: targets.map(function (target) { return target.address; }).join(", "),
@@ -235,7 +255,8 @@
                 };
             });
         } catch (error) {
-            error.message = "일부 수식이 작성되었을 수 있습니다. 결과 범위를 확인하세요. " + error.message;
+            error.message = (attempted ? "일부 수식이 작성되었을 수 있습니다. " : "수식을 작성하지 않았습니다. ") +
+                "계산 확인 완료 " + completed + "셀 · 확인할 범위: " + activeRange + ". " + error.message;
             throw error;
         }
     }

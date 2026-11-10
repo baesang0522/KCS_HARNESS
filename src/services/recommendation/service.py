@@ -1,4 +1,5 @@
 import hashlib
+import logging
 
 from services.errors import ConflictError, ModelProcessingError, NotFoundError
 from services.recommendation.analysis import MODEL_GROUP_ROLES, dumps, generate_advice
@@ -91,6 +92,7 @@ async def process_recommendation(
             except ValueError as error:
                 raise ModelProcessingError(str(error)) from error
             except Exception as error:
+                logging.getLogger(__name__).exception("AI 조언 생성 실패: request_id=%s", rid)
                 raise ModelProcessingError(
                     "전체 데이터 조언 생성에 실패했습니다."
                 ) from error
