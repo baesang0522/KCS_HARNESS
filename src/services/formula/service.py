@@ -8,7 +8,7 @@ from services.errors import ConflictError, NotFoundError
 from services.formula.schemas import (
     CreateFormulaJobRequest, FormulaAction, FormulaApprovalRequest, FormulaPlan,
     FormulaConversationMessage, FormulaHistoryEntry, FormulaPlanningContext,
-    FormulaPreview, FormulaJob, range_bounds,
+    FormulaPreview, FormulaJob, FormulaCompletion, range_bounds,
 )
 
 
@@ -36,6 +36,15 @@ def validate_source_reference(plan: FormulaPlan, source: CreateFormulaJobRequest
     )
     if not any(reference.search(action.formula) for action in plan.actions):
         raise ValueError("조회·상품 작업 수식이 선택한 원본 키를 참조하지 않습니다.")
+
+
+def validate_output_scope(plan: FormulaPlan, source: CreateFormulaJobRequest) -> None:
+    for action in plan.actions:
+        first, col, last, _ = range_bounds(action.target_range)
+        if first < source.row_start + 1 or last > source.row_start + source.row_count:
+            raise ValueError("수식 결과는 선택한 데이터 행 범위 안에 있어야 합니다.")
+        if source.column_start < col <= source.column_start + source.column_count:
+            raise ValueError("수식 결과 범위가 원본 선택 범위와 겹칩니다.")
 
 
 def parse_formula_plan(raw: str) -> FormulaPlan:
@@ -83,6 +92,7 @@ def public_formula_job(formula_job: FormulaJob) -> dict:
             str(formula_job.approved_preview_id) if formula_job.approved_preview_id else None
         ),
         "error": formula_job.error,
+        "result": formula_job.result.model_dump(mode="json") if formula_job.result else None,
     }
 
 
@@ -112,6 +122,12 @@ async def create_formula_job(payload: CreateFormulaJobRequest, repository, formu
         if len(formula_jobs) >= 100:
             raise ConflictError("개발용 작업 수 제한에 도달했습니다.")
         previous = formula_jobs.get(conversation.workflow.active_formula_job_id)
+        def same_scope(item):
+            return (isinstance(item, FormulaJob) and item.source.conversation_id == payload.conversation_id
+                    and item.source.worksheet_id == payload.worksheet_id
+                    and item.source.workspace_id == payload.workspace_id and item.source.table_id == payload.table_id)
+        if not same_scope(previous):
+            previous = None
         history = [
             FormulaHistoryEntry(
                 instruction=item.source.instruction,
@@ -124,8 +140,7 @@ async def create_formula_job(payload: CreateFormulaJobRequest, repository, formu
             if (
                 isinstance(item, FormulaJob)
                 and item.preview is not None
-                and item.source.conversation_id == payload.conversation_id
-                and item.source.sheet_name == payload.sheet_name
+                and same_scope(item)
             )
         ][-5:]
         recent_messages = []
@@ -157,7 +172,7 @@ async def create_formula_job(payload: CreateFormulaJobRequest, repository, formu
         formula_job = FormulaJob(source=payload, planning_context=planning_context)
         formula_jobs[key] = formula_job
         conversation.workflow.active_formula_job_id = key
-        conversation.workflow.task_type = "formula"
+        conversation.workflow.task_type = payload.workspace_task_type or "formula"
         conversation.workflow.pending_intent = None
         conversation.workflow.phase = "FORMULA_JOB_ATTACHED"
         return public_formula_job(formula_job)
@@ -170,6 +185,8 @@ async def plan_formula_job(formula_job_id: UUID, formula_jobs: dict, runtime) ->
     if formula_job.status in {"PREVIEW_READY", "NEEDS_INPUT"}:
         return public_formula_job(formula_job)
 
+    if formula_job.status not in {"CREATED", "FAILED"}:
+        raise ConflictError("적용을 시작한 수식은 다시 계획하거나 실행할 수 없습니다.")
     formula_job.status, formula_job.error = "PLANNING", ""
     try:
         source = formula_job.source
@@ -189,6 +206,7 @@ async def plan_formula_job(formula_job_id: UUID, formula_jobs: dict, runtime) ->
                     "row_count": source.row_count,
                     "column_count": source.column_count,
                     "samples": [row.model_dump() for row in source.samples],
+                    "input_columns": [column.model_dump() for column in source.input_columns],
                 },
                 "sheet_context": (
                     source.sheet_context.model_dump(mode="json")
@@ -199,6 +217,7 @@ async def plan_formula_job(formula_job_id: UUID, formula_jobs: dict, runtime) ->
         )
         plan = parse_formula_plan(response.content.strip())
         validate_source_reference(plan, source)
+        validate_output_scope(plan, source)
         formula_job.preview = FormulaPreview(plan=plan)
         formula_job.approved_preview_id = None
         formula_job.status = "PREVIEW_READY" if plan.actions else "NEEDS_INPUT"
@@ -226,6 +245,7 @@ def approve_preview(
         or formula_job.preview.preview_id != preview_id
     ):
         raise ConflictError("확인한 수식 계획이 현재 미리보기와 다릅니다.")
+    revised = formula_job.preview
     if payload is not None:
         requested_ranges = payload.ranges()
         if len(requested_ranges) != len(formula_job.preview.plan.actions):
@@ -243,19 +263,50 @@ def approve_preview(
                 "target_range": target_range,
                 "anchor_cell": target_range.split(":", 1)[0],
             }))
-        formula_job.preview = FormulaPreview(
+        revised = FormulaPreview(
             preview_id=formula_job.preview.preview_id,
-            plan=formula_job.preview.plan.model_copy(update={
-                "actions": tuple(revised_actions),
-            }),
+            plan=FormulaPlan.model_validate({**formula_job.preview.plan.model_dump(),
+                                            "actions": tuple(revised_actions)}),
         )
+    validate_output_scope(revised.plan, formula_job.source)
+    formula_job.preview = revised
     formula_job.approved_preview_id = preview_id
+    formula_job.status = "APPLYING"
     return formula_job.preview
 
 
-def complete_formula_job(formula_job_id: UUID, preview_id: UUID, formula_jobs: dict) -> dict:
-    formula_job = find_formula_job(formula_jobs, formula_job_id)
-    if formula_job.approved_preview_id != preview_id:
+def complete_formula_job(formula_job_id: UUID, preview_id: UUID, payload: FormulaCompletion, formula_jobs: dict) -> dict:
+    job = find_formula_job(formula_jobs, formula_job_id)
+    if job.approved_preview_id != preview_id or job.preview is None:
         raise ConflictError("승인된 수식 계획만 완료할 수 있습니다.")
-    formula_job.status = "APPLIED"
-    return public_formula_job(formula_job)
+    if job.status == "APPLIED":
+        if job.result != payload:
+            raise ConflictError("이미 기록된 수식 결과와 다릅니다.")
+        return public_formula_job(job)
+    if job.status != "APPLYING":
+        raise ConflictError("적용 중인 수식만 완료할 수 있습니다.")
+    if len(payload.targets) != len(job.preview.plan.actions):
+        raise ConflictError("실제 결과 열 개수가 승인한 계획과 다릅니다.")
+    for target, action in zip(payload.targets, job.preview.plan.actions, strict=True):
+        actual = (target.row_start + 1, target.column_start + 1,
+                  target.row_start + target.row_count, target.column_start + target.column_count)
+        if actual != range_bounds(action.target_range):
+            raise ConflictError("실제 수식 결과 범위가 승인한 계획과 다릅니다.")
+    ids = payload.result_column_ids
+    if (len(set(ids)) != len(ids) or
+        (job.source.workspace_id is not None and len(ids) != len(payload.targets)) or
+        (job.source.workspace_id is None and ids) or
+        set(ids) & {column.column_id for column in job.source.input_columns}):
+        raise ConflictError("수식 결과 열 ID가 올바르지 않습니다.")
+    job.result = payload
+    job.status = "APPLIED"
+    return public_formula_job(job)
+
+
+def mark_formula_unknown(formula_job_id: UUID, preview_id: UUID, formula_jobs: dict) -> dict:
+    job = find_formula_job(formula_jobs, formula_job_id)
+    if job.approved_preview_id != preview_id or job.status not in {"APPLYING", "UNKNOWN"}:
+        raise ConflictError("적용을 시작한 수식만 완료 미확인으로 기록할 수 있습니다.")
+    job.status = "UNKNOWN"
+    job.error = "수식 적용 완료를 확인하지 못했습니다. 결과 범위를 확인하세요. 자동 재실행하지 않습니다."
+    return public_formula_job(job)

@@ -35,7 +35,7 @@ class CreateOperationJob(StrictModel):
     table_id: ColumnId
     task_type: TaskType
     row_start: int = Field(ge=0, lt=1048576)
-    row_count: int = Field(ge=1, lt=400000)
+    row_count: int = Field(ge=1, le=400000)
     operation: Operation
     model_spec_column_id: ColumnId | None = None
 

@@ -1,10 +1,10 @@
 """수식 작업 API. 공통 문자열 연산은 operations 라우터에서 처리한다."""
 from uuid import UUID
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from services.formula import service
-from services.formula.schemas import CreateFormulaJobRequest, FormulaApprovalRequest, FormulaPreview
+from services.formula.schemas import CreateFormulaJobRequest, FormulaApprovalRequest, FormulaPreview, FormulaCompletion
 
 router = APIRouter(prefix="/formula-jobs", tags=["formula"])
 
@@ -34,9 +34,17 @@ async def analyze_formula_job(formula_job_id: UUID, request: Request):
 @router.post("/{formula_job_id}/previews/{preview_id}/approve", response_model=FormulaPreview)
 async def approve_preview(formula_job_id: UUID, preview_id: UUID, request: Request,
                           payload: FormulaApprovalRequest | None = None):
-    return service.approve_preview(formula_job_id, preview_id, payload, request.app.state.formula_jobs)
+    try:
+        return service.approve_preview(formula_job_id, preview_id, payload, request.app.state.formula_jobs)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @router.post("/{formula_job_id}/previews/{preview_id}/complete")
-async def complete_preview(formula_job_id: UUID, preview_id: UUID, request: Request):
-    return service.complete_formula_job(formula_job_id, preview_id, request.app.state.formula_jobs)
+async def complete_preview(formula_job_id: UUID, preview_id: UUID, payload: FormulaCompletion, request: Request):
+    return service.complete_formula_job(formula_job_id, preview_id, payload, request.app.state.formula_jobs)
+
+
+@router.post("/{formula_job_id}/previews/{preview_id}/unknown")
+async def unknown_preview(formula_job_id: UUID, preview_id: UUID, request: Request):
+    return service.mark_formula_unknown(formula_job_id, preview_id, request.app.state.formula_jobs)

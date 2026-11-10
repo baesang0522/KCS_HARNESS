@@ -19,4 +19,5 @@ class WorkFlowState:
         "WAITING_TASK_TYPE",
         "WAITING_SELECTION",
         "FORMULA_JOB_ATTACHED",
+        "WORKSPACE_READY",
     ] = "IDLE"

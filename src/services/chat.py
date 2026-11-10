@@ -7,7 +7,7 @@ from services.recommendation.service import resolve_advice_columns
 from repositories.conversation_repository import StoredTurn
 from services.errors import MODEL_RESPONSE_ERROR, ConflictError, ModelProcessingError
 from services.formula.service import formula_job_context
-from services.operations.jobs import operation_history_context
+from services.execution_history import execution_history_context, same_formula_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -31,18 +31,21 @@ def build_task_context(state, formula_jobs: dict, *, operation_jobs: dict,
     ):
         raise ValueError("현재 대화와 작업의 연결이 일치하지 않습니다.")
 
+    if not same_formula_workspace(formula_job, conversation_id, workspace):
+        formula_job = None
+
     return {
         "pending_intent": state.pending_intent,
         "task_type": (
             workspace["task_type"] if workspace else state.task_type
         ),
-        "phase": state.phase,
+        "phase": ("WORKSPACE_READY" if workspace and not formula_job else state.phase),
         "workspace": workspace,
         "active_formula_job": (
             formula_job_context(formula_job) if formula_job else None
         ),
-        "operation_history": operation_history_context(
-            operation_jobs,
+        "execution_history": execution_history_context(
+            operation_jobs, formula_jobs,
             conversation_id=conversation_id,
             workspace=workspace,
         ),
@@ -85,6 +88,8 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
             answer = decision.answer
             if decision.intent == "start_task":
                 action = {"type": "confirm_selection", "task_type": decision.task_type}
+                if decision.task_type == "formula" and workspace:
+                    action.update(workspace_id=str(workspace["workspace_id"]), column_ids=decision.formula_column_ids)
             elif decision.intent == "operation":
                 action = {"type": "configure_operation", "operation": decision.operation.model_dump()}
             elif decision.intent == "similarity":
@@ -102,7 +107,14 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
             ui_action=action, request_context=workspace, advice_requested=advice_requested,
         ))
         if decision.intent == "start_task":
-            state.task_type, state.pending_intent, state.phase = decision.task_type, None, "WAITING_SELECTION"
+            state.task_type = workspace["task_type"] if workspace and decision.task_type == "formula" else decision.task_type
+            state.pending_intent, state.phase = None, "WAITING_SELECTION"
+            if decision.task_type != "formula":
+                state.active_formula_job_id = None
+
+        elif workspace and decision.intent in {"operation", "similarity", "cleaning_help", "recommendation"}:
+            state.task_type, state.pending_intent, state.phase = workspace["task_type"], None, "WORKSPACE_READY"
+            state.active_formula_job_id = None
 
         elif decision.intent == "clarify" and not workspace:
             state.pending_intent = state.pending_intent or message
