@@ -70,13 +70,23 @@ def build_request_tools(task_context: dict):
             task_type: Literal[
                 "model_normalization", "counterparty_cleanup", "formula"
             ],
+            input_column_ids: list[str] | None = None,
     ) -> dict:
         """새 업무를 시작하거나 수식을 요청한다. 기존 정제 작업에는 사용하지 않는다.
         현재 작업 시트가 있어도 사용자가 업무 전환을 명시하면 사용한다.
         같은 업무 안의 전처리, 치환, 분리 요청에는 사용하지 않는다."""
+        if task_type == "formula" and workspace:
+            if not input_column_ids:
+                raise ValueError("수식에 사용할 입력 열을 실제 열 ID로 지정하세요. 모호하면 ask_user로 확인하세요.")
+            resolve_columns(workspace, input_column_ids)
+            if len(input_column_ids) > 20:
+                raise ValueError("수식 입력은 최대 20열입니다.")
+        elif input_column_ids is not None:
+            raise ValueError("작업 표의 수식 요청에만 입력 열 ID를 지정하세요.")
         return {
             "intent": "start_task",
             "task_type": task_type,
+            "formula_column_ids": input_column_ids,
             "operation": None,
             "answer": "작업할 범위를 선택하고 설정을 확인해 주세요.",
         }

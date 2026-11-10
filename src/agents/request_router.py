@@ -16,6 +16,7 @@ class RequestDecision(BaseModel):
     task_type: TaskType | None = None
     operation: Operation | None = None
     similarity: SimilaritySelection | None = None
+    formula_column_ids: list[str] | None = Field(default=None, min_length=1, max_length=20)
     answer: str = Field(min_length=1, max_length=8000)
     analysis_column_ids: list[str] | None = Field(default=None, max_length=200)
 
@@ -27,6 +28,8 @@ class RequestDecision(BaseModel):
         if (self.intent == "operation" and self.task_type is not None
                 and self.task_type == (info.context or {}).get("workspace_task_type")):
             self.task_type = None
+        if self.formula_column_ids is not None and (self.intent != "start_task" or self.task_type != "formula"):
+            raise ValueError("수식 작업에만 formula_column_ids를 지정하세요.")
         if self.intent == "start_task" and self.task_type is None:
             raise ValueError("작업 시작에는 작업 종류가 필요합니다.")
         if self.intent != "start_task" and self.task_type is not None:
@@ -82,6 +85,14 @@ async def route_request(runtime, messages, *, task_context: dict):
             context=validation_context,
         )
         reasons = []
+
+    if decision.intent == "start_task" and decision.task_type == "formula":
+        if workspace:
+            if not decision.formula_column_ids:
+                return RequestDecision(intent="clarify", answer="수식에 사용할 열을 알려주세요. 비교할 열이 있다면 함께 지정해 주세요."), reasons
+            resolve_columns(workspace, decision.formula_column_ids)
+        elif decision.formula_column_ids is not None:
+            raise ValueError("수식 입력 열을 연결할 작업 표가 없습니다.")
 
     if decision.operation:
         if not workspace:

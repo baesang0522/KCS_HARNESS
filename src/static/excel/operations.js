@@ -274,16 +274,6 @@
                     data.snapshot, data.values, names, output, progress
                 );
 
-                var saveError = null;
-                try {
-                    result.columns.forEach(function (column, index) {
-                        column.description = resultDescription(data, index);
-                    });
-                    await options.result(result, data.job);
-                } catch (error) {
-                    saveError = error;
-                }
-
                 await options.jobs.status(
                     data.job,
                     "APPLIED",
@@ -292,8 +282,10 @@
                     })
                 );
                 recorded = true;
-
-                if (saveError) throw saveError;
+                result.columns.forEach(function (column, index) {
+                    column.description = resultDescription(data, index);
+                });
+                await options.result(result, data.job);
 
                 complete(
                     result.row_count.toLocaleString() +

@@ -386,7 +386,7 @@
         }
         if (action.type !== "confirm_selection") throw new Error("지원하지 않는 화면 요청입니다.");
         if (action.task_type === "formula") {
-            formula.openAndSelect(instruction);
+            formula.openAndSelect(instruction, {workspace_id: action.workspace_id, column_ids: action.column_ids});
         } else {
             await workspace.open(action.task_type);
         }
@@ -611,6 +611,8 @@
         reportStop: reportStop,
         getTarget: workspace.formulaTarget,
         prepareOutput: workspace.prepareFormulaOutput,
+        validateSource: workspace.validateFormulaSource,
+        getResultColumns: workspace.formulaResultColumns,
         onResult: workspace.formulaResult,
         complete: completeTask,
         isReady: function () { return ready; },

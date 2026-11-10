@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
@@ -63,6 +64,16 @@ class FormulaSheetContext(BaseModel):
         return self
 
 
+class FormulaInputColumn(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    column_id: str = Field(min_length=1, max_length=256)
+    column_index: int = Field(ge=0, lt=16384)
+    header: str = Field(max_length=256)
+    role: str = Field(max_length=50)
+    description: str = Field(default="", max_length=1000)
+
+
 class CreateFormulaJobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -76,7 +87,11 @@ class CreateFormulaJobRequest(BaseModel):
     row_start: int = Field(ge=0, lt=1048576)
     column_start: int = Field(ge=0, lt=16384)
     row_count: int = Field(ge=1, le=1048576)
-    column_count: int = Field(ge=1, le=20)
+    column_count: int = Field(ge=1, le=16384)
+    workspace_id: UUID | None = None
+    table_id: str | None = Field(default=None, min_length=1, max_length=256)
+    workspace_task_type: Literal["model_normalization", "counterparty_cleanup"] | None = None
+    input_columns: tuple[FormulaInputColumn, ...] = Field(default=(), max_length=20)
     samples: tuple[FormulaSampleRow, ...] = Field(min_length=1, max_length=20)
     sheet_context: FormulaSheetContext | None = None
 
@@ -86,7 +101,21 @@ class CreateFormulaJobRequest(BaseModel):
             raise ValueError("선택 범위가 Excel 행 경계를 벗어납니다.")
         if self.column_start + self.column_count > 16384:
             raise ValueError("선택 범위가 Excel 열 경계를 벗어납니다.")
-        if any(len(row.cells) != self.column_count for row in self.samples):
+        linked = (self.workspace_id is not None, self.table_id is not None,
+                  self.workspace_task_type is not None, bool(self.input_columns))
+        if any(linked) and not all(linked):
+            raise ValueError("수식 입력 열과 작업공간 연결을 함께 전달하세요.")
+        if self.input_columns:
+            ids = [column.column_id for column in self.input_columns]
+            indexes = [column.column_index for column in self.input_columns]
+            if len(set(ids)) != len(ids) or len(set(indexes)) != len(indexes):
+                raise ValueError("수식 입력 열이 중복되었습니다.")
+            if min(indexes) != self.column_start or max(indexes) + 1 != self.column_start + self.column_count:
+                raise ValueError("수식 입력 열의 위치와 선택 범위가 다릅니다.")
+        elif self.column_count > 20:
+            raise ValueError("직접 선택한 수식 범위는 최대 20열입니다.")
+        sampled_columns = len(self.input_columns) or self.column_count
+        if any(len(row.cells) != sampled_columns for row in self.samples):
             raise ValueError("표본의 열 수가 선택 범위와 다릅니다.")
         return self
 
@@ -167,7 +196,7 @@ class FormulaPlan(BaseModel):
             raise ValueError("수식 작업 또는 확인 질문 중 하나만 반환해야 합니다.")
         if self.actions:
             bounds = [range_bounds(action.target_range) for action in self.actions]
-            if len(set(action.target_range for action in self.actions)) != len(self.actions):
+            if len(set(bounds)) != len(self.actions):
                 raise ValueError("결과 범위가 서로 겹칩니다.")
             first_rows = (bounds[0][0], bounds[0][2])
             if any((item[0], item[2]) != first_rows for item in bounds[1:]):
@@ -248,13 +277,29 @@ class FormulaApprovalRequest(BaseModel):
         return self.target_ranges or (self.target_range,)  # type: ignore[return-value]
 
 
+class FormulaResultRange(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    row_start: int = Field(ge=0, lt=1048576)
+    row_count: int = Field(ge=1, le=1048576)
+    column_start: int = Field(ge=0, lt=16384)
+    column_count: Literal[1] = 1
+
+
+class FormulaCompletion(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    targets: tuple[FormulaResultRange, ...] = Field(min_length=1, max_length=3)
+    result_column_ids: tuple[Annotated[str, Field(min_length=1, max_length=256)], ...] = Field(default=(), max_length=3)
+
+
 class FormulaJob(BaseModel):
     task_type: Literal["formula"] = "formula"
     status: Literal[
-        "CREATED", "PLANNING", "PREVIEW_READY", "NEEDS_INPUT", "FAILED", "APPLIED"
+        "CREATED", "PLANNING", "PREVIEW_READY", "NEEDS_INPUT", "FAILED", "APPLYING", "UNKNOWN", "APPLIED"
     ] = "CREATED"
     source: CreateFormulaJobRequest
     preview: FormulaPreview | None = None
     planning_context: FormulaPlanningContext | None = None
     approved_preview_id: UUID | None = None
     error: str = ""
+    result: FormulaCompletion | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

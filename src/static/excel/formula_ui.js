@@ -38,7 +38,8 @@
             multiple = preview.plan.actions.length > 1;
             open();
             requestText.textContent = instruction;
-            sourceAddress.textContent = selection.address;
+            var inputNames = (selection.input_columns || []).map(function (column) { return column.header; }).join(", ");
+            sourceAddress.textContent = (inputNames ? inputNames + " · " : "") + selection.address;
             targetAddress.textContent = target.address;
             targetRow.hidden = false;
             previewText.textContent = preview.plan.actions.map(function (action, index) {

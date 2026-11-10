@@ -12,6 +12,7 @@
         var targetSnapshot = null;
         var applied = false;
         var useWorkspace = true;
+        var inputScope = null;
         var writeAttempted = false;
         var startTimer = null;
 
@@ -40,7 +41,8 @@
                 if (!options.isReady()) {
                     throw new Error("엑셀 안에서 추가 기능을 열어주세요.");
                 }
-                selection = await excel.readFormulaContext(useWorkspace && options.getTarget ? await options.getTarget() : null);
+                selection = await excel.readFormulaContext(options.getTarget ? await options.getTarget(inputScope, !useWorkspace) : null);
+                if (options.validateSource) await options.validateSource(selection);
                 options.checkRequest(run);
                 var payload = Object.assign({}, selection, {
                     conversation_id: options.getConversationId(),
@@ -102,7 +104,7 @@
         }
 
         function selectSource() {
-            if (options.isBusy() || applied) return;
+            if (options.isBusy() || applied || writeAttempted) return;
             selection = formulaJob = preview = targetSnapshot = null;
             useWorkspace = false;
             ui.reset();
@@ -112,7 +114,12 @@
         async function approveAndApply() {
             if (!preview || !targetSnapshot || applied || writeAttempted || options.isBusy()) return;
             options.setBusy(true);
+            var approvalRequested = false, recorded = false;
             try {
+                if (options.validateSource) await options.validateSource(selection);
+                await excel.validateFormulaPreview(preview, selection);
+                approvalRequested = true;
+                writeAttempted = true;
                 var approved = await api.requestJson(
                     "/formula-jobs/" + formulaJob.formula_job_id + "/previews/" +
                     preview.preview_id + "/approve",
@@ -129,22 +136,33 @@
                 if (approved.preview_id !== preview.preview_id) {
                     throw new Error("확인한 계획과 승인된 계획이 다릅니다.");
                 }
+                if (options.validateSource) await options.validateSource(selection);
                 await excel.validateFormulaPreview(approved, selection);
-                writeAttempted = true;
                 if (options.prepareOutput) await options.prepareOutput(approved, selection);
                 var result = await excel.applyFormulaPreview(approved, selection, function (label, done, total) {
                     ui.setStatus(label + " · " + done.toLocaleString() + "/" + total.toLocaleString() + "셀");
                 });
                 applied = true;
-                ui.setApplied(result);
-                if (options.onResult) await options.onResult(result, selection);
+                var ids = options.getResultColumns ? await options.getResultColumns(result, selection) : [];
                 await api.requestJson(
                     "/formula-jobs/" + formulaJob.formula_job_id + "/previews/" +
                     preview.preview_id + "/complete",
-                    {method: "POST"}
+                    {method: "POST", headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({targets: result.targets, result_column_ids: ids})}
                 );
+                recorded = true;
+                ui.setApplied(result);
+                if (options.onResult) await options.onResult(result, selection, ids);
                 options.complete(result.address + " · " + result.row_count + "행에 수식을 적용했습니다.");
             } catch (error) {
+                if (approvalRequested && !recorded) {
+                    try {
+                        await api.requestJson("/formula-jobs/" + formulaJob.formula_job_id + "/previews/" +
+                            preview.preview_id + "/unknown", {method: "POST"});
+                    } catch (statusError) {
+                        error.message += " · 서버의 적용 상태를 확인하지 못했습니다. 다시 적용하지 마세요.";
+                    }
+                }
                 options.complete((applied ? "수식은 작성됐지만 완료 정보 처리에 실패했습니다. 다시 쓰지 마세요. " : "수식 적용 실패: ") + error.message);
             } finally {
                 options.setBusy(false);
@@ -154,8 +172,9 @@
         ui.bind({source: selectSource, target: selectTarget, apply: approveAndApply});
         return {
             dismiss: function () { window.clearTimeout(startTimer); ui.reset(); },
-            openAndSelect: function (value) {
+            openAndSelect: function (value, scope) {
                 instruction = value;
+                inputScope = scope || null;
                 selection = formulaJob = preview = targetSnapshot = null;
                 applied = false;
                 writeAttempted = false;
@@ -168,6 +187,7 @@
             reset: function () {
                 window.clearTimeout(startTimer);
                 instruction = "";
+                inputScope = null;
                 selection = formulaJob = preview = targetSnapshot = null;
                 applied = false;
                 writeAttempted = false;

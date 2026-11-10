@@ -30,6 +30,8 @@ class ConfirmSelectionAction(BaseModel):
         "counterparty_cleanup",
         "formula",
     ]
+    workspace_id: UUID | None = None
+    column_ids: list[ColumnId] | None = Field(default=None, min_length=1, max_length=20)
 
 
 class ConfigureOperationAction(BaseModel):

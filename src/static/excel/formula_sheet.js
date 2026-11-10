@@ -22,16 +22,16 @@
             sheet.load("id,name");
             await context.sync();
 
-            if (range.columnCount > 20) {
+            var inputs = target && target.input_columns || [];
+            if (inputs.length > 20 || (!inputs.length && range.columnCount > 20)) {
                 throw new Error("수식 작업은 최대 20열 범위를 선택하세요.");
             }
 
             var sampleSize = Math.min(20, range.rowCount);
-            var sample = range.getCell(0, 0).getResizedRange(
-                sampleSize - 1,
-                range.columnCount - 1
-            );
-            sample.load("text");
+            var samples = inputs.length ? inputs.map(function (input) {
+                return sheet.getRangeByIndexes(range.rowIndex, input.column_index, sampleSize, 1);
+            }) : [range.getCell(0, 0).getResizedRange(sampleSize - 1, range.columnCount - 1)];
+            samples.forEach(function (sample) { sample.load("text"); });
             var usedSample = used.getCell(0, 0).getResizedRange(
                 Math.min(20, used.rowCount) - 1,
                 Math.min(20, used.columnCount) - 1
@@ -48,7 +48,12 @@
                 column_start: range.columnIndex,
                 row_count: range.rowCount,
                 column_count: range.columnCount,
-                samples: sample.text.map(function (cells) {
+                workspace_id: inputs.length ? target.workspace_id : null,
+                table_id: inputs.length ? target.table_id : null,
+                workspace_task_type: inputs.length ? target.workspace_task_type : null,
+                input_columns: inputs,
+                samples: Array.from({length: sampleSize}, function (_, index) {
+                    var cells = inputs.length ? samples.map(function (sample) { return sample.text[index][0]; }) : samples[0].text[index];
                     return {cells: cells};
                 }),
                 sheet_context: {
@@ -122,7 +127,7 @@
                 address: snapshots.map(function (item) { return item.address; }).join(", "),
                 target_ranges: snapshots.map(function (item) { return item.target_range; }),
                 anchor_cells: snapshots.map(function (item) { return item.anchor_cell; }),
-                row_count: selection.row_count,
+                row_count: snapshots[0].row_count,
                 reason: "planned"
             };
             if (actions.length > 1) {
@@ -135,9 +140,9 @@
             var candidates = [];
             for (var offset = 0; offset < count; offset += 1) {
                 var candidate = sheet.getRangeByIndexes(
-                    selection.row_start,
+                    planned[0].range.rowIndex,
                     startColumn + offset,
-                    selection.row_count,
+                    planned[0].range.rowCount,
                     1
                 );
                 candidates.push(inspectFormulaTarget(candidate));
@@ -162,6 +167,8 @@
         return await Excel.run(async function (context) {
             var chosen = context.workbook.getSelectedRange();
             var chosenSheet = chosen.worksheet;
+            var planned = context.workbook.worksheets.getItem(selection.worksheet_id).getRange(preview.plan.actions[0].target_range);
+            planned.load("rowIndex,rowCount");
             chosen.load("columnIndex");
             chosenSheet.load("name");
             await context.sync();
@@ -169,9 +176,9 @@
                 throw new Error("원본과 같은 시트에서 결과 열을 선택하세요.");
             }
             var target = chosenSheet.getRangeByIndexes(
-                selection.row_start,
+                planned.rowIndex,
                 chosen.columnIndex,
-                selection.row_count,
+                planned.rowCount,
                 1
             );
             var inspection = inspectFormulaTarget(target);
@@ -248,7 +255,7 @@
                 }
                 return {
                     address: targets.map(function (target) { return target.address; }).join(", "),
-                    row_count: selection.row_count,
+                    row_count: targets[0].rowCount,
                     action_count: targets.length,
                     targets: targets.map(function (target) { return {row_start: target.rowIndex, row_count: target.rowCount,
                         column_start: target.columnIndex, column_count: target.columnCount}; })
