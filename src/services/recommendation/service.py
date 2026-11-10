@@ -1,8 +1,11 @@
+from services.errors import SHARED_MESSAGES
 import hashlib
 import logging
 
 from services.errors import ConflictError, ModelProcessingError, NotFoundError
-from services.recommendation.analysis import MODEL_GROUP_ROLES, dumps, generate_advice
+from services.recommendation.analysis import generate_advice
+from services.recommendation.model_io import dumps
+from services.recommendation.selection import MODEL_GROUP_ROLES
 from services.recommendation.schemas import AdviceRequest
 
 
@@ -11,7 +14,7 @@ def resolve_columns(
     ids: list[str] | None,
 ) -> list[str]:
     if not workspace:
-        raise ValueError("먼저 작업 시트를 준비하세요.")
+        raise ValueError(SHARED_MESSAGES["WORKSPACE_REQUIRED"])
 
     known = [str(column["column_id"]) for column in workspace["columns"]]
     selected = known if ids is None else ids
@@ -32,7 +35,7 @@ def resolve_advice_columns(workspace: dict | None, ids: list[str] | None) -> lis
         for role in MODEL_GROUP_ROLES:
             columns = [column for column in workspace["columns"] if column.get("role") == role]
             if len(columns) != 1:
-                raise ValueError("빈도 집계에는 신고품명·거래품명·모델규격명 열이 필요합니다.")
+                raise ValueError(SHARED_MESSAGES["ADVICE_GROUP_COLUMNS_REQUIRED"])
             column_id = str(columns[0]["column_id"])
             if column_id not in selected:
                 selected.append(column_id)

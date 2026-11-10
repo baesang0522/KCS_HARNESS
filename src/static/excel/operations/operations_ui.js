@@ -34,7 +34,6 @@
         function rules() {
             return Array.from(el("rules").querySelectorAll("input:checked")).map(function (input) {
                 var words = input.value === "remove_words" ? el("words").value.split("\n").map(function (v) { return v.trim(); }).filter(Boolean) : [];
-                if (input.value === "remove_words" && !words.length) throw new Error("제거할 단어를 한 줄에 하나씩 입력하세요.");
                 return {operation: input.value, words: words};
             });
         }
@@ -71,27 +70,13 @@
             operation: function () {
                 var type = el("kind").value;
                 var ids = type === "group" ? keys() : targets();
-                if (!ids.length || ids.some(function (id) { return !id; }) || ids.length > 20) throw new Error("대상 열을 1~20개 선택하세요.");
                 var selected = type === "preprocess" ? rules() : [];
                 if (type === "preprocess" && !selected.length) return null;
                 var delimiter = type === "split" && el("delimiter-mode").value === "custom" ? el("delimiter").value : null;
-                if (delimiter === "") throw new Error("구분자를 입력하세요.");
                 var operation = {kind: type, column_ids: ids, rules: selected, delimiter: delimiter};
                 if (type === "group") {
                     operation.value_column_id = el("value-column").value;
                     operation.group_mode = el("group-mode").value;
-
-                    if (!operation.value_column_id) {
-                        throw new Error("값을 통일할 대상 열을 선택하세요.");
-                    }
-                    if (ids.length > 19) {
-                        throw new Error("판단 기준은 최대 19열입니다.");
-                    }
-                    if (ids.includes(operation.value_column_id)) {
-                        throw new Error(
-                            "판단 기준과 값을 바꿀 열은 서로 다르게 선택하세요."
-                        );
-                    }
 
                     operation.source_row = null;
                     operation.representative = null;
@@ -100,33 +85,22 @@
                         operation.source_row = Number(el("source-row").value);
                         operation.representative = el("group-value").value || null;
 
-                        if (
-                            !Number.isInteger(operation.source_row) ||
-                            operation.source_row < 1 ||
-                            operation.source_row > 1048576
-                        ) {
-                            throw new Error(
-                                "대표값을 적은 Excel 행 번호를 입력하세요."
-                            );
-                        }
+
                     }
                 }
                 if (type === "split") operation.part = el("part").value;
                 if (type === "replace") {
-                    if (!el("find").value) throw new Error("찾을 문자열을 입력하세요.");
                     operation.find = el("find").value; operation.replacement = el("replacement").value;
                 }
                 if (type === "map") operation.mappings = mapping.get();
                 if (type === "extract") {
-                    if (!extractionColumn() || ids[0] !== extractionColumn()) throw new Error("모델규격 추출은 지정된 모델규격명 열에만 적용할 수 있습니다.");
-                    operation.extraction_mode = el("extraction-mode").value;
-                    if (!operation.extraction_mode) throw new Error("추천을 확인하고 추출 방식을 선택하세요.");
+                    operation.extraction_mode = el("extraction-mode").value || null;
                 }
                 return operation;
             },
             configure: function (operation) {
                 if (operation.kind === "extract" && (!extractionColumn() || operation.column_ids.length !== 1 || operation.column_ids[0] !== extractionColumn())) {
-                    throw new Error("모델규격 추출은 지정된 모델규격명 열에만 적용할 수 있습니다.");
+                    throw new Error(window.errorMessages.MODEL_SPEC_REQUIRED);
                 }
                 if (!operation.column_ids.concat(operation.value_column_id || []).every(function (id) { return columns.some(function (c) { return String(c.column_id) === id; }); })) {
                     throw new Error("현재 작업에 없는 열입니다. 범위를 다시 확인하세요.");

@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
+from api.errors import validation_message
+
 from services.operations.schemas import OperationRequest, OperationResponse, ValueRequest
 from services.operations.service import execute, value_catalog
 from services.operations.rules import extraction_suggestions
@@ -18,7 +20,7 @@ def preview_operation(payload: OperationRequest) -> OperationResponse:
     try:
         return execute(payload)
     except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
+        raise HTTPException(status_code=422, detail=validation_message(error)) from error
 
 
 @router.post("/similarity")
@@ -26,7 +28,7 @@ def compare_similarity(payload: SimilarityRequest):
     try:
         return inspect_similarity(payload)
     except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
+        raise HTTPException(status_code=422, detail=validation_message(error)) from error
 
 
 @router.post("/extraction-suggestions")

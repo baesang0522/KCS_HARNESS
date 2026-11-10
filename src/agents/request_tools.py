@@ -1,5 +1,6 @@
 from typing import Literal
 from langchain_core.tools import tool
+from services.errors import SHARED_MESSAGES
 from services.operations.schemas import Mapping, Operation, Rule, extraction_column_id
 from services.similarity import SimilaritySelection
 from services.recommendation.service import resolve_advice_columns, resolve_columns
@@ -186,7 +187,7 @@ def build_request_tools(task_context: dict):
         """지정된 모델규격명 열의 모델규격 추출 카드를 연다. 방식 미지정이면 대상 전체에서 추천하며 자동 적용하지 않는다."""
         expected = extraction_column_id(workspace)
         if column_id is not None and column_id != expected:
-            raise ValueError("모델규격 추출은 지정된 모델규격명 열에만 적용할 수 있습니다.")
+            raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])
         return card(
             kind="extract",
             column_ids=[expected],

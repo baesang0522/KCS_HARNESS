@@ -47,7 +47,6 @@
             catalog: function (data) { items = data.items; renderValues(); },
             set: function (value) { pairs = value.map(function (p) { return {source: p.source, target: p.target}; }); renderPairs(); },
             get: function () {
-                if (!pairs.length || pairs.some(function (p) { return !p.target.trim(); })) throw new Error("원본 그룹과 대표값을 지정하세요.");
                 return pairs.map(function (p) { return {source: p.source, target: p.target}; });
             },
             reset: function () { items = []; pairs = []; el("value-search").value = el("representative").value = ""; renderValues(); renderPairs(); }

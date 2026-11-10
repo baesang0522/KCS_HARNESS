@@ -18,6 +18,12 @@
             options.api,
             options.getConversationId
         );
+        var formula = window.createWorkspaceFormula({
+            getWorkspace: function () { return workspace; },
+            getTarget: function () { return target; },
+            getLastFormula: function () { return lastFormula; },
+            refresh: refresh, newRequestId: options.api.newRequestId
+        });
         var operations = window.createOperations({
             api: options.api,
             jobs: jobs,
@@ -37,7 +43,7 @@
             api: options.api, isBusy: options.isBusy, setBusy: options.setBusy,
             status: ui.status, complete: options.complete,
             getInput: async function () {
-                if (!workspace || !target) throw new Error("먼저 작업 시트를 준비하세요.");
+                if (!workspace || !target) throw new Error(window.errorMessages.WORKSPACE_REQUIRED);
                 await refresh();
                 return {workspace: workspace, target: target};
             }
@@ -56,7 +62,7 @@
             if (!workspace) return false;
             var previous = JSON.stringify(workspace.columns), lostTarget = false;
             await Excel.run(async function (context) {
-                var info = await window.operationsSheet.layout(context, workspace);
+                var info = await window.workspaceTable.layout(context, workspace);
                 workspace.sheet_name = info.sheet.name;
                 workspace.row_count = info.body.rowCount;
                 workspace.columns = info.columns.filter(function (c) { return c.column_id !== workspace.source_row_column_id; }).map(function (column) {
@@ -336,145 +342,27 @@
                         truncated: row.values.some(function (v) { return v.length > 1000; })}; })};
             },
             readRecommendation: async function (columnIds, expected, progress, check) {
-                check = check || function () {};
-                check();
-                if (!workspace || !expected) throw new Error("먼저 작업 시트를 준비하세요.");
+                if (check) check();
+                if (!workspace || !expected) throw new Error(window.errorMessages.WORKSPACE_REQUIRED);
                 await refresh();
-                if (workspace.worksheet_id !== expected.worksheet_id ||
-                    String(workspace.table_id) !== String(expected.table_id)) {
-                    throw new Error("작업 표가 바뀌었습니다. 새 조언 요청을 보내세요.");
-                }
-                if (!Array.isArray(columnIds) || !columnIds.length || columnIds.length > 200 ||
-                    columnIds.some(function (id) { return typeof id !== "string"; }) ||
-                    new Set(columnIds).size !== columnIds.length) {
-                    throw new Error("분석 대상 열이 올바르지 않습니다.");
-                }
-                columnIds.forEach(function (id) {
-                    var current = workspace.columns.find(function (column) { return String(column.column_id) === id; });
-                    var original = expected.columns.find(function (column) { return String(column.column_id) === id; });
-                    if (!current || !original || current.header !== original.header || current.role !== original.role ||
-                        (current.description || "") !== (original.description || "")) {
-                        throw new Error("분석 대상 열이나 설명이 바뀌었습니다. 새 조언 요청을 보내세요.");
-                    }
-                });
-                var full = await Excel.run(async function (context) {
-                    var info = await window.operationsSheet.layout(context, workspace);
-                    return {row_start: info.body.rowIndex, row_count: info.body.rowCount, stamp: info.stamp};
-                });
-                if (workspace.task_type === "model_normalization") {
-                    var grouped = await window.operationsSheet.readModelAdvice(workspace, full, columnIds, progress, check);
-                    check();
-                    return Object.assign({
-                        worksheet_id: workspace.worksheet_id, table_id: String(workspace.table_id),
-                        row_start: full.row_start, row_count: full.row_count, column_ids: columnIds
-                    }, grouped);
-                }
-                var snapshot = await window.operationsSheet.read(workspace, full, columnIds, progress, check);
-                check();
-                if (snapshot.stamp !== full.stamp || snapshot.rows.length !== full.row_count) {
-                    throw new Error("읽는 동안 작업 표가 바뀌었습니다. 다시 요청하세요.");
-                }
-                return {
-                    worksheet_id: workspace.worksheet_id, table_id: String(workspace.table_id),
-                    row_start: full.row_start, row_count: full.row_count, column_ids: columnIds,
-                    rows: snapshot.rows.map(function (row) { return {excel_row: row.excel_row, values: row.values}; })
-                };
+                return window.readRecommendation(workspace, columnIds, expected, progress, check);
             },
             configureSimilarity: async function (settings) {
-                if (!workspace) throw new Error("먼저 필수 세 열을 지정해 작업을 시작하세요.");
+                if (!workspace) throw new Error(window.errorMessages.WORKSPACE_SETUP_REQUIRED);
                 await refresh(); ui.open(workspace.task_type); display([settings.column_id]);
                 similarity.show(workspace, target, settings);
                 ui.status("검사 대상을 확인하고 실행하세요. 결과는 새 시트에 작성합니다.");
             },
             recommendExtraction: function () { return operations.recommendExtraction(); },
             configure: async function (operation) {
-                if (!workspace) throw new Error("먼저 필수 세 열을 지정해 작업을 시작하세요.");
+                if (!workspace) throw new Error(window.errorMessages.WORKSPACE_SETUP_REQUIRED);
                 await refresh(); ui.open(workspace.task_type); display(operation.column_ids); operations.configure(operation);
                 ui.status("요청한 설정을 채웠습니다. 대상·조건을 확인하고 ‘변경 내용 확인’을 누르세요.");
             },
-            formulaTarget: async function (scope, fromSelection) {
-                if (!workspace) {
-                    if (!fromSelection && scope && scope.workspace_id) throw new Error("요청한 작업 표를 다시 열어주세요.");
-                    return fromSelection ? null : lastFormula;
-                }
-                var chosen = null;
-                if (fromSelection) {
-                    chosen = await window.workspaceSheet.readWorkspaceTarget(workspace, false);
-                    if (!chosen) return null;
-                    scope = {workspace_id: workspace.workspace_id,
-                        column_ids: chosen.columns.map(function (column) { return String(column.column_id); })};
-                }
-                if (!scope || scope.workspace_id !== workspace.workspace_id || !Array.isArray(scope.column_ids) ||
-                    !scope.column_ids.length || scope.column_ids.length > 20 || new Set(scope.column_ids).size !== scope.column_ids.length) {
-                    throw new Error("수식에 사용할 작업 표와 입력 열을 다시 지정해 주세요.");
-                }
-                await refresh();
-                var columns = scope.column_ids.map(function (id) {
-                    var column = workspace.columns.find(function (c) { return String(c.column_id) === id; });
-                    if (!column) throw new Error("요청한 수식 입력 열이 삭제되었습니다. 대상을 다시 확인하세요.");
-                    return column;
-                }).sort(function (a, b) { return a.column_index - b.column_index; });
-                return {worksheet_id: workspace.worksheet_id, workspace_id: workspace.workspace_id,
-                    table_id: String(workspace.table_id), workspace_task_type: workspace.task_type,
-                    row_start: (chosen || target).row_start, row_count: (chosen || target).row_count,
-                    column_start: columns[0].column_index,
-                    column_count: columns[columns.length - 1].column_index - columns[0].column_index + 1,
-                    input_columns: columns.map(function (c) { return {column_id: String(c.column_id),
-                        column_index: c.column_index, header: c.header, role: c.role, description: c.description || ""}; })};
-            },
-            validateFormulaSource: async function (selection) {
-                if (!selection.workspace_id) return;
-                if (!workspace || workspace.workspace_id !== selection.workspace_id ||
-                    workspace.worksheet_id !== selection.worksheet_id || String(workspace.table_id) !== selection.table_id) {
-                    throw new Error("수식 계획의 작업 표가 바뀌었습니다. 다시 요청하세요.");
-                }
-                await Excel.run(async function (context) {
-                    var info = await window.operationsSheet.layout(context, workspace);
-                    if (info.sheet.name !== selection.sheet_name || selection.row_start < info.body.rowIndex ||
-                        selection.row_start + selection.row_count > info.body.rowIndex + info.body.rowCount ||
-                        selection.input_columns.some(function (input) {
-                            var current = info.columns.find(function (c) { return String(c.column_id) === input.column_id; });
-                            return !current || current.column_index !== input.column_index || current.header !== input.header;
-                        })) throw new Error("수식 입력 열이나 행 범위가 바뀌었습니다. 수식을 다시 확인하세요.");
-                });
-            },
-            prepareFormulaOutput: async function (preview, selection) {
-                if (!workspace || workspace.worksheet_id !== selection.worksheet_id) return;
-                await Excel.run(async function (context) {
-                    var info = await window.operationsSheet.layout(context, workspace);
-                    var ranges = preview.plan.actions.map(function (action) {
-                        var range = info.sheet.getRange(action.target_range);
-                        range.load("rowIndex,rowCount,columnIndex,columnCount"); return range;
-                    });
-                    await context.sync();
-                    var end = Math.max.apply(null, ranges.map(function (r) { return r.columnIndex + r.columnCount; }));
-                    var oldEnd = info.body.columnIndex + info.body.columnCount;
-                    if (ranges.some(function (r) { return r.rowIndex < info.body.rowIndex ||
-                        r.rowIndex + r.rowCount > info.body.rowIndex + info.body.rowCount ||
-                        r.columnIndex < info.body.columnIndex + 1; })) throw new Error("수식 결과는 현재 작업 표의 데이터 행에 작성하세요.");
-                    if (end - info.body.columnIndex > 201) throw new Error("작업 표는 최대 200개 데이터 열입니다.");
-                    if (end <= oldEnd) return;
-                    var extension = info.sheet.getRangeByIndexes(info.body.rowIndex - 1, oldEnd, info.body.rowCount + 1, end - oldEnd);
-                    var occupied = extension.getUsedRangeOrNullObject(); occupied.load("address"); await context.sync();
-                    if (!occupied.isNullObject) throw new Error("수식 결과까지의 공간에 기존 데이터가 있습니다. 작업 표의 빈 열을 선택하세요.");
-                    for (var columnIndex = oldEnd; columnIndex < end; columnIndex++) {
-                        var actionIndex = ranges.findIndex(function (r) { return r.columnIndex === columnIndex; });
-                        var label = actionIndex >= 0 ? preview.plan.actions[actionIndex].output_label : "추가 열";
-                        info.table.columns.add(null, null, label + " " + options.api.newRequestId().slice(0, 6));
-                    }
-                    await context.sync();
-                });
-            },
-            formulaResultColumns: async function (result, selection) {
-                if (!selection.workspace_id) return [];
-                if (!workspace || selection.workspace_id !== workspace.workspace_id) throw new Error("수식 결과의 작업 표가 바뀌었습니다.");
-                await refresh();
-                return result.targets.map(function (range) {
-                    var columns = workspace.columns.filter(function (c) { return c.column_index === range.column_start; });
-                    if (range.column_count !== 1 || columns.length !== 1) throw new Error("수식 결과 열을 확인하지 못했습니다.");
-                    return String(columns[0].column_id);
-                });
-            },
+            formulaTarget: formula.formulaTarget,
+            validateFormulaSource: formula.validateFormulaSource,
+            prepareFormulaOutput: formula.prepareFormulaOutput,
+            formulaResultColumns: formula.formulaResultColumns,
             formulaResult: async function (result, selection, ids) {
                 if (!selection.workspace_id) {
                     lastFormula = result.targets.length === 1 ? Object.assign({worksheet_id: selection.worksheet_id}, result.targets[0]) : null;

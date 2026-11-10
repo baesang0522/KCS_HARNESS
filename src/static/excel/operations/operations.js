@@ -45,56 +45,9 @@
             try {
                 if (await options.refresh()) throw new Error("대상 열이 바뀌었습니다. 다시 선택하세요.");
 
-                var ids = ui.targets();
-                if (ids.length !== 1) throw new Error("추천할 열 하나를 선택하세요.");
-                var models = workspace.columns.filter(function (column) { return column.role === "model_spec"; });
-                if (workspace.task_type !== "model_normalization" || models.length !== 1 || String(models[0].column_id) !== ids[0]) {
-                    throw new Error("모델규격 추출은 지정된 모델규격명 열에만 적용할 수 있습니다.");
-                }
-
-                var snapshot = await sheet.read(
-                    workspace, target, ids, progress, function () {}
+                var summary = await window.readExtractionSuggestions(
+                    workspace, target, ui.targets(), options.api, progress
                 );
-                var rows = snapshot.rows;
-                if (!rows.length) throw new Error("추천할 데이터가 없습니다.");
-
-                var summary = {sample_count: 0, suggestions: []};
-
-                for (var offset = 0; offset < rows.length;) {
-                    var values = [], characters = 0;
-                    while (offset < rows.length && values.length < 10000) {
-                        var value = rows[offset].values[0];
-                        if (value.length > 32767) throw new Error("셀 문자열이 너무 깁니다.");
-                        if (characters + value.length > 16000000) break;
-
-                        values.push(value);
-                        characters += value.length;
-                        offset += 1;
-                    }
-
-                    var data = await options.api.requestJson("/operations/extraction-suggestions", {
-                        method: "POST",
-                        headers: {"Content-Type": "application/json"},
-                        body: JSON.stringify({values: values})
-                    });
-
-                    summary.sample_count += data.sample_count;
-                    data.suggestions.forEach(function (item) {
-                        var total = summary.suggestions.find(function (entry) {
-                            return entry.mode === item.mode;
-                        });
-                        if (!total) {
-                            summary.suggestions.push(item);
-                            return;
-                        }
-                        total.matched_rows += item.matched_rows;
-                        total.multiple_rows += item.multiple_rows;
-                        total.examples = total.examples.concat(item.examples).slice(0, 2);
-                    });
-
-                    progress("패턴 검사", offset, rows.length);
-                }
-
                 ui.extractionSuggestions(summary);
                 options.status("전체 대상의 추천을 확인하고 추출 방식을 선택하세요. 적용 전 ‘변경 내용 확인’에서 결과를 검토합니다.");
             } catch (error) {
@@ -182,10 +135,7 @@
 
                 console.error("[operations.build]", error);
 
-                complete(
-                    "작업 미리보기 오류\n" +
-                    (error.message || String(error))
-                );
+                complete(error.message || String(error));
             } finally {
                 processing = false;
                 abort = null;

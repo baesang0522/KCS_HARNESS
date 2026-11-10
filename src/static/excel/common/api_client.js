@@ -4,25 +4,25 @@
     var apiBase = window.location.pathname.split("/static/excel/")[0];
 
     async function requestJson(path, options) {
-        var response = await fetch(apiBase + path, options);
-        var data = await response.json().catch(function () {
-            return {};
-        });
-
+        var response;
+        try {
+            response = await fetch(apiBase + path, options);
+        } catch (error) {
+            if (error.name === "AbortError") throw error;
+            throw new Error("서버에 연결하지 못했습니다. 연결 상태를 확인하고 다시 시도하세요.");
+        }
+        var data = await response.json().catch(function () { return null; });
         if (!response.ok) {
-            var detail = '요청 실패: HTTP ' + response.status;
-
-            if (typeof data.detail === 'string') {
-                detail = data.detail;
-            } else if (Array.isArray(data.detail)) {
-                detail += '\n' + data.detail.map(function (item) {
-                    var field = (item.loc || []).join('.');
-                    return field + ': ' + item.msg;
-                }).join('\n');
-            }
+            // 업무·입력 오류 문구는 서버가 결정하고, 프론트는 그대로 표시한다.
+            var detail = data && typeof data.detail === "string" && data.detail.trim()
+                ? data.detail
+                : "서버 요청에 실패했습니다. 잠시 후 다시 시도하세요. (HTTP " + response.status + ")";
             var error = new Error(detail);
             error.status = response.status;
             throw error;
+        }
+        if (!data || typeof data !== "object") {
+            throw new Error("서버 응답을 읽지 못했습니다. 다시 시도하세요.");
         }
 
         return data;

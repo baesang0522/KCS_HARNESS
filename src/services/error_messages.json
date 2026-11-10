@@ -1,0 +1,6 @@
+{
+  "WORKSPACE_SETUP_REQUIRED": "먼저 필수 세 열을 지정해 작업을 시작하세요.",
+  "WORKSPACE_REQUIRED": "먼저 작업 시트를 준비하세요.",
+  "MODEL_SPEC_REQUIRED": "모델규격 추출은 지정된 모델규격명 열에만 적용할 수 있습니다.",
+  "ADVICE_GROUP_COLUMNS_REQUIRED": "빈도 집계에는 신고품명·거래품명·모델규격명 열이 필요합니다."
+}

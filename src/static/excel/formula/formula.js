@@ -163,7 +163,7 @@
                         error.message += " · 서버의 적용 상태를 확인하지 못했습니다. 다시 적용하지 마세요.";
                     }
                 }
-                options.complete((applied ? "수식은 작성됐지만 완료 정보 처리에 실패했습니다. 다시 쓰지 마세요. " : "수식 적용 실패: ") + error.message);
+                options.complete((applied ? "수식은 작성됐지만 완료 정보 처리에 실패했습니다. 다시 쓰지 마세요. " : "") + error.message);
             } finally {
                 options.setBusy(false);
             }

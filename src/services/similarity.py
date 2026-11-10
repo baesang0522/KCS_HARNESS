@@ -1,3 +1,4 @@
+from services.errors import SHARED_MESSAGES
 from collections import defaultdict
 from difflib import SequenceMatcher
 from itertools import combinations
@@ -27,7 +28,7 @@ class SimilaritySelection(BaseModel):
 
     def check_workspace(self, workspace: dict | None) -> None:
         if not workspace:
-            raise ValueError("먼저 작업 시트를 준비하세요.")
+            raise ValueError(SHARED_MESSAGES["WORKSPACE_REQUIRED"])
         known = {str(column["column_id"]) for column in workspace["columns"]}
         if not set(self.input_column_ids) <= known:
             raise ValueError("현재 작업 시트에 없는 열입니다.")

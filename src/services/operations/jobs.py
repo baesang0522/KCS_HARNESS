@@ -1,3 +1,4 @@
+from services.errors import SHARED_MESSAGES
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
@@ -41,11 +42,12 @@ class CreateOperationJob(StrictModel):
 
     @model_validator(mode="after")
     def validate_scope(self):
+        self.operation.validate_ready()
         if self.operation.kind == "extract" and (
             self.task_type != "model_normalization" or self.model_spec_column_id is None
             or self.operation.column_ids != [self.model_spec_column_id]
         ):
-            raise ValueError("모델규격 추출은 지정된 모델규격명 열에만 적용할 수 있습니다.")
+            raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])
         if self.row_start + self.row_count > 1048576:
             raise ValueError("처리 범위가 Excel 행 경계를 벗어납니다.")
         if len(self.model_dump_json().encode("utf-8")) > 262144:

@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
+from services.errors import SHARED_MESSAGES
 from agents.request_graph import run_request_graph
 from models.llama_cpp import get_reasoning_content
 from services.operations.schemas import Operation, extraction_column_id
@@ -96,7 +97,7 @@ async def route_request(runtime, messages, *, task_context: dict):
 
     if decision.operation:
         if not workspace:
-            raise ValueError("먼저 필수 세 열을 지정해 작업을 시작하세요.")
+            raise ValueError(SHARED_MESSAGES["WORKSPACE_SETUP_REQUIRED"])
 
         columns = {
             column["column_id"]
@@ -105,7 +106,7 @@ async def route_request(runtime, messages, *, task_context: dict):
         if not set(decision.operation.input_column_ids) <= columns:
             raise ValueError("현재 작업 시트에 없는 열을 요청했습니다.")
         if decision.operation.kind == "extract" and decision.operation.column_ids != [extraction_column_id(workspace)]:
-            raise ValueError("모델규격 추출은 지정된 모델규격명 열에만 적용할 수 있습니다.")
+            raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])
 
     if decision.similarity:
         decision.similarity.check_workspace(workspace)
