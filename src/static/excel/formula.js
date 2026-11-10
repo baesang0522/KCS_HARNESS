@@ -132,7 +132,9 @@
                 await excel.validateFormulaPreview(approved, selection);
                 writeAttempted = true;
                 if (options.prepareOutput) await options.prepareOutput(approved, selection);
-                var result = await excel.applyFormulaPreview(approved, selection);
+                var result = await excel.applyFormulaPreview(approved, selection, function (label, done, total) {
+                    ui.setStatus(label + " · " + done.toLocaleString() + "/" + total.toLocaleString() + "셀");
+                });
                 applied = true;
                 ui.setApplied(result);
                 if (options.onResult) await options.onResult(result, selection);

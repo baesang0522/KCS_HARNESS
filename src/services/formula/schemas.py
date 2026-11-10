@@ -75,7 +75,7 @@ class CreateFormulaJobRequest(BaseModel):
     address: str = Field(min_length=1, max_length=512)
     row_start: int = Field(ge=0, lt=1048576)
     column_start: int = Field(ge=0, lt=16384)
-    row_count: int = Field(ge=1, le=400000)
+    row_count: int = Field(ge=1, le=1048576)
     column_count: int = Field(ge=1, le=20)
     samples: tuple[FormulaSampleRow, ...] = Field(min_length=1, max_length=20)
     sheet_context: FormulaSheetContext | None = None
@@ -145,8 +145,6 @@ class FormulaAction(BaseModel):
         if _cell_parts(self.anchor_cell) != (start_row, start_column):
             raise ValueError("기준 셀은 대상 범위의 왼쪽 위 셀이어야 합니다.")
         cells = (end_row - start_row + 1) * (end_column - start_column + 1)
-        if cells > 10000:
-            raise ValueError("첫 수식 작업은 최대 10,000셀까지 지원합니다.")
         if self.mode == "single" and cells != 1:
             raise ValueError("단일 수식의 대상은 한 셀이어야 합니다.")
         if self.mode == "fill_down" and end_column != start_column:

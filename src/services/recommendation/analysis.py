@@ -7,14 +7,13 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from services.errors import MODEL_RESPONSE_ERROR
-from services.recommendation.schemas import AdviceRequest, CheckedFinding, ComparisonPlan, Review
+from services.recommendation.schemas import AdviceRequest, CheckedFinding, ComparisonPlan, Review, TOP_COMBINATIONS
 
 
 # shortcut: 입력 예산은 바이트 기준, 서버 tokenizer 연결 시 실제 토큰 기준으로 교체.
 INPUT_BYTES = 48000
 SCAN_MAX_ROWS = 100
 MODEL_GROUP_ROLES = ("declared_name", "trade_name", "model_spec")
-TOP_COMBINATIONS = 500
 logger = logging.getLogger(__name__)
 
 
@@ -159,6 +158,14 @@ def top_model_combinations(data: AdviceRequest, columns: list[dict]) -> tuple[li
             raise ValueError("빈도 집계에는 신고품명·거래품명·모델규격명 열이 필요합니다.")
         indexes.append(matches[0])
 
+    if data.selection is not None:
+        if data.selection.group_column_ids != [columns[i]["column_id"] for i in indexes]:
+            raise ValueError("집계 기준은 신고품명·거래품명·모델규격명이어야 합니다.")
+        return [
+            {"excel_row": row.excel_row, "values": [value.upper() for value in row.values], "count": row.count}
+            for row in data.rows
+        ], data.selection.model_dump()
+
     groups = {}
     for row in data.rows:
         key = tuple(row.values[i].upper() for i in indexes)
@@ -206,7 +213,9 @@ async def generate_advice(
     if workspace["task_type"] == "model_normalization":
         rows, selection = top_model_combinations(data, columns)
     else:
-        rows = [row.model_dump() for row in data.rows]
+        if data.selection is not None:
+            raise ValueError("상위 조합 집계는 모델규격 정제에서만 지원합니다.")
+        rows = [row.model_dump(exclude_none=True) for row in data.rows]
     by_row = {row["excel_row"]: row for row in rows}
 
     base = {

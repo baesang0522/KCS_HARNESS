@@ -314,7 +314,7 @@
             var current = await currentHelpContext();
             document.getElementById("cleaning-help-scope").textContent = current.sheet_name +
                 (mode === "advice" ? (current.task_type === "model_normalization"
-                    ? " · 대문자 기준 빈도 상위 500개 조합" : " · 모든 데이터 열·설명·전체 행")
+                    ? " · 대문자 기준 빈도 상위 100개 조합" : " · 모든 데이터 열·설명·전체 행")
                     : " · 현재 대상 " + current.row_count.toLocaleString() + "행");
             if (mode === "advice") return;
             document.getElementById("cleaning-help-work").appendChild(workPanel);
@@ -397,7 +397,7 @@
 
         var draft = advice ? message.value : null;
         var value = advice
-            ? "추가 열과 열 설명도 참고해서 AI 정제 의견을 줘. 모델규격 정제는 대문자 기준 빈도 상위 500개 조합으로 분석해줘."
+            ? "추가 열과 열 설명도 참고해서 AI 정제 의견을 줘. 모델규격 정제는 대문자 기준 빈도 상위 100개 조합으로 분석해줘."
             : message.value.trim();
 
         if (!value) {
