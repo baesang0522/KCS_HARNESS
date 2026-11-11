@@ -4,7 +4,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validat
 
 from services.errors import SHARED_MESSAGES
 from agents.request_graph import run_request_graph
-from models.llama_cpp import get_reasoning_content
 from services.operations.schemas import Operation, extraction_column_id
 from services.chat_state import TaskType
 from services.similarity import SimilaritySelection
@@ -60,32 +59,9 @@ async def route_request(runtime, messages, *, task_context: dict):
         ),
     }
 
-    if runtime.settings.llm.provider == "codex_cli":
-        response = await runtime.respond(runtime.request_prompt, {
-            "conversation": [
-                {"role": message.type, "content": message.content}
-                for message in messages
-            ],
-            "task_context": task_context,
-        })
-        decision = RequestDecision.model_validate_json(
-            response.content.strip(),
-            context=validation_context,
-        )
-        reasoning = get_reasoning_content(response)
-        reasons = [reasoning] if reasoning else []
-
-    else:
-        result = await run_request_graph(
-            runtime,
-            messages,
-            task_context,
-        )
-        decision = RequestDecision.model_validate(
-            result,
-            context=validation_context,
-        )
-        reasons = []
+    result = await run_request_graph(runtime, messages, task_context)
+    decision = RequestDecision.model_validate(result, context=validation_context)
+    reasons = []
 
     if decision.intent == "start_task" and decision.task_type == "formula":
         if workspace:
