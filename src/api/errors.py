@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from repositories.conversation_repository import ConversationNotFound
-from services.errors import ConflictError, ModelProcessingError, NotFoundError
+from services.errors import DocumentError, ConflictError, ModelProcessingError, NotFoundError
 
 
 def validation_message(error: ValueError | RequestValidationError) -> str:
@@ -34,5 +34,5 @@ async def request_validation_response(request: Request, error: RequestValidation
 async def service_error_response(request: Request, error: Exception):
     if isinstance(error, ConversationNotFound):
         return JSONResponse(status_code=404, content={"detail": "대화가 없습니다. 새 대화를 시작하세요."})
-    status = {NotFoundError: 404, ConflictError: 409, ModelProcessingError: 502}.get(type(error), 500)
+    status = {DocumentError: 422, NotFoundError: 404, ConflictError: 409, ModelProcessingError: 502}.get(type(error), 500)
     return JSONResponse(status_code=status, content={"detail": str(error)})

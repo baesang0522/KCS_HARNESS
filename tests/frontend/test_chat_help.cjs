@@ -96,13 +96,13 @@ test('retry keeps request ID; new question changes it; stale saved conversation 
 
 test('page bootstrap wires chat and formula callbacks before initialization', async () => {
     const h = createDOM(); let workspaceOptions, formulaOptions;
-    const stub = {dismiss() {}, reset() {}, setBusy() {}, context: async () => null,
+    const stub = {dismiss() {}, reset() {}, setBusy() {}, context: async () => null, referenceTarget: () => null,
         formulaTarget() {}, validateFormulaSource() {}, prepareFormulaOutput() {}, formulaResultColumns() {}, formulaResult() {}};
-    h.window.apiClient = {requestJson: async () => ({conversation_id: 'conversation'}), newRequestId: () => 'id'};
+    h.window.apiClient = {requestJson: async url => url.endsWith('/documents') ? {documents: []} : {conversation_id: 'conversation'}, newRequestId: () => 'id'};
     h.window.createWorkspaceController = options => { workspaceOptions = options; return stub; };
     h.window.createFormulaController = options => { formulaOptions = options; return stub; };
     h.window.createFormulaUI = () => ({});
-    h.load('chat/chat.js'); h.load('cleaning_help/cleaning_help.js'); h.load('taskpane.js');
+    h.load('chat/chat.js'); h.load('cleaning_help/cleaning_help.js'); h.load('documents/documents.js'); h.load('taskpane.js');
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(workspaceOptions.isBusy(), false); assert.equal(workspaceOptions.getConversationId(), 'conversation');
     assert.equal(formulaOptions.validateSource, stub.validateFormulaSource);
@@ -117,12 +117,12 @@ test('all application scripts load in HTML order and the real controllers initia
     h.sandbox.fetch = async (url, options) => {
         requests.push({url, options});
         return {ok: true, json: async () => url === '/conversations' ? {conversation_id: 'conversation'}
-            : {answer: '도움 카드를 열었어.', ui_action: {type: 'open_cleaning_help'}}};
+            : url.endsWith('/documents') ? {documents: []} : {answer: '도움 카드를 열었어.', ui_action: {type: 'open_cleaning_help'}}};
     };
     const scripts = h.document.querySelectorAll('script').map(node => node.getAttribute('src')).filter(Boolean);
     scripts.filter(file => !file.startsWith('vendor/')).forEach(file => h.load(file));
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(requests.length, 1); assert.equal(requests[0].url, '/conversations');
+    assert.deepEqual(requests.map(r => r.url), ['/conversations', '/conversations/conversation/documents']);
     assert.equal(h.document.querySelector('.send').disabled, false);
     assert.equal(h.document.getElementById('notice').textContent, '');
     await h.document.getElementById('open-workspace').emit('click');

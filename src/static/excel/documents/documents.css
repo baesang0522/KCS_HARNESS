@@ -1,0 +1,13 @@
+.document-toolbar { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 8px; }
+.document-toolbar button { padding:5px 8px; border:1px solid #ded7e9; background:#faf8fd; border-radius:6px; color:#655279; font-size:11px; cursor:pointer; }
+.document-toolbar button:disabled { opacity:.5; cursor:default; }
+.document-item { border-top:1px solid #e8e5ef; padding:12px 0; overflow-wrap:anywhere; }
+.document-item strong { font-size:13px; }
+.document-item p { margin:6px 0; }
+.document-actions { display:flex; flex-wrap:wrap; gap:6px; }
+.document-actions button { font-size:11px; padding:6px 8px; }
+.document-page-controls { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.document-page-controls input { width:65px; padding:5px; }
+#document-preview-title { overflow-wrap:anywhere; font-size:13px; }
+#document-page-body { overflow:auto; max-height:50vh; font-size:12px; overflow-wrap:anywhere; }
+#documents-status:empty { display:none; }

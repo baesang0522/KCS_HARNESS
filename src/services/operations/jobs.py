@@ -16,6 +16,8 @@ from services.operations.schemas import (
 )
 from services.operations.service import execute
 
+EXECUTION_HISTORY_LIMIT = 10
+
 JobStatus = Literal[
     "CREATED",
     "PREVIEW_READY",
@@ -218,8 +220,8 @@ def operation_history_context(
         }
 
     records = []
-    # shortcut: 현재 작업공간의 최근 8건만 제공한다. 오래된 실행·다른 시트 탐색은 별도 검색 단계에서 확장한다.
-    for job in matched[:8]:
+    # shortcut: 현재 작업공간의 최근 10건만 제공한다. 더 오래된 결과는 사용자가 대상 열을 명시해야 한다.
+    for job in matched[:EXECUTION_HISTORY_LIMIT]:
         operation = job.source.operation
         settings = operation.model_dump_json(exclude_defaults=True)
         results = []

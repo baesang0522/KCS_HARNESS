@@ -48,6 +48,11 @@
                 return {workspace: workspace, target: target};
             }
         });
+        function referenceTarget() {
+            if (!workspace) return null;
+            return {workspace_id: workspace.workspace_id, worksheet_id: workspace.worksheet_id,
+                table_id: String(workspace.table_id), sheet_name: workspace.sheet_name, task_type: workspace.task_type};
+        }
         async function save() {
             if (!workspace) return;
 
@@ -57,6 +62,7 @@
             workspace.finalized = finalized;
 
             await window.workspaceStore.save(workspace);
+            if (options.onWorkspaceReady) await options.onWorkspaceReady(referenceTarget());
         }
         async function refresh() {
             if (!workspace) return false;
@@ -327,6 +333,7 @@
             dismiss: function () { operations.invalidate(); similarity.reset(); ui.hide(); },
             reset: function () { similarity.reset(); source = workspace = target = null; lastResults = []; lastFormula = null; ready = false; finalized = null; operations.reset(); ui.reset(); },
             setBusy: function (busy) { ui.busy(busy, ready); operations.busy(busy); similarity.busy(); },
+            referenceTarget: referenceTarget,
             context: async function () {
                 if (!workspace) return null;
                 await refresh();

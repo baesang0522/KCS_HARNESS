@@ -1,6 +1,6 @@
 """현재 대화·작업 표의 정제와 수식 결과를 같은 형식으로 제공한다."""
 from services.formula.schemas import FormulaJob
-from services.operations.jobs import operation_history_context
+from services.operations.jobs import EXECUTION_HISTORY_LIMIT, operation_history_context
 
 
 def same_formula_workspace(job, conversation_id: str, workspace: dict | None) -> bool:
@@ -42,8 +42,13 @@ def execution_history_context(operation_jobs: dict, formula_jobs: dict, *, conve
             'settings_excerpt': settings[:1600], 'settings_truncated': len(settings) > 1600,
             'output_name': ', '.join(action.output_label for action in plan.actions) if plan else None,
             'result_columns': results,
-            'executed_range': {'first_excel_row': job.source.row_start + 1, 'row_count': job.source.row_count},
+            'executed_range': {'targets': [
+                {'first_excel_row': target.row_start + 1, 'row_count': target.row_count,
+                 'first_excel_column': target.column_start + 1, 'column_count': target.column_count}
+                for target in job.result.targets
+            ]} if job.status == 'APPLIED' and job.result else None,
         })
     records.sort(key=lambda record: record['created_at'], reverse=True)
-    # shortcut: 최근 8건만 제공한다. 오래된 작업 검색은 별도 조회 단계가 필요하다.
-    return {'records': records[:8], 'omitted_count': history['omitted_count'] + max(0, len(records) - 8)}
+    # shortcut: 최근 10건만 제공한다. 더 오래된 결과는 사용자가 대상 열을 명시해야 한다.
+    return {'records': records[:EXECUTION_HISTORY_LIMIT],
+            'omitted_count': history['omitted_count'] + max(0, len(records) - EXECUTION_HISTORY_LIMIT)}
