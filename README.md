@@ -124,6 +124,28 @@ Excel Add-in에서 모델규격·해외거래처 데이터를 작업 시트로 �
 - PoC 서버는 **단일 프로세스(`--workers 1`)**로 실행합니다. 여러 프로세스·서버 사이에는 메모리 상태가 공유되지 않습니다. DB 설치나 접속 설정은 필요하지 않습니다.
 - 실제 처리 속도는 Excel 환경과 셀 크기에 따라 달라집니다. OfficeApi 1.9 지원 환경에서 실제 통합문서 확인이 필요합니다.
 
+## 내부 모델과 Codex의 공통 하네스
+
+요청 분류는 모델 종류와 관계없이 다음 경로를 사용합니다.
+
+`채팅 → request_tools.yml → 요청 그래프 → 도구 인자 검증 → 작업 카드 → 사용자 확인 → 기존 실행 처리`
+
+- Codex도 같은 도구 목록·실제 열 ID·최근 실행 기록을 받습니다. CLI의 구조화된 응답을 도구 호출로 변환한 뒤 서버가 실행하며, 잘못된 인자는 공통 그래프에서 한 번 수정 기회를 줍니다.
+- Codex 전용 분류 프롬프트 `request_router.yml`과 직접 결정 JSON을 받던 우회 분기를 제거했습니다.
+- 수식 계획은 `formula.yml`, AI 조언은 `recommendation.yml`을 두 환경에서 함께 사용하고 기존 결과 검증·승인 절차를 유지합니다.
+- `KCS_ENV=external`은 `config.yml`의 Codex 모델과 실행 계정의 Codex CLI 로그인을 사용합니다. `codex exec --ephemeral --output-schema` 지원 버전이 필요합니다. 확인한 CLI는 0.166.0입니다.
+- 이것은 **이 서버가 호출하는 Codex 연결 방식**입니다. 별도로 연 Codex 데스크톱 대화가 자동으로 이 서버를 사용하는 것은 아닙니다.
+
+실제 모델의 요청 해석을 비교하려면 프로젝트 루트에서 다음을 실행합니다. 합성 열 정보와 요청 6개를 사용하며 Excel 파일을 읽거나 수정하지 않습니다. 모델 호출은 발생합니다.
+
+```sh
+PYTHONPATH=src KCS_ENV=external .venv/bin/python scripts/evaluate_routing.py
+# 내부망에서는 같은 사례를 내부 모델로 실행
+PYTHONPATH=src KCS_ENV=internal .venv/bin/python scripts/evaluate_routing.py
+```
+
+조건부 수식 추출·단순 분리·모델 후보 추출·도움 카드·AI 의견·명시한 결과 열을 각각 검사하고 실패 시 종료 코드 1을 반환합니다. 분류 통과는 실제 Excel 계산 결과나 26B의 모든 요청 정확도를 보장하지 않습니다.
+
 ## 테스트
 
 프로젝트 루트에서 실행합니다. 설치된 프로젝트 Python 환경과 Node.js를 사용하며 외부 모델 호출은 하지 않습니다.

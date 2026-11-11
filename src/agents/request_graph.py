@@ -1,4 +1,5 @@
 import json
+import logging
 
 from typing import Annotated, TypedDict
 from langchain_core.messages import (
@@ -56,11 +57,9 @@ async def run_request_graph(runtime, messages, task_context: dict) -> dict:
         if reply.tool_calls:
             return {"messages": [reply]}
 
-        print(
-            f"모델 tool 호출 누락: "
-            f"content={reply.content!r} "
-            f"additional_kwargs={reply.additional_kwargs!r} "
-            f"response_metatdata={reply.response_metadata!r} "
+        logging.getLogger(__name__).warning(
+            "모델 도구 호출 누락: finish_reason=%s, content_length=%s",
+            reply.response_metadata.get("finish_reason"), len(reply.content),
         )
 
         return {

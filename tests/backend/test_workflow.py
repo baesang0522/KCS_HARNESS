@@ -21,6 +21,7 @@ from services.execution_history import execution_history_context
 from services.formula.schemas import CreateFormulaJobRequest, FormulaPlan
 from services.operations.jobs import CreateOperationJob, OperationJob
 from agents.request_tools import build_request_tools
+from models.codex_adapter import CodexModel
 
 
 class WorkflowTests(unittest.TestCase):
@@ -35,15 +36,27 @@ class WorkflowTests(unittest.TestCase):
         self.decision = {'intent': 'start_task', 'task_type': 'formula',
                          'formula_column_ids': ['trade', 'cleaned'], 'answer': '입력 열을 확인하세요.'}
         async def respond(prompt, payload):
-            if prompt == 'formula':
-                self.planning_inputs.append(payload)
-                body = self.plan
+            self.planning_inputs.append(payload)
+            return AIMessage(content=json.dumps(self.plan))
+
+        async def execute(prompt, schema):
+            payload = json.loads(prompt.split("\n", 1)[1])
+            self.context = json.loads(payload['conversation'][1]['content'])['task_context']
+            if payload['conversation'][-1]['role'] == 'tool':
+                name, args = 'ask_user', {'question': '수식에 사용할 열을 알려주세요.'}
+            elif self.decision['intent'] == 'operation':
+                op = self.decision['operation']
+                name, args = 'replace_text', dict(column_id=op['column_ids'][0],
+                                                find=op['find'], replacement=op['replacement'])
             else:
-                self.context = payload['task_context']
-                body = self.decision
-            return AIMessage(content=json.dumps(body))
+                name, args = 'start_task', dict(task_type=self.decision['task_type'],
+                    input_column_ids=self.decision.get('formula_column_ids'))
+            return dict(name=name, arguments=json.dumps(args))
+
+        model = CodexModel('test')
+        model._execute = execute
         app.state.runtime = SimpleNamespace(settings=SimpleNamespace(llm=SimpleNamespace(provider='codex_cli', timeout_seconds=1)),
-            respond=respond, request_prompt='router', formula_prompt='formula')
+            model=model, tools_prompt='router', respond=respond, formula_prompt='formula')
         app.state.conversations = self.repo
         app.state.formula_jobs = {}
         app.state.operation_jobs = {}

@@ -19,7 +19,6 @@ PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 class CustomsHarness:
     settings: Settings
     model: BaseChatModel | CodexModel
-    request_prompt: str
     formula_prompt: str
     tools_prompt: str
     recommendation_prompt: str
@@ -94,7 +93,6 @@ def create_runtime() -> CustomsHarness:
         settings=settings,
         model=model,
         advice_model=advice_model,
-        request_prompt=load_agent_prompt(PROMPT_DIR / "request_router.yml").render(),
         formula_prompt=load_agent_prompt(PROMPT_DIR / "formula.yml").render(),
         tools_prompt=load_agent_prompt(PROMPT_DIR / "request_tools.yml").render(),
         recommendation_prompt=load_agent_prompt(PROMPT_DIR / "recommendation.yml").render(),

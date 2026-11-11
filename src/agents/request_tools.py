@@ -73,7 +73,8 @@ def build_request_tools(task_context: dict):
             ],
             input_column_ids: list[str] | None = None,
     ) -> dict:
-        """새 업무를 시작하거나 수식을 요청한다. 기존 정제 작업에는 사용하지 않는다.
+        """새 업무를 시작하거나 수식·조건부 비교를 요청한다.
+        A열의 마지막 단어가 B열에 있으면 추출하는 요청은 formula이며 두 입력 열 ID를 지정한다.
         현재 작업 시트가 있어도 사용자가 업무 전환을 명시하면 사용한다.
         같은 업무 안의 전처리, 치환, 분리 요청에는 사용하지 않는다."""
         if task_type == "formula" and workspace:
@@ -136,7 +137,8 @@ def build_request_tools(task_context: dict):
             delimiter: str | None = None,
             part: Literal["all", "last"] = "all",
     ) -> dict:
-        """문자열 분리를 설정한다. delimiter=null은 공백, part=last는 마지막 단어 추출이다."""
+        """한 열의 문자열만 분리한다. delimiter=null은 공백, part=last는 마지막 단어다.
+        다른 열에 포함되는지 검사하는 조건부 추출은 start_task의 formula를 사용한다."""
         return card(
             kind="split",
             column_ids=[target(column_id)],
@@ -184,7 +186,8 @@ def build_request_tools(task_context: dict):
         column_id: str | None = None,
         extraction_mode: Literal["alphanumeric", "labelled"] | None = None,
     ) -> dict:
-        """지정된 모델규격명 열의 모델규격 추출 카드를 연다. 방식 미지정이면 대상 전체에서 추천하며 자동 적용하지 않는다."""
+        """모델규격명 한 열에서 문자+숫자 또는 MODEL·CODE·GRADE 뒤 후보를 추출한다.
+        방식 미지정이면 추천 카드를 연다. 다른 열과 비교하는 조건부 추출은 formula다. 자동 적용하지 않는다."""
         expected = extraction_column_id(workspace)
         if column_id is not None and column_id != expected:
             raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])
