@@ -132,6 +132,7 @@
             conversationId = data.conversation_id;
             pendingRequest = null;
             saveSession();
+            if (options.onConversationChanged) await options.onConversationChanged(conversationId);
         }
 
         function renderMessages(messages) {
@@ -153,6 +154,7 @@
             );
 
             renderMessages(data.messages);
+            if (options.onConversationChanged) await options.onConversationChanged(conversationId);
         }
 
         async function initializeConversation() {

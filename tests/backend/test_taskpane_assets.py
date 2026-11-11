@@ -43,6 +43,7 @@ class TaskpaneAssetsTests(unittest.TestCase):
             ('formula/workspace_formula.js', 'workspace/workspace.js'),
             ('operations/extraction_suggestions.js', 'operations/operations.js'),
             ('chat/chat.js', 'taskpane.js'),
+            ('documents/documents.js', 'taskpane.js'),
             ('cleaning_help/cleaning_help.js', 'taskpane.js'),
         ):
             self.assertLess(paths.index(dependency), paths.index(consumer))

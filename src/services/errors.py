@@ -25,3 +25,7 @@ class ConflictError(ServiceError):
 
 class ModelProcessingError(ServiceError):
     pass
+
+
+class DocumentError(ServiceError):
+    pass

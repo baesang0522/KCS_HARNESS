@@ -27,7 +27,8 @@ async function setup() {
     vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../src/static/excel/formula/workspace_formula.js'),'utf8'),sandbox);
     vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../src/static/excel/workspace/workspace.js'),'utf8'),sandbox);
     h.controller=window.createWorkspaceController({api:{newRequestId:()=> 'id'},getConversationId:()=> 'conversation',
-        isBusy:()=>false,setBusy(){},complete(){},enterConversation(){}});
+        isBusy:()=>false,setBusy(){},complete(){},enterConversation(){},
+        onWorkspaceReady: async target => { h.reference = target; }});
     await handlers.restore();
     assert(!h.status.some(x=>x.includes('실패')));
     h.scope={workspace_id:'workspace',column_ids:['trade','cleaned']};
@@ -79,4 +80,13 @@ test('result IDs are resolved before reporting success; last result only changes
     await h.controller.configure({kind:'replace',column_ids:['grouped'],find:'X',replacement:'Y'});
     assert.deepEqual(Array.from(h.configured.column_ids),['grouped']);
     assert.deepEqual(Array.from((await h.controller.context()).target_column_ids),['grouped']);
+});
+
+test('workspace restoration notifies reference documents with identity and no cell data', async () => {
+    const h = await setup();
+    assert.equal(h.reference.workspace_id, 'workspace');
+    assert.equal(h.reference.task_type, 'model_normalization');
+    assert.equal(h.reference.table_id, 'table');
+    assert.equal('columns' in h.reference, false);
+    assert.equal(JSON.stringify(h.controller.referenceTarget()), JSON.stringify(h.reference));
 });

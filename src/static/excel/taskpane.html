@@ -7,6 +7,7 @@
   <title>엑셀 전처리 도우미</title>
   <link rel="stylesheet" href="taskpane.css">
   <link rel="stylesheet" href="common/markdown.css">
+  <link rel="stylesheet" href="documents/documents.css">
   <script src="vendor/office-js/office.js"></script>
   <script defer src="vendor/marked.umd.js"></script>
   <script defer src="vendor/purify.min.js"></script>
@@ -37,6 +38,7 @@
   <script defer src="formula/formula.js"></script>
   <script defer src="chat/chat.js"></script>
   <script defer src="cleaning_help/cleaning_help.js"></script>
+  <script defer src="documents/documents.js"></script>
   <script defer src="taskpane.js"></script>
 </head>
 <body>
@@ -52,6 +54,25 @@
       </button>
     </header>
     <main>
+      <section class="normalization-panel" id="documents-panel" aria-labelledby="documents-title" hidden>
+        <h2 id="documents-title" tabindex="-1">PDF 참고자료</h2>
+        <button type="button" id="documents-close">참고자료 접기</button>
+        <p>문서를 읽고 사용할 작업에 연결합니다. 아직 대화 답변이나 Excel 정제에 자동 반영되지는 않습니다.</p>
+        <p>자료는 현재 서버의 대화에만 보관됩니다. 서버 재시작 후에는 다시 첨부하세요.</p>
+        <p id="documents-status" role="status" aria-live="polite"></p>
+        <div id="documents-list"></div>
+        <section id="document-preview" aria-labelledby="document-preview-title" hidden>
+          <h3 id="document-preview-title"></h3>
+          <div class="document-page-controls">
+            <button type="button" id="document-prev" aria-label="이전 PDF 페이지">이전</button>
+            <label for="document-page" class="sr-only">PDF 페이지</label>
+            <input type="number" id="document-page" min="1" value="1">
+            <span id="document-page-count"></span>
+            <button type="button" id="document-next" aria-label="다음 PDF 페이지">다음</button>
+          </div>
+          <div id="document-page-body" class="message-body" aria-live="polite"></div>
+        </section>
+      </section>
       <div id="welcome-content">
       <div class="eyebrow"><span class="dot"></span> EXCEL ASSISTANT <span class="badge">미리보기</span></div>
       <section class="welcome">
@@ -272,6 +293,11 @@
     <footer>
       <p id="notice" class="notice" role="status" aria-live="polite"></p>
       <form id="composer" class="composer">
+        <div class="document-toolbar">
+          <input type="file" id="document-file" accept="application/pdf,.pdf" hidden>
+          <button type="button" id="document-add" disabled>PDF 첨부</button>
+          <button type="button" id="documents-toggle" aria-controls="documents-panel">참고자료 (0)</button>
+        </div>
         <div class="composer-top">
           <button type="button" id="message-resize" class="composer-resize"
                   aria-controls="composer-fields" aria-expanded="true">입력칸 접기</button>

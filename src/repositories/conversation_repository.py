@@ -24,6 +24,7 @@ class StoredTurn:
 
 @dataclass
 class MemoryConversation:
+    documents: dict = field(default_factory=dict)
     turns: list[StoredTurn] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     workflow: WorkFlowState = field(default_factory=WorkFlowState)
@@ -75,6 +76,8 @@ class MemoryConversationRepository:
             if len(conversation.cancelled_requests) >= 100:
                 raise ConflictError("개발용 중지 기록 제한입니다. 새 대화를 시작하세요.")
             conversation.cancelled_requests.add(request_id)
+
+        conversation.documents.pop(request_id, None)
 
         # 처리 중인 요청이 대화 잠금을 잡고 있으므로 취소 경로에서는 잠금을 기다리지 않는다.
         task = conversation.active_requests.get(request_id)

@@ -1,7 +1,7 @@
 "use strict";
 (function () {
     var api = window.apiClient;
-    var workspace = null, formula = null, help = null;
+    var workspace = null, formula = null, help = null, documents = null;
     var connection = document.getElementById('connection');
     var diagnostic = document.getElementById('diagnostic');
     var ready = false;
@@ -29,7 +29,9 @@
         closeTaskCards: closeTaskCards,
         resetTasks: function () { workspace.reset(); formula.reset(); },
         handleUIAction: handleUIAction,
+        onConversationChanged: function (id) { if (documents) return documents.load(id); },
         onBusy: function (value) {
+            if (documents) documents.updateControls();
             if (help) help.updateControls();
             if (workspace) workspace.setBusy(value);
             if (formula) formula.setBusy(value);
@@ -91,7 +93,8 @@
         complete: completeTask,
         isBusy: chat.isBusy,
         setBusy: chat.setBusy,
-        getConversationId: chat.getConversationId
+        getConversationId: chat.getConversationId,
+        onWorkspaceReady: function (target) { if (documents) return documents.attachPending(target); }
     });
     formula = window.createFormulaController({
         ui: window.createFormulaUI({
@@ -121,6 +124,12 @@
         workspace: workspace, isBusy: chat.isBusy, setBusy: chat.setBusy,
         closeTaskCards: closeTaskCards, enterConversation: chat.enterConversation,
         sendMessage: chat.sendMessage
+    });
+    documents = window.createDocumentsController({
+        api: api, getWorkspace: workspace.referenceTarget,
+        isBusy: chat.isBusy, setBusy: chat.setBusy,
+        beginRequest: chat.beginRequest, endRequest: chat.endRequest,
+        checkRequest: chat.checkRequest, reportStop: chat.reportStop
     });
     chat.initialize();
 })();

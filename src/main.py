@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -19,6 +20,7 @@ async def lifespan(app: FastAPI):
     app.state.conversations = MemoryConversationRepository()
     app.state.formula_jobs = {}
     app.state.operation_jobs = {}
+    app.state.document_slots = asyncio.Semaphore(2)
 
     yield
 

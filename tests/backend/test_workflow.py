@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -16,6 +17,7 @@ from repositories.conversation_repository import MemoryConversationRepository, C
 from services.errors import ServiceError
 from services.chat import build_task_context
 from services.chat_state import WorkFlowState
+from services.execution_history import execution_history_context
 from services.formula.schemas import CreateFormulaJobRequest, FormulaPlan
 from services.operations.jobs import CreateOperationJob, OperationJob
 from agents.request_tools import build_request_tools
@@ -143,6 +145,54 @@ class WorkflowTests(unittest.TestCase):
         record=next(r for r in self.context['execution_history']['records'] if r['kind']=='formula')
         self.assertEqual(record['status'],'UNKNOWN')
         self.assertEqual(record['result_columns'],[])
+        self.assertIsNone(record['executed_range'])
+
+    def test_formula_history_uses_completed_targets_instead_of_input_rows(self):
+        self.plan['actions'] = [
+            {**self.plan['actions'][0], 'target_range': 'AA5', 'anchor_cell': 'AA5', 'mode': 'single'},
+            {**self.plan['actions'][0], 'target_range': 'AB5', 'anchor_cell': 'AB5', 'mode': 'single'},
+        ]
+        self.preview()
+        self.chat()
+        self.assertIsNone(self.context['execution_history']['records'][0]['executed_range'])
+        approved = self.client.post(self.path+'/approve', json={'target_ranges': ['AA5', 'AB5']})
+        self.assertEqual(approved.status_code, 200, approved.text)
+        completed = self.client.post(self.path+'/complete', json={
+            'targets': [
+                {'row_start': 4, 'row_count': 1, 'column_start': 26, 'column_count': 1},
+                {'row_start': 4, 'row_count': 1, 'column_start': 27, 'column_count': 1},
+            ], 'result_column_ids': ['formula-result', 'second-result'],
+        })
+        self.assertEqual(completed.status_code, 200, completed.text)
+        self.chat()
+        self.assertEqual(self.context['execution_history']['records'][0]['executed_range'], {'targets': [
+            {'first_excel_row': 5, 'row_count': 1, 'first_excel_column': 27, 'column_count': 1},
+            {'first_excel_row': 5, 'row_count': 1, 'first_excel_column': 28, 'column_count': 1},
+        ]})
+
+    def test_history_keeps_ten_newest_operations_and_formulas_combined(self):
+        operation_ids = []
+        for index in range(12):
+            self.seed_operation('replaced', {'kind': 'replace', 'column_ids': ['model'],
+                                            'find': 'X', 'replacement': 'Y'})
+            job_id = next(reversed(self.app.state.operation_jobs))
+            operation_ids.append(job_id)
+            self.app.state.operation_jobs[job_id].created_at = datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=index)
+
+        def history():
+            return execution_history_context(self.app.state.operation_jobs, self.app.state.formula_jobs,
+                                             conversation_id=self.cid, workspace=self.workspace)
+
+        self.assertEqual([r['job_id'] for r in history()['records']], list(reversed(operation_ids))[:10])
+        self.assertEqual(history()['omitted_count'], 2)
+        self.preview(); self.approve()
+        completed = self.client.post(self.path+'/complete', json=self.result)
+        self.assertEqual(completed.status_code, 200, completed.text)
+        records = history()['records']
+        self.assertEqual([r['job_id'] for r in records],
+                         [self.source['formula_job_id']] + list(reversed(operation_ids))[:9])
+        self.assertEqual(history()['omitted_count'], 3)
+        self.assertEqual(records[0]['executed_range']['targets'][0]['row_count'], 90000)
 
     def test_completion_validates_actual_ranges_ids_and_is_idempotent(self):
         self.preview();self.approve()
