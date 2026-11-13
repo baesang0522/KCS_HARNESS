@@ -51,13 +51,11 @@ class AdviceSelectionTests(unittest.IsolatedAsyncioTestCase):
         async def invoke(messages):
             payload = json.loads(messages[-1].content)
             requests.append(payload)
-            if payload['stage'] == 'plan':
-                answer = {'column_ids': []}
-            elif payload['stage'] == 'scan':
+            if payload['stage'] == 'scan':
                 answer = {'findings': [{'excel_rows': [payload['rows'][0]['excel_row']],
                                         'advice': '자주 등장하는 모델 표기를 확인하세요.'}]}
             else:
-                answer = {'finding': payload['proposal']}
+                answer = {'findings': payload['proposals']}
             return AIMessage(content=json.dumps(answer))
 
         data = AdviceRequest.model_validate(self.payload())

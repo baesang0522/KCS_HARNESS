@@ -205,6 +205,32 @@
             }
         }
 
+        function watchRecommendationProgress(run) {
+            var controller = new AbortController(), timer, stopped = false;
+            var path = '/conversations/' + encodeURIComponent(run.request.conversation_id) +
+                '/requests/' + encodeURIComponent(run.request.request_id) + '/recommendation-progress';
+            function stop() {
+                stopped = true;
+                window.clearTimeout(timer);
+                controller.abort();
+                run.controller.signal.removeEventListener('abort', stop);
+            }
+            async function poll() {
+                try {
+                    var progress = await api.requestJson(path, {signal: controller.signal, cache: 'no-store'});
+                    if (!stopped && !run.cancelled && activeRequest === run && progress.message) {
+                        notice.textContent = progress.message;
+                    }
+                } catch (_) {
+                    // 진행 조회 실패가 실제 분석 요청을 중단하지 않게 한다.
+                }
+                if (!stopped) timer = window.setTimeout(poll, 1000);
+            }
+            run.controller.signal.addEventListener('abort', stop);
+            poll();
+            return stop;
+        }
+
         async function sendMessage(advice) {
             if (sending) return false;
 
@@ -232,7 +258,7 @@
             options.closeTaskCards();
             if (!pendingBubble) pendingBubble = appendMessage('user', value);
             message.value = '';
-            notice.textContent = '답변을 생성하고 있습니다…';
+            notice.textContent = advice ? '분석할 작업표를 확인하고 있습니다…' : '답변을 생성하고 있습니다…';
 
             try {
                 if (!conversationId) {
@@ -278,16 +304,21 @@
                         function () { checkChat(run); }
                     );
                     checkChat(run);
-                    notice.textContent = "데이터를 분석하고 정제 의견을 준비하고 있습니다…";
-                    reply = await api.requestJson('/chat/recommendation', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(Object.assign({}, data, {
-                            conversation_id: pendingRequest.conversation_id,
-                            request_id: pendingRequest.request_id
-                        })),
-                        signal: run.controller.signal
-                    });
+                    notice.textContent = "AI 분석을 준비하고 있습니다…";
+                    var stopProgress = watchRecommendationProgress(run);
+                    try {
+                        reply = await api.requestJson('/chat/recommendation', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(Object.assign({}, data, {
+                                conversation_id: pendingRequest.conversation_id,
+                                request_id: pendingRequest.request_id
+                            })),
+                            signal: run.controller.signal
+                        });
+                    } finally {
+                        stopProgress();
+                    }
                     checkChat(run);
                 }
 

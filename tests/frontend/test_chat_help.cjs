@@ -18,11 +18,13 @@ async function setup(saved) {
         h.requests.push({url, options, body: options.body && JSON.parse(options.body)});
         if (url === '/conversations') return {conversation_id: 'conversation'};
         if (url.endsWith('/cancel')) return {};
+        if (url.endsWith('/recommendation-progress')) return h.progress(options);
         if (url === '/conversations/old') { const error = new Error('gone'); error.status = 404; throw error; }
         if (url.startsWith('/conversations/')) return {messages: []};
         return h.reply(url, options);
     }};
     h.reply = async () => ({answer: '완료', ui_action: null});
+    h.progress = async () => ({message: 'AI 분석을 준비하고 있습니다…'});
     if (saved) h.localStorage.setItem('kcs-chat-session-v1', JSON.stringify(saved));
     h.load('chat/chat.js'); h.load('cleaning_help/cleaning_help.js');
     const close = () => { if (h.help) h.help.dismiss(); h.workspace.dismiss(); };
@@ -81,6 +83,64 @@ test('stop aborts local request, calls server cancellation, and ignores a late r
     assert(h.node('conversation').textContent.includes('요청을 중지했습니다'));
     assert.equal(h.node('message').value, '긴 요청'); assert.equal(h.chat.isBusy(), false);
     assert.equal(JSON.parse(h.localStorage.getItem('kcs-chat-session-v1')).pending_request, null);
+});
+
+test('advice updates the existing notice through analysis and verification, then stops polling', async () => {
+    const h = await setup(), timers = new Map(); let nextTimer = 0, finish;
+    h.window.setTimeout = callback => { timers.set(++nextTimer, callback); return nextTimer; };
+    h.window.clearTimeout = id => timers.delete(id);
+    let stage = '1/2 · 상위 100개 분석 중', progressSignal;
+    h.progress = async options => { progressSignal = options.signal; return {message: stage}; };
+    h.reply = async url => url === '/chat'
+        ? {ui_action: {type: 'analyze_data', column_ids: ['model']}}
+        : new Promise(resolve => { finish = resolve; });
+    const running = h.chat.sendMessage({workspace_id: 'work'});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(h.node('notice').textContent, stage);
+    assert.equal(timers.size, 1);
+    stage = '2/2 · 제안 8개 전체 검증 중';
+    const [id, tick] = timers.entries().next().value; timers.delete(id); await tick();
+    assert.equal(h.node('notice').textContent, stage);
+    finish({answer: '검증된 최종 의견', ui_action: null}); await running;
+    assert.equal(h.node('notice').textContent, '');
+    assert(h.node('conversation').textContent.includes('검증된 최종 의견'));
+    assert.equal(timers.size, 0);
+    assert.equal(progressSignal.aborted, true);
+});
+
+test('late progress cannot overwrite completed, failed, or cancelled advice', async () => {
+    for (const outcome of ['complete', 'fail', 'cancel']) {
+        const h = await setup(); let finish, fail, progressReply, progressSignal, timers = 0;
+        h.window.setTimeout = () => { timers++; return 1; };
+        h.progress = options => { progressSignal = options.signal; return new Promise(resolve => { progressReply = resolve; }); };
+        h.reply = async url => url === '/chat'
+            ? {ui_action: {type: 'analyze_data', column_ids: ['model']}}
+            : new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+        const running = h.chat.sendMessage({workspace_id: 'work'});
+        await new Promise(resolve => setImmediate(resolve));
+        if (outcome === 'cancel') await h.node('composer').emit('submit');
+        if (outcome === 'fail') fail(new Error('분석 실패'));
+        else finish({answer: '결과', ui_action: null});
+        await running;
+        const notice = h.node('notice').textContent, count = timers;
+        progressReply({message: '늦은 검증 안내'});
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(h.node('notice').textContent, notice);
+        assert.equal(timers, count);
+        assert.equal(progressSignal.aborted, true);
+        assert.equal(h.chat.isBusy(), false);
+    }
+});
+
+test('progress lookup failure does not discard a successful analysis', async () => {
+    const h = await setup();
+    h.progress = async () => { throw new Error('진행 조회 연결 오류'); };
+    h.reply = async url => url === '/chat'
+        ? {ui_action: {type: 'analyze_data', column_ids: ['model']}}
+        : {answer: '정상 의견', ui_action: null};
+    await h.chat.sendMessage({workspace_id: 'work'});
+    assert(h.node('conversation').textContent.includes('정상 의견'));
+    assert.equal(h.node('notice').textContent, '');
 });
 
 test('retry keeps request ID; new question changes it; stale saved conversation recovers', async () => {

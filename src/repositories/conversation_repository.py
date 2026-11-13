@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from services.chat_state import WorkFlowState
-from services.errors import ConflictError
+from services.errors import ConflictError, NotFoundError
 
 
 class ConversationNotFound(Exception):
@@ -20,6 +20,7 @@ class StoredTurn:
     ui_action: dict | None = None
     request_context: dict | None = None
     advice_requested: bool = False
+    recommendation_progress: str | None = None
 
 
 @dataclass
@@ -46,6 +47,16 @@ class MemoryConversationRepository:
         conversation_id = str(uuid4())
         self._conversations[conversation_id] = MemoryConversation()
         return conversation_id
+
+    def recommendation_progress(self, conversation_id: str, request_id: str) -> str:
+        conversation = self._conversations.get(conversation_id)
+        if conversation is None:
+            raise ConversationNotFound(conversation_id)
+        # 분석이 대화 잠금을 보유하므로 진행 문구는 잠금을 기다리지 않고 읽는다.
+        turn = next((turn for turn in conversation.turns if turn.request_id == request_id), None)
+        if turn is None:
+            raise NotFoundError("원래 조언 요청을 찾을 수 없습니다.")
+        return turn.recommendation_progress or "AI 분석을 준비하고 있습니다…"
 
     @asynccontextmanager
     async def request(self, conversation_id: str, request_id: str):
@@ -88,6 +99,7 @@ class MemoryConversationRepository:
                 turn.answer = "사용자가 요청을 중지했습니다."
                 turn.reasoning = []
                 turn.ui_action = None
+                turn.recommendation_progress = "요청을 중지했습니다."
         return {"status": "cancelled"}
 
     @asynccontextmanager

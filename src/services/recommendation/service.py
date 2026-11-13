@@ -1,4 +1,5 @@
 from services.errors import SHARED_MESSAGES
+import asyncio
 import hashlib
 import logging
 
@@ -91,10 +92,16 @@ async def process_recommendation(
                     turn.question,
                     workspace,
                     payload,
+                    progress=lambda message: setattr(turn, "recommendation_progress", message),
                 )
+            except asyncio.CancelledError:
+                turn.recommendation_progress = "요청을 중지했습니다."
+                raise
             except ValueError as error:
+                turn.recommendation_progress = "정제 의견 생성에 실패했습니다."
                 raise ModelProcessingError(str(error)) from error
             except Exception as error:
+                turn.recommendation_progress = "정제 의견 생성에 실패했습니다."
                 logging.getLogger(__name__).exception("AI 조언 생성 실패: request_id=%s", rid)
                 raise ModelProcessingError(
                     "전체 데이터 조언 생성에 실패했습니다."
@@ -104,6 +111,7 @@ async def process_recommendation(
             turn.reasoning = []
             turn.ui_action = None
             conversation.recommendation_hashes[rid] = digest
+            turn.recommendation_progress = "정제 의견 작성이 완료됐습니다."
 
         return {
             "conversation_id": cid,

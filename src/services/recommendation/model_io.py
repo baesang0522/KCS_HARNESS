@@ -76,7 +76,8 @@ async def ask(model, prompt: str, stage: str, payload: dict, schema):
 
         if len(prompt.encode("utf-8")) + len(content.encode("utf-8")) > INPUT_BYTES:
             raise ValueError(
-                "분석 입력 예산을 초과했습니다. 원문은 생략하지 않았습니다."
+                "AI에 한 번에 보낼 수 있는 입력 크기를 초과했습니다. "
+                "추가 열이나 열 설명을 줄인 뒤 다시 요청하세요. 데이터는 생략하지 않았습니다."
             )
 
         reply = await model.ainvoke([

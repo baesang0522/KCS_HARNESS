@@ -80,15 +80,13 @@ class ModelAdviceTests(unittest.IsolatedAsyncioTestCase):
         async def invoke(messages):
             request = json.loads(messages[-1].content)
             requests.append(request)
-            if request['stage'] == 'plan':
-                reply = {'column_ids': ['model']}
-            elif request['stage'] == 'scan':
+            if request['stage'] == 'scan':
                 reply = {'findings': [{'excel_rows': [request['rows'][0]['excel_row']],
                                        'advice': '추출 후보를 확인하세요.'}]}
             elif request['stage'] == 'merge':
                 reply = request['reviews'][0]
             else:
-                reply = {'finding': request['proposal']}
+                reply = {'findings': request['proposals']}
             return AIMessage(content=json.dumps(reply, ensure_ascii=False))
 
         values = [['note', f'ab{i}', 'paint', 'enamel'] for i in range(502)]
@@ -98,11 +96,8 @@ class ModelAdviceTests(unittest.IsolatedAsyncioTestCase):
         result = await generate_advice(SimpleNamespace(
             advice_model=SimpleNamespace(ainvoke=invoke), recommendation_prompt='test'),
             '정제 의견', {'task_type': 'model_normalization', 'columns': MODEL_COLUMNS}, data)
-        for ordering in ('frequency_desc', 'model'):
-            scans = [r for r in requests if r['stage'] == 'scan' and r['ordering'] == ordering]
-            self.assertTrue(all(len(r['rows']) <= 100 for r in scans))
-            received = {row['excel_row']: row for r in scans for row in r['rows']}
-            self.assertEqual(received, {row['excel_row']: row for row in expected})
+        self.assertEqual([r['stage'] for r in requests], ['scan', 'verify'])
+        self.assertEqual(requests[0]['rows'], expected)
         self.assertTrue(all(r['selection'] == scope for r in requests))
         verified = [row for r in requests if r['stage'] == 'verify' for row in r['rows']]
         self.assertTrue(verified)
@@ -176,22 +171,20 @@ class ModelAdviceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, '토큰 한도'):
             await ask(model, 'test', 'scan', {}, Review)
 
-    async def test_counterparty_advice_still_scans_every_row_and_column_then_merges(self):
+    async def test_counterparty_advice_scans_every_row_once_then_merges(self):
         requests = []
 
         async def invoke(messages):
             request = json.loads(messages[-1].content)
             requests.append(request)
             stage = request['stage']
-            if stage == 'plan':
-                reply = {'column_ids': ['model']}
-            elif stage == 'scan':
+            if stage == 'scan':
                 reply = {'findings': [{'excel_rows': [request['rows'][0]['excel_row']],
                                        'advice': '모델명을 확인하세요.'}]}
             elif stage == 'merge':
                 reply = request['reviews'][0]
             else:
-                reply = {'finding': request['proposal']}
+                reply = {'findings': request['proposals']}
             return AIMessage(content=json.dumps(reply, ensure_ascii=False))
 
         rows = [{'excel_row': i + 1, 'values': [f'AB{250-i}', f'설명 {i}']}
@@ -206,12 +199,13 @@ class ModelAdviceTests(unittest.IsolatedAsyncioTestCase):
         result = await generate_advice(SimpleNamespace(
             advice_model=SimpleNamespace(ainvoke=invoke), recommendation_prompt='test'),
             '전체 데이터 정제 의견', workspace, data)
-        for ordering in ('excel_row', 'model'):
-            scans = [r for r in requests if r['stage'] == 'scan' and r['ordering'] == ordering]
-            self.assertEqual([len(r['rows']) for r in scans], [100, 100, 52])
-            received = {row['excel_row']: row for r in scans for row in r['rows']}
-            self.assertEqual(received, {row['excel_row']: row for row in rows})
-            self.assertTrue(all(r['columns'] == workspace['columns'] for r in scans))
+        scans = [r for r in requests if r['stage'] == 'scan']
+        self.assertEqual([len(r['rows']) for r in scans], [100, 100, 52])
+        received = {row['excel_row']: row for r in scans for row in r['rows']}
+        self.assertEqual(received, {row['excel_row']: row for row in rows})
+        self.assertTrue(all(r['columns'] == workspace['columns'] for r in scans))
+        self.assertNotIn('plan', [r['stage'] for r in requests])
+        self.assertEqual(sum(r['stage'] == 'verify' for r in requests), 1)
         self.assertIn('merge', [r['stage'] for r in requests])
         self.assertIn('verify', [r['stage'] for r in requests])
         self.assertIn('전체 250행', result)

@@ -89,10 +89,6 @@ class AdviceRequest(StrictModel):
         return self
 
 
-class ComparisonPlan(StrictModel):
-    column_ids: list[ColumnId] = Field(default_factory=list, max_length=3)
-
-
 class Finding(StrictModel):
     excel_rows: list[Annotated[int, Field(ge=1, le=1048576)]] = Field(
         min_length=1,
@@ -104,7 +100,3 @@ class Finding(StrictModel):
 
 class Review(StrictModel):
     findings: list[Finding] = Field(default_factory=list, max_length=8)
-
-
-class CheckedFinding(StrictModel):
-    finding: Finding | None = None

@@ -116,6 +116,13 @@ async def chat(payload: ChatRequest, request: Request):
     return result
 
 
+@router.get("/conversations/{conversation_id}/requests/{request_id}/recommendation-progress")
+async def recommendation_progress(conversation_id: UUID, request_id: UUID, request: Request):
+    return {"message": request.app.state.conversations.recommendation_progress(
+        str(conversation_id), str(request_id),
+    )}
+
+
 @router.post("/chat/recommendation", response_model=ChatResponse)
 async def recommendation(payload: AdviceRequest, request: Request):
     ids = {

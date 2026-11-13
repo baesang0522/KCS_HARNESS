@@ -1,21 +1,10 @@
-"""조언에 사용할 조합의 집계·선정과 비교용 정렬 기준."""
+"""조언에 사용할 조합의 집계·선정."""
 from services.errors import SHARED_MESSAGES
-import re
-import unicodedata
 
 from services.recommendation.schemas import AdviceRequest, TOP_COMBINATIONS
 
 
 MODEL_GROUP_ROLES = ("declared_name", "trade_name", "model_spec")
-
-
-def comparison_key(value: str) -> str:
-    # 후보 정렬용이며 원문과 실제 셀은 변경하지 않는다.
-    return re.sub(
-        r"\W+",
-        "",
-        unicodedata.normalize("NFKC", value).casefold(),
-    )
 
 
 def top_model_combinations(data: AdviceRequest, columns: list[dict]) -> tuple[list[dict], dict]:

@@ -1,8 +1,8 @@
 """선정된 데이터를 검토하고 제안을 종합·근거 확인한다."""
 from services.errors import MODEL_RESPONSE_ERROR
 from services.recommendation.model_io import ask, available_bytes, batches
-from services.recommendation.selection import comparison_key, top_model_combinations
-from services.recommendation.schemas import AdviceRequest, CheckedFinding, ComparisonPlan, Review
+from services.recommendation.selection import top_model_combinations
+from services.recommendation.schemas import AdviceRequest, Review
 
 
 SCAN_MAX_ROWS = 100
@@ -19,6 +19,7 @@ async def generate_advice(
     question: str,
     workspace: dict,
     data: AdviceRequest,
+    progress=None,
 ):
     model = runtime.advice_model
     if model is None:
@@ -48,46 +49,27 @@ async def generate_advice(
     if selection is not None:
         base["selection"] = selection
 
-    plan = await ask(model, prompt, "plan", base, ComparisonPlan)
-    if (
-        len(set(plan.column_ids)) != len(plan.column_ids)
-        or not set(plan.column_ids) <= set(data.column_ids)
-    ):
-        raise ValueError(MODEL_RESPONSE_ERROR)
-
-    scan_limit = available_bytes(prompt, base, Review)
     reports = []
-
-    async def scan(ordered_rows, ordering: str):
-        for part in batches(ordered_rows, scan_limit, overlap=True, max_items=SCAN_MAX_ROWS):
-            review = await ask(
-                model,
-                prompt,
-                "scan",
-                {**base, "ordering": ordering, "rows": part},
-                Review,
+    parts = [rows] if selection else list(batches(
+        rows, available_bytes(prompt, base, Review), overlap=True, max_items=SCAN_MAX_ROWS,
+    ))
+    for index, part in enumerate(parts, 1):
+        if progress:
+            progress(
+                f"1/2 · 빈도 상위 {len(rows)}개 조합을 AI가 분석하고 있습니다…"
+                if selection else f"전체 데이터 분석 중 · {index}/{len(parts)}묶음…"
             )
-            check_evidence(review, {row["excel_row"] for row in part})
-            if review.findings:
-                reports.append(review.model_dump())
-
-    await scan(rows, "frequency_desc" if selection else "excel_row")
-
-    for column_id in plan.column_ids:
-        index = data.column_ids.index(column_id)
-        ordered = sorted(
-            rows,
-            key=lambda row: (
-                comparison_key(row["values"][index]),
-                row["excel_row"],
-            ),
+        review = await ask(
+            model, prompt, "scan", {**base, "rows": part}, Review,
         )
-        await scan(ordered, column_id)
-
-    merge_limit = available_bytes(prompt, base, Review)
+        check_evidence(review, {row["excel_row"] for row in part})
+        if review.findings:
+            reports.append(review.model_dump())
 
     while len(reports) > 1:
-        parts = list(batches(reports, merge_limit))
+        if progress:
+            progress("검토 결과를 통합하고 있습니다…")
+        parts = list(batches(reports, available_bytes(prompt, base, Review)))
         if len(parts) == len(reports):
             raise ValueError("검토 결과를 통합할 입력 공간이 부족합니다.")
 
@@ -115,28 +97,25 @@ async def generate_advice(
     final = Review.model_validate(reports[0]) if reports else Review()
     checked = []
 
-    for finding in final.findings:
-        evidence = [
-            by_row[number]
-            for number in dict.fromkeys(finding.excel_rows)
-        ]
+    if final.findings:
+        evidence_ids = dict.fromkeys(
+            number for finding in final.findings for number in finding.excel_rows
+        )
+        if progress:
+            progress(f"2/2 · 제안 {len(final.findings)}개 전체를 근거와 대조해 검증하고 있습니다…")
         result = await ask(
             model,
             prompt,
             "verify",
             {
                 **base,
-                "proposal": finding.model_dump(),
-                "rows": evidence,
+                "proposals": [finding.model_dump() for finding in final.findings],
+                "rows": [by_row[number] for number in evidence_ids],
             },
-            CheckedFinding,
+            Review,
         )
-        if result.finding is not None:
-            check_evidence(
-                Review(findings=[result.finding]),
-                {row["excel_row"] for row in evidence},
-            )
-            checked.append(result.finding)
+        check_evidence(result, set(evidence_ids))
+        checked = result.findings
 
     names = ", ".join(column["header"] for column in columns)
     scope = (
@@ -149,7 +128,6 @@ async def generate_advice(
     lines = [
         f"분석 대상: {names}",
         scope,
-        f"{len(plan.column_ids)}개 열 기준으로 정렬하여 그룹화 후보도 검토했습니다.",
         "아래는 우선 확인할 제안이며 모든 행 쌍의 비교 결과는 아닙니다. "
         "셀은 변경하지 않았습니다.",
     ]
