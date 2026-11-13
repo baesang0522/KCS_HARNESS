@@ -5,7 +5,7 @@
         var columns = [], currentTaskType = null, hasPreview = false, mapping = window.createMappingEditor();
         function extractionColumn() {
             var models = columns.filter(function (column) { return column.role === "model_spec"; });
-            return currentTaskType === "model_normalization" && models.length === 1 ? String(models[0].column_id) : "";
+            return models.length === 1 ? String(models[0].column_id) : "";
         }
         function fill(select, selected) {
             select.textContent = "";
@@ -20,7 +20,7 @@
             var value = el("kind").value;
             fill(el("column"), [el("column").value]);
             el("column").disabled = value === "extract";
-            ["preprocess", "split", "group", "replace", "map", "extract"].forEach(function (name) { el(name).hidden = name !== value; });
+            ["preprocess", "split", "group", "replace", "map", "extract", "set"].forEach(function (name) { el(name).hidden = name !== value; });
             el("single").hidden = value === "group";
             var automatic = el("group-mode").value === "first_non_empty";
             el("group-manual").hidden = automatic;
@@ -47,7 +47,7 @@
                     this.show(available, fallback, taskType, true);
                 } else {
                     columns = available;
-                    ["column", "keys", "value-column", "anchor"].forEach(function (name) {
+                    ["column", "keys", "value-column", "anchor", "existing-column"].forEach(function (name) {
                         var selected = Array.from(el(name).selectedOptions).map(function (option) { return option.value; });
                         fill(el(name), selected.filter(function (id) { return ids.has(id); }));
                     });
@@ -60,12 +60,13 @@
                 if (resetMode) {
                     el("kind").value = "preprocess"; el("part").value = "all"; el("group-mode").value = "manual"; el("extraction-mode").value = "";
                     el("rules").querySelectorAll("input").forEach(function (input) { input.checked = false; });
-                    ["words", "find", "replacement", "delimiter", "source-row", "group-value"].forEach(function (id) { el(id).value = ""; });
+                    ["words", "find", "replacement", "delimiter", "source-row", "group-value", "assigned-value"].forEach(function (id) { el(id).value = ""; });
                 }
                 fill(el("column"), preferred.slice(0, 1).map(String));
                 var defaults = columns.filter(function (c) { return taskType === "counterparty_cleanup" ?
                     ["country_code", "company_name"].indexOf(c.role) >= 0 : c.role === "trade_name"; }).map(function (c) { return String(c.column_id); });
-                fill(el("keys"), defaults); fill(el("value-column"), preferred.slice(0, 1).map(String)); fill(el("anchor"), preferred.map(String)); kind();
+                fill(el("keys"), defaults); fill(el("value-column"), preferred.slice(0, 1).map(String)); fill(el("anchor"), preferred.map(String)); fill(el("existing-column"), preferred.slice(0, 1).map(String));
+                if (resetMode) el("output-mode").value = "new"; kind();
             },
             operation: function () {
                 var type = el("kind").value;
@@ -88,6 +89,7 @@
 
                     }
                 }
+                if (type === "set") operation.assigned_value = el("assigned-value").value;
                 if (type === "split") operation.part = el("part").value;
                 if (type === "replace") {
                     operation.find = el("find").value; operation.replacement = el("replacement").value;
@@ -122,6 +124,7 @@
                 });
                 el("words").value = operation.rules.filter(function (r) { return r.operation === "remove_words"; }).flatMap(function (r) { return r.words; }).join("\n");
                 el("delimiter-mode").value = operation.delimiter === null ? "whitespace" : "custom";
+                el("assigned-value").value = operation.assigned_value || "";
                 el("delimiter").value = operation.delimiter || "";
                 el("find").value = operation.find || ""; el("replacement").value = operation.replacement || "";
                 mapping.set(operation.mappings || []);
@@ -179,8 +182,28 @@
                 fill(el("anchor"), [String(column.column_id)]);
                 el("name").value = column.header + ({split: data.operation.part === "last" ? " 마지막 단어" : " 단어", replace: " 치환", map: " 대표값", group: " 통일", extract: " 모델명 후보"}[data.operation.kind] || " 정제");
                 el("side").value = "after";
+                var existing = el("output-mode").value === "existing";
+                el("new-placement").hidden = existing;
+                el("apply").textContent = existing ? "확인한 결과를 기존 열에 반영" : "확인한 결과를 새 열로 만들기";
+                if (existing) {
+                    var destination = data.snapshot.output_columns.find(function (c) { return String(c.column_id) === data.snapshot.output_column_id; });
+                    el("summary").textContent += " · 기존 ‘" + destination.header + "’ 열의 " + data.changed + "행 변경";
+                    var examples = el("extraction-preview"); examples.hidden = false; examples.textContent = "기존 값 → 적용할 값 (앞 10행)";
+                    data.values.slice(0, 10).forEach(function (row, i) {
+                        var line = document.createElement("p");
+                        line.textContent = data.snapshot.rows[i].excel_row + "행: " + data.snapshot.rows[i].destination.slice(0, 160) + " → " + row[0].slice(0, 160) +
+                            (["group", "extract"].includes(data.operation.kind) ? " · " + row[1] : ""); examples.appendChild(line);
+                    });
+                    if (data.operation.kind === "split" && data.names.length > 1) {
+                        el("summary").textContent += " · 여러 열로 분리하는 결과는 새 열 저장을 선택하세요.";
+                    } else if (data.names.length > 1) el("summary").textContent += " · 상태 정보는 미리보기에서 확인하고 첫 번째 결과값만 반영합니다.";
+                }
+                if (data.snapshot.row_filter) el("summary").textContent += " · 작업 조건에 맞는 행만 처리합니다.";
             },
+            destination: function () { return el("output-mode").value === "existing" ? el("existing-column").value : null; },
             output: function () {
+                if (el("output-mode").value === "existing") return {mode: "existing", column_id: el("existing-column").value,
+                    name: columns.find(function (c) { return String(c.column_id) === el("existing-column").value; }).header.slice(0, 200)};
                 var name = el("name").value.trim();
                 if (!name) throw new Error("결과 열 이름을 입력하세요.");
                 return {anchor: el("anchor").value, side: el("side").value, name: name};

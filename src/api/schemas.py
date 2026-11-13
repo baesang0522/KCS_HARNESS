@@ -26,7 +26,7 @@ class ChatRequest(BaseModel):
 class ConfirmSelectionAction(BaseModel):
     type: Literal["confirm_selection"]
     task_type: Literal[
-        "model_normalization",
+        "investigation", "model_normalization",
         "counterparty_cleanup",
         "formula",
     ]

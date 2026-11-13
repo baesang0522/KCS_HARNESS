@@ -12,7 +12,7 @@
         var viewer = document.getElementById('document-preview');
         var pageInput = document.getElementById('document-page');
         var pageBody = document.getElementById('document-page-body');
-        var tasks = {model_normalization: '모델규격 정제', counterparty_cleanup: '해외거래처부호 정제'};
+        var tasks = {investigation: '통합 조사', model_normalization: '모델규격 정제', counterparty_cleanup: '해외거래처부호 정제'};
 
         function base() { return '/conversations/' + encodeURIComponent(cid) + '/documents'; }
         function endpoint(id) { return base() + '/' + encodeURIComponent(id); }

@@ -21,7 +21,7 @@
             document.getElementById("cleaning-help-setup").disabled = options.isBusy();
             document.getElementById("cleaning-help-advice").disabled =
                 options.isBusy() || !helpContext || helpKind.value !== "advice";
-            var models = helpContext && helpContext.task_type === "model_normalization"
+            var models = helpContext
                 ? helpContext.columns.filter(function (column) { return column.role === "model_spec"; }) : [];
             helpKind.querySelector('option[value="extract"]').disabled = models.length !== 1;
         }
@@ -72,8 +72,8 @@
                 if (!mode) return;
                 var current = await currentHelpContext();
                 document.getElementById("cleaning-help-scope").textContent = current.sheet_name +
-                    (mode === "advice" ? (current.task_type === "model_normalization"
-                        ? " · 대문자 기준 빈도 상위 100개 조합" : " · 모든 데이터 열·설명·전체 행")
+                    (mode === "advice" ? ((current.task_type === "model_normalization" || current.advice_subject === "model")
+                        ? " · 대문자 기준 빈도 상위 100개 조합" : " · 현재 조건에 맞는 행·열 설명")
                         : " · 현재 대상 " + current.row_count.toLocaleString() + "행");
                 if (mode === "advice") return;
                 document.getElementById("cleaning-help-work").appendChild(workPanel);
@@ -84,7 +84,7 @@
                     await workspace.configureSimilarity({column_id: id, group_column_id: null});
                 } else if (mode === "extract") {
                     var models = current.columns.filter(function (column) { return column.role === "model_spec"; });
-                    if (current.task_type !== "model_normalization" || models.length !== 1) {
+                    if (models.length !== 1) {
                         throw new Error("작업 준비에서 모델규격명 열을 지정하세요.");
                     }
                     await workspace.configure({kind: "extract", column_ids: [models[0].column_id],

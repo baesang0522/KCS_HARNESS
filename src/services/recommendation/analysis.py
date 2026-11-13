@@ -33,7 +33,7 @@ async def generate_advice(
     }
     columns = [by_id[column_id] for column_id in data.column_ids]
     selection = None
-    if workspace["task_type"] == "model_normalization":
+    if workspace["task_type"] == "model_normalization" or (workspace["task_type"] == "investigation" and workspace.get("advice_subject") == "model"):
         rows, selection = top_model_combinations(data, columns)
     else:
         if data.selection is not None:
@@ -46,6 +46,10 @@ async def generate_advice(
         "task_type": workspace["task_type"],
         "columns": columns,
     }
+    if workspace.get("row_filter"):
+        base["row_filter"] = workspace["row_filter"]
+    if workspace["task_type"] == "investigation":
+        base["advice_subject"] = workspace.get("advice_subject", "company")
     if selection is not None:
         base["selection"] = selection
 
@@ -119,11 +123,11 @@ async def generate_advice(
 
     names = ", ".join(column["header"] for column in columns)
     scope = (
-        f"전체 {data.row_count:,}행을 대문자로 변환해 신고품명·거래품명·모델규격명 조합별로 집계하고, "
+        f"분석 범위 {data.row_count:,}행을 대문자로 변환해 신고품명·거래품명·모델규격명 조합별로 집계하고, "
         f"{selection['total_combinations']:,}개 조합 중 빈도 상위 {len(rows):,}개를 검토했습니다.\n"
         f"선정 조합에 해당하는 원본은 {selection['represented_rows']:,}행입니다. "
         "추가 열·결과 열은 조합별 첫 행의 대문자 변환 예시이며 그룹 전체를 대표하지 않습니다."
-        if selection else f"전체 {data.row_count:,}행의 원문과 열 설명을 검토했습니다."
+        if selection else f"전체 {data.row_count:,}행의 원문과 열 설명을 검토했습니다." if not data.sparse else f"조건에 맞는 {data.row_count:,}행의 원문과 열 설명을 검토했습니다."
     )
     lines = [
         f"분석 대상: {names}",

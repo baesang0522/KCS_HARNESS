@@ -6,16 +6,19 @@ const root = path.join(__dirname, '../../src/static/excel');
 class Element {
     constructor(tag, attrs = {}) {
         this.tagName = tag; this.attrs = attrs; this.children = []; this.parentNode = null;
-        this.listeners = {}; this.dataset = {}; this.value = ''; this.hidden = 'hidden' in attrs;
+        this.listeners = {}; this.dataset = {}; this._value = attrs.value || ''; this.style = {}; this.hidden = 'hidden' in attrs;
         this.disabled = false; this.readOnly = false; this._text = '';
         this.classList = {add: name => { this.attrs.class = ((this.attrs.class || '') + ' ' + name).trim(); }};
     }
+    get value() { return this.tagName === 'select' ? (this._value || this.children.find(c => c.selected)?.value || this.children[0]?.value || '') : this._value; }
+    set value(value) { this._value = String(value); if (this.tagName === 'select') this.children.forEach(c => { c.selected = c.value === this._value; }); }
+    get parentElement() { return this.parentNode; }
     contains(node) { return this === node || this.children.some(child => child.contains(node)); }
     replaceChildren(...nodes) { this.textContent = ''; nodes.forEach(node => this.appendChild(node)); }
     get selectedOptions() { return this.children.filter(child => child.selected || child.value === this.value); }
     get nextSibling() { return this.parentNode?.children[this.parentNode.children.indexOf(this) + 1] || null; }
     get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
-    set textContent(value) { this._text = value; this.children.forEach(child => { child.parentNode = null; }); this.children = []; }
+    set textContent(value) { this._text = value; if (this.tagName === 'select') this._value = ''; this.children.forEach(child => { child.parentNode = null; }); this.children = []; }
     set className(value) { this.attrs.class = value; }
     get className() { return this.attrs.class || ''; }
     getAttribute(name) { return this.attrs[name] ?? null; }
@@ -61,6 +64,7 @@ function createDOM() {
     }
     document.getElementById = id => document.querySelector(`[id="${id}"]`);
     document.createElement = tag => new Element(tag);
+    document.createTextNode = text => { const node = new Element('#text'); node.textContent = text; return node; };
     const messages = JSON.parse(fs.readFileSync(path.join(__dirname, '../../src/services/error_messages.json'), 'utf8'));
     document.getElementById('server-error-messages').textContent = JSON.stringify(messages);
     const values = new Map();

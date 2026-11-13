@@ -90,7 +90,7 @@ class CreateFormulaJobRequest(BaseModel):
     column_count: int = Field(ge=1, le=16384)
     workspace_id: UUID | None = None
     table_id: str | None = Field(default=None, min_length=1, max_length=256)
-    workspace_task_type: Literal["model_normalization", "counterparty_cleanup"] | None = None
+    workspace_task_type: Literal["investigation", "model_normalization", "counterparty_cleanup"] | None = None
     input_columns: tuple[FormulaInputColumn, ...] = Field(default=(), max_length=20)
     samples: tuple[FormulaSampleRow, ...] = Field(min_length=1, max_length=20)
     sheet_context: FormulaSheetContext | None = None

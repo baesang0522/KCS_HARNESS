@@ -12,7 +12,7 @@ from services.operations.schemas import (
     OperationRequest,
     Row,
     StrictModel,
-    TaskType,
+    TaskType, RowFilter,
 )
 from services.operations.service import execute
 
@@ -41,12 +41,13 @@ class CreateOperationJob(StrictModel):
     row_count: int = Field(ge=1, le=400000)
     operation: Operation
     model_spec_column_id: ColumnId | None = None
+    row_filter: RowFilter | None = None
 
     @model_validator(mode="after")
     def validate_scope(self):
         self.operation.validate_ready()
         if self.operation.kind == "extract" and (
-            self.task_type != "model_normalization" or self.model_spec_column_id is None
+            self.model_spec_column_id is None
             or self.operation.column_ids != [self.model_spec_column_id]
         ):
             raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])
@@ -61,9 +62,20 @@ class CreateOperationJob(StrictModel):
 
 
 class OutputPlacement(StrictModel):
-    anchor: ColumnId
-    side: Literal["before", "after"]
-    name: str = Field(min_length=1, max_length=200)
+    mode: Literal["new", "existing"] = "new"
+    column_id: ColumnId | None = None
+    anchor: ColumnId | None = None
+    side: Literal["before", "after"] = "after"
+    name: str = Field(default="결과", min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_destination(self):
+        if self.mode == "existing":
+            if not self.column_id:
+                raise ValueError("결과를 반영할 기존 열을 선택하세요.")
+        elif not self.anchor or self.column_id is not None:
+            raise ValueError("새 결과 열의 위치를 선택하세요.")
+        return self
 
 
 class JobUpdate(StrictModel):
@@ -87,11 +99,13 @@ class JobUpdate(StrictModel):
 
 
 class JobPreview(StrictModel):
+    selected_count: int | None = Field(default=None, ge=1, le=400000)
     rows: list[Row] = Field(min_length=1, max_length=400000)
 
 
 class OperationJob(StrictModel):
     source: CreateOperationJob
+    selected_count: int | None = Field(default=None, ge=1, le=400000)
     status: JobStatus = "CREATED"
     output: OutputPlacement | None = None
     result_column_ids: list[ColumnId] = Field(default_factory=list)
@@ -129,6 +143,8 @@ def preview_job(job: OperationJob, payload: JobPreview):
             "현재 상태에서는 미리보기를 계산할 수 없습니다."
         )
     request = OperationRequest(operation=job.source.operation, rows=payload.rows)
+    if payload.selected_count is not None and (payload.selected_count > job.source.row_count or len(request.rows) > payload.selected_count):
+        raise ValueError("분석 대상 행 수가 올바르지 않습니다.")
     start = job.source.row_start + 1
     stop = job.source.row_start + job.source.row_count
 
@@ -140,10 +156,14 @@ def preview_job(job: OperationJob, payload: JobPreview):
 
     if (
         request.operation.kind == "group"
-        and len(request.rows) != job.source.row_count
+        and len(request.rows) != (payload.selected_count if job.source.row_filter else job.source.row_count)
     ):
         raise ValueError("그룹 작업은 등록한 범위 전체를 한번에 전달하세요.")
-    return execute(request)
+    if job.selected_count is not None and payload.selected_count != job.selected_count:
+        raise ValueError("분석 대상 행 수가 바뀌었습니다. 새 미리보기를 만드세요.")
+    result = execute(request)
+    job.selected_count = payload.selected_count
+    return result
 
 
 def begin_apply(job: OperationJob, output: OutputPlacement) -> OperationJob:
@@ -183,7 +203,10 @@ def update_job(job: OperationJob, update: JobUpdate) -> OperationJob:
     if update.status not in allowed.get(job.status, set()):
         raise ConflictError("허용되지 않는 실행 상태 변경입니다.")
 
-    if set(update.result_column_ids) & set(job.source.operation.input_column_ids):
+    if job.output and job.output.mode == "existing":
+        if update.status == "APPLIED" and update.result_column_ids != [job.output.column_id]:
+            raise ConflictError("승인한 기존 결과 열과 다릅니다.")
+    elif set(update.result_column_ids) & set(job.source.operation.input_column_ids):
         raise ConflictError("결과는 입력과 다른 새 열이어야 합니다.")
 
     job.status = update.status
@@ -254,6 +277,8 @@ def operation_history_context(
             "executed_range": {
                 "first_excel_row": job.source.row_start + 1,
                 "row_count": job.source.row_count,
+                **({"row_filter": job.source.row_filter.model_dump(),
+                    "matching_row_count": job.selected_count} if job.source.row_filter else {}),
             },
         })
 

@@ -32,7 +32,7 @@ def resolve_columns(
 
 def resolve_advice_columns(workspace: dict | None, ids: list[str] | None) -> list[str]:
     selected = list(resolve_columns(workspace, ids))
-    if workspace["task_type"] == "model_normalization":
+    if workspace["task_type"] == "model_normalization" or (workspace["task_type"] == "investigation" and workspace.get("advice_subject") == "model"):
         for role in MODEL_GROUP_ROLES:
             columns = [column for column in workspace["columns"] if column.get("role") == role]
             if len(columns) != 1:

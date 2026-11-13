@@ -40,7 +40,8 @@
             el("column").value = settings.column_id || "";
             el("group").value = settings.group_column_id || "";
             el("method").value = "";
-            el("scope").textContent = workspace.sheet_name + " · 현재 범위 " + target.row_count.toLocaleString() + "행. 숨긴 행도 포함합니다.";
+            el("scope").textContent = workspace.sheet_name + " · 현재 범위 " + target.row_count.toLocaleString() +
+                (workspace.row_filter ? "행 중 작업 조건에 맞는 행만 검사합니다." : "행. 숨긴 행도 포함합니다.");
             document.getElementById("operations").hidden = true;
             el("panel").hidden = false;
             describe();

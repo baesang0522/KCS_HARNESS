@@ -80,7 +80,10 @@ def execute(payload: OperationRequest) -> OperationResponse:
     for row in payload.rows:
         needs_review = False
 
-        if operation.kind == "preprocess":
+        if operation.kind == "set":
+            values = [operation.assigned_value]
+
+        elif operation.kind == "preprocess":
             values = [preprocess(row.values[0], operation.rules)]
 
         elif operation.kind == "split":
@@ -167,7 +170,8 @@ def execute(payload: OperationRequest) -> OperationResponse:
         )
 
     headers = (
-        ["정제"] if operation.kind == "preprocess"
+        ["지정값"] if operation.kind == "set"
+        else ["정제"] if operation.kind == "preprocess"
         else ["모델명 후보", "추출상태"] if operation.kind == "extract"
         else ["치환"] if operation.kind == "replace"
         else ["대표값"] if operation.kind == "map"

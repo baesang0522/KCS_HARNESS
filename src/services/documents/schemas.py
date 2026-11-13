@@ -10,12 +10,12 @@ class DocumentWorkspace(BaseModel):
     worksheet_id: str = Field(min_length=1, max_length=255)
     table_id: str = Field(min_length=1, max_length=255)
     sheet_name: str = Field(min_length=1, max_length=255)
-    task_type: Literal["model_normalization", "counterparty_cleanup"]
+    task_type: Literal["investigation", "model_normalization", "counterparty_cleanup"]
 
 
 class DocumentLink(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    task_type: Literal["model_normalization", "counterparty_cleanup"]
+    task_type: Literal["investigation", "model_normalization", "counterparty_cleanup"]
     workspace: DocumentWorkspace | None = None
 
     @model_validator(mode="after")

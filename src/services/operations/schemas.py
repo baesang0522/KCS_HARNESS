@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Text = Annotated[str, Field(max_length=32767)]
 ColumnId = Annotated[str, Field(min_length=1, max_length=256)]
-TaskType = Literal["model_normalization", "counterparty_cleanup"]
+TaskType = Literal["investigation", "model_normalization", "counterparty_cleanup"]
 FIND_REQUIRED = "찾을 문자열을 입력하세요."
 
 
@@ -34,7 +34,7 @@ class ValueRequest(StrictModel):
 
 
 def extraction_column_id(workspace: dict | None) -> str:
-    if not workspace or workspace.get("task_type") != "model_normalization":
+    if not workspace:
         raise ValueError("모델규격 추출은 모델규격 정제 작업에서만 사용할 수 있습니다.")
     columns = [column for column in workspace["columns"] if column.get("role") == "model_spec"]
     if len(columns) != 1:
@@ -58,7 +58,7 @@ class Rule(StrictModel):
 
 
 class Operation(StrictModel):
-    kind: Literal["preprocess", "split", "group", "replace", "map", "extract"]
+    kind: Literal["preprocess", "split", "group", "replace", "map", "extract", "set"]
     column_ids: list[ColumnId] = Field(min_length=1, max_length=20)
     rules: list[Rule] = Field(default_factory=list, max_length=10)
     delimiter: str | None = Field(default=None, min_length=1, max_length=100)
@@ -71,6 +71,7 @@ class Operation(StrictModel):
     part: Literal["all", "last"] = "all"
     group_mode: Literal["manual", "first_non_empty"] = "manual"
     extraction_mode: Literal["alphanumeric", "labelled"] | None = None
+    assigned_value: Text | None = None
 
     @property
     def input_column_ids(self) -> list[str]:
@@ -78,6 +79,8 @@ class Operation(StrictModel):
 
     @model_validator(mode="after")
     def validate_operation(self):
+        if (self.kind == "set") != (self.assigned_value is not None):
+            raise ValueError("값 지정 작업에는 적용할 값을 입력하세요. 빈 문자열도 사용할 수 있습니다.")
         if self.kind != "extract" and self.extraction_mode is not None:
             raise ValueError("추출 방식은 모델명 후보 찾기에서만 지정하세요.")
         if len(set(self.column_ids)) != len(self.column_ids):
@@ -180,6 +183,12 @@ class SampleRow(StrictModel):
     truncated: bool = False
 
 
+class RowFilter(StrictModel):
+    column_id: ColumnId
+    operator: Literal["equals", "not_equals", "contains", "blank", "not_blank"]
+    value: Text = ""
+
+
 class WorkspaceContext(StrictModel):
     workspace_id: UUID
     worksheet_id: str = Field(min_length=1, max_length=256)
@@ -187,7 +196,9 @@ class WorkspaceContext(StrictModel):
     task_type: TaskType
     sheet_name: str = Field(min_length=1, max_length=256)
     row_count: int = Field(ge=1, le=400000)
-    columns: list[WorkspaceColumn] = Field(min_length=3, max_length=200)
+    columns: list[WorkspaceColumn] = Field(min_length=1, max_length=200)
+    row_filter: RowFilter | None = None
+    advice_subject: Literal["model", "company"] = "company"
     target_column_ids: list[ColumnId] = Field(default_factory=list, max_length=20)
     last_result_column_ids: list[ColumnId] = Field(default_factory=list, max_length=100)
     sample_rows: list[SampleRow] = Field(default_factory=list, max_length=10)
@@ -197,10 +208,14 @@ class WorkspaceContext(StrictModel):
         required = ({"declared_name", "trade_name", "model_spec"}
                     if self.task_type == "model_normalization"
                     else {"country_code", "party_code", "company_name"})
+        if self.task_type == "investigation":
+            required = set()
         ids = [column.column_id for column in self.columns]
         roles = [column.role for column in self.columns]
         if len(set(ids)) != len(ids) or any(roles.count(role) != 1 for role in required):
             raise ValueError("업무에 필요한 서로 다른 세 열을 확인하세요.")
+        if self.row_filter and self.row_filter.column_id not in ids:
+            raise ValueError("조건 열이 삭제되었습니다. 작업 범위를 다시 지정하세요.")
         if any(len(row.values) != len(self.target_column_ids) for row in self.sample_rows):
             raise ValueError("표본의 열 수가 현재 대상과 다릅니다.")
         # 이전 화면의 대화 문맥에 삭제한 결과 열이 남아 있어도 다음 요청은 받는다.

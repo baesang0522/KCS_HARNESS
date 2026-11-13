@@ -3,7 +3,7 @@ from typing import Literal
 
 
 TaskType = Literal[
-    "model_normalization",
+    "investigation", "model_normalization",
     "counterparty_cleanup",
     "formula"
 ]

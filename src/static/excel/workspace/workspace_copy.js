@@ -12,7 +12,7 @@
         var indexes = Array.from(new Set(required.concat(
             references.map(function (column) { return column.source_index; })
         ))).sort(function (left, right) { return left - right; });
-        if (new Set(required).size !== 3 || indexes.some(function (index) {
+        if ((source.task_type !== "investigation" && new Set(required).size !== 3) || !indexes.length || new Set(required).size !== required.length || indexes.some(function (index) {
             return !Number.isInteger(index) || index < 0 || index >= source.column_count;
         })) {
             throw new Error("필수 열과 추가 열을 다시 확인하세요.");
@@ -32,7 +32,8 @@
             var existing = sheets.getItemOrNullObject(sheetName);
             var settingKey = "kcs.workspace." + sheetName;
             var saved = context.workbook.settings.getItemOrNullObject(settingKey);
-            var headers = indexes.map(function (index) {
+            var headerIndexes = source.task_type === "investigation" ? source.headers.map(function (_, i) { return i; }) : indexes;
+            var headers = headerIndexes.map(function (index) {
                 var range = original.getRangeByIndexes(source.row_start, source.column_indexes[index], 1, 1);
                 range.load("text"); return range;
             });
@@ -49,7 +50,7 @@
                 }
                 throw new Error(sheetName + " 시트가 이미 있습니다. 부분 복사 결과를 확인하세요.");
             }
-            if (indexes.some(function (index, position) {
+            if (headerIndexes.some(function (index, position) {
                 return headers[position].text[0][0] !== source.headers[index];
             })) {
                 throw new Error("원본 열 구성이 바뀌었습니다. 범위를 다시 가져오세요.");
@@ -58,6 +59,35 @@
             var sheet = sheets.add(sheetName);
             var dataRows = source.row_count - 1;
             try {
+                var sourceSnapshot = null;
+                if (source.task_type === "investigation") {
+                    var backup = sheets.add("원본_" + sheetName.slice(-16));
+                    backup.load("id,name");
+                    var backupNames = ["원본 행 번호"].concat(source.headers.map(function (name, i) { return (name || "원본열 " + (i + 1)).slice(0, 255); }));
+                    backup.getRangeByIndexes(0, 0, 1, backupNames.length).values = [backupNames.map(function (name) { return "'" + name; })];
+                    var backupSize = Math.max(1, Math.floor(20000 / backupNames.length));
+                    for (var first = 0; first < dataRows; first += backupSize) {
+                        var length = Math.min(backupSize, dataRows - first);
+                        source.column_indexes.forEach(function (column, i) {
+                            var input = original.getRangeByIndexes(source.row_start + 1 + first, column, length, 1);
+                            var output = backup.getRangeByIndexes(first + 1, i + 1, length, 1);
+                            output.copyFrom(input, "Formats"); output.copyFrom(input, "Values");
+                        });
+                        backup.getRangeByIndexes(first + 1, 0, length, 1).values = Array.from({length: length}, function (_, i) { return [source.row_start + first + i + 2]; });
+                        await context.sync();
+                        if (onProgress) onProgress(first + length, dataRows, "원본 보관본 준비");
+                    }
+                    var backupTable = backup.tables.add(backup.getRangeByIndexes(0, 0, source.row_count, backupNames.length), true);
+                    backupTable.load("id"); backupTable.columns.load("items/id,items/name,items/index");
+                    await context.sync();
+                    sourceSnapshot = {worksheet_id: backup.id, sheet_name: backup.name, table_id: backupTable.id,
+                        source_row_column_id: backupTable.columns.items[0].id, row_count: dataRows,
+                        columns: backupTable.columns.items.slice(1).map(function (c, i) {
+                            return {column_id: c.id, header: c.name, column_index: c.index, source_index: i,
+                                source_column_index: source.column_indexes[i], source_header: source.headers[i], role: "reference"};
+                        })};
+                    backup.protection.protect(); backup.visibility = "Hidden";
+                }
                 sheet.load("id,name");
                 var names = ["원본 행 번호"].concat(indexes.map(function (index) {
                     return (source.headers[index] || "열 " + (index + 1)).slice(0, 255);
@@ -73,9 +103,9 @@
                 for (var offset = 0; offset < dataRows; offset += chunkRows) {
                     var count = Math.min(chunkRows, dataRows - offset);
                     indexes.forEach(function (index, outputIndex) {
-                        var input = original.getRangeByIndexes(
-                            source.row_start + 1 + offset,
-                            source.column_indexes[index], count, 1
+                        var input = (sourceSnapshot ? backup : original).getRangeByIndexes(
+                            (sourceSnapshot ? 1 : source.row_start + 1) + offset,
+                            sourceSnapshot ? index + 1 : source.column_indexes[index], count, 1
                         );
                         var output = sheet.getRangeByIndexes(offset + 1, outputIndex + 1, count, 1);
                         output.copyFrom(input, "Formats");
@@ -86,7 +116,7 @@
                             return [source.row_start + offset + index + 2];
                         });
                     await context.sync();
-                    if (onProgress) onProgress(offset + count, dataRows);
+                    if (onProgress) onProgress(offset + count, dataRows, "작업표 복사");
                 }
 
                 // 표 정렬 시 원본 행 연결도 함께 움직인다. 열 ID는 이름 변경에도 유지된다.
@@ -107,6 +137,7 @@
                         column_id: column.id,
                         column_index: column.index,
                         header: column.name,
+                        source_column_id: sourceSnapshot ? String(sourceSnapshot.columns[index].column_id) : null,
                         source_index: index,
                         source_column_index: source.column_indexes[index],
                         source_header: source.headers[index],
@@ -118,6 +149,7 @@
                 });
                 var workspace = {
                     task_type: source.task_type,
+                    source_snapshot: sourceSnapshot,
                     worksheet_id: sheet.id,
                     sheet_name: sheet.name,
                     table_id: table.id,

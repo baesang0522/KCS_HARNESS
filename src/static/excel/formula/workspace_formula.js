@@ -11,6 +11,7 @@
                     if (!fromSelection && scope && scope.workspace_id) throw new Error("요청한 작업 표를 다시 열어주세요.");
                     return fromSelection ? null : lastFormula;
                 }
+                if (workspace.row_filter) throw new Error("조건 범위에서는 수식 채우기를 아직 지원하지 않습니다. 정제 기능을 사용하거나 조건을 해제한 전체 범위를 명시적으로 선택하세요.");
                 var chosen = null;
                 if (fromSelection) {
                     chosen = await window.workspaceSheet.readWorkspaceTarget(workspace, false);
@@ -43,6 +44,7 @@
                     workspace.worksheet_id !== selection.worksheet_id || String(workspace.table_id) !== selection.table_id) {
                     throw new Error("수식 계획의 작업 표가 바뀌었습니다. 다시 요청하세요.");
                 }
+                if (workspace.row_filter) throw new Error("조건이 설정되어 수식 적용을 중단했습니다. 대상 범위를 다시 확인하세요.");
                 await Excel.run(async function (context) {
                     var info = await window.workspaceTable.layout(context, workspace);
                     if (info.sheet.name !== selection.sheet_name || selection.row_start < info.body.rowIndex ||
@@ -56,6 +58,7 @@
             prepareFormulaOutput: async function (preview, selection) {
                 var workspace = options.getWorkspace();
                 if (!workspace || workspace.worksheet_id !== selection.worksheet_id) return;
+                if (workspace.row_filter) throw new Error("조건이 설정되어 수식 적용을 중단했습니다. 대상 범위를 다시 확인하세요.");
                 await Excel.run(async function (context) {
                     var info = await window.workspaceTable.layout(context, workspace);
                     var ranges = preview.plan.actions.map(function (action) {

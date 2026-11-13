@@ -69,7 +69,7 @@ def build_request_tools(task_context: dict):
     @tool
     def start_task(
             task_type: Literal[
-                "model_normalization", "counterparty_cleanup", "formula"
+                "investigation", "model_normalization", "counterparty_cleanup", "formula"
             ],
             input_column_ids: list[str] | None = None,
     ) -> dict:
@@ -92,6 +92,11 @@ def build_request_tools(task_context: dict):
             "operation": None,
             "answer": "작업할 범위를 선택하고 설정을 확인해 주세요.",
         }
+
+    @tool
+    def set_value(value: str, column_id: str | None = None) -> dict:
+        """현재 작업 조건에 맞는 행에 사용자가 명시한 값을 지정한다. 빈 문자열은 비우기다. 적용은 사용자가 확인한다."""
+        return card(kind="set", column_ids=[target(column_id)], assigned_value=value)
 
     @tool
     def remove_words(
@@ -246,6 +251,7 @@ def build_request_tools(task_context: dict):
     tools = [answer_question, ask_user, start_task, open_cleaning_help]
     if workspace:
         tools.extend([
+            set_value,
             remove_words,
             preprocess,
             replace_text,

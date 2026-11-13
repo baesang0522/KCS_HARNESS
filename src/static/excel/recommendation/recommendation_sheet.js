@@ -22,20 +22,27 @@
             });
             var keys = selectedColumns(info, groupIds);
             var columns = selectedColumns(info, ids);
-            var groups = new Map();
+            var groups = new Map(), matchedCount = 0, seen = new Set();
+            var filter = workspace.row_filter || null;
+            var filterColumns = filter ? selectedColumns(info, [filter.column_id]) : [];
             for (var offset = 0; offset < target.row_count; offset += batchSize) {
                 cancelled();
                 var count = Math.min(batchSize, target.row_count - offset);
-                var part = await chunk(context, info, target.row_start + offset, count, keys);
+                var part = await chunk(context, info, target.row_start + offset, count, keys.concat(filterColumns));
                 part.forEach(function (row) {
+                    if (!Number.isSafeInteger(row.identity) || row.identity < 1 || seen.has(row.identity)) throw new Error("원본 행 식별값이 없거나 중복되었습니다.");
+                    seen.add(row.identity);
+                    if (filter && !window.operationsSheet.matches(row.values[3], filter)) return;
+                    row.values = row.values.slice(0, 3); matchedCount++;
                     var key = JSON.stringify(row.values.map(function (value) { return value.toUpperCase(); }));
                     var group = groups.get(key);
                     if (group) group.count++;
-                    else groups.set(key, {key: key, excel_row: row.excel_row, count: 1});
+                    else groups.set(key, {key: key, excel_row: row.excel_row, identity: row.identity, count: 1});
                 });
                 progress("전체 조합 빈도 집계", offset + count, target.row_count);
             }
             cancelled();
+            if (!matchedCount) throw new Error("조건에 맞는 행이 없습니다.");
             var selected = Array.from(groups.values()).sort(function (a, b) {
                 return b.count - a.count || a.excel_row - b.excel_row;
             }).slice(0, 100);
@@ -45,8 +52,11 @@
             for (var index = 0; index < selected.length; index++) {
                 cancelled();
                 var group = selected[index];
-                var row = (await chunk(context, info, group.excel_row - 1, 1, columns))[0];
-                var values = row.values.map(function (value) { return value.toUpperCase(); });
+                var row = (await chunk(context, info, group.excel_row - 1, 1, columns.concat(filterColumns)))[0];
+                if (row.identity !== group.identity || (filter && !window.operationsSheet.matches(row.values[ids.length], filter))) {
+                    throw new Error("집계 중 대표 행이나 조건이 바뀌었습니다. 다시 요청하세요.");
+                }
+                var values = row.values.slice(0, ids.length).map(function (value) { return value.toUpperCase(); });
                 var key = JSON.stringify(groupIds.map(function (id) { return values[ids.indexOf(id)]; }));
                 if (key !== group.key) throw new Error("집계 중 대표 행의 값이 바뀌었습니다. 다시 요청하세요.");
                 rows.push({excel_row: row.excel_row, values: values, count: group.count});
@@ -56,7 +66,7 @@
             if ((await layout(context, workspace)).stamp !== info.stamp) throw new Error("읽는 동안 표 구성이 바뀌었습니다.");
             return {rows: rows, selection: {
                 mode: "uppercase_top_combinations", group_column_ids: groupIds,
-                total_rows: target.row_count, total_combinations: totalCombinations,
+                total_rows: matchedCount, total_combinations: totalCombinations,
                 selected_combinations: rows.length,
                 represented_rows: rows.reduce(function (sum, row) { return sum + row.count; }, 0),
                 additional_values: "first_row_example_only"

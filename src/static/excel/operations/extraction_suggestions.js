@@ -3,7 +3,7 @@
     window.readExtractionSuggestions = async function (workspace, target, ids, api, progress) {
         if (ids.length !== 1) throw new Error("추천할 열 하나를 선택하세요.");
         var models = workspace.columns.filter(function (column) { return column.role === "model_spec"; });
-        if (workspace.task_type !== "model_normalization" || models.length !== 1 || String(models[0].column_id) !== ids[0]) {
+        if (models.length !== 1 || String(models[0].column_id) !== ids[0]) {
             throw new Error(window.errorMessages.MODEL_SPEC_REQUIRED);
         }
 

@@ -19,6 +19,7 @@
   <script defer src="formula/formula_sheet.js"></script>
   <script defer src="workspace/workspace_sheet.js"></script>
   <script defer src="workspace/workspace_copy.js"></script>
+  <script defer src="workspace/source_columns.js"></script>
   <script defer src="workspace/workspace_columns.js"></script>
   <script defer src="workspace/workspace_ui.js"></script>
   <script defer src="workspace/table_reader.js"></script>
@@ -45,7 +46,7 @@
   <div class="app">
     <header class="topbar">
       <div class="brand"><img src="assets/mata10.png" width="28" height="28" alt=""><span>엑셀 전처리 도우미</span></div>
-      <button type="button" class="workspace-launch" id="open-workspace">작업 화면</button>
+      <button type="button" class="workspace-launch" id="open-workspace">작업 준비</button>
       <button type="button" class="icon-button" id="new-chat"
               aria-label="홈으로 · 새 대화" title="홈으로 · 새 대화">
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -82,12 +83,10 @@
       </section>
       <section class="suggestions" aria-labelledby="suggestion-title">
         <h2 id="suggestion-title">이런 작업을 함께할 수 있어요</h2>
-        <button class="suggestion" data-task="counterparty_cleanup"><span class="card-icon violet" aria-hidden="true">✧</span><span><strong>해외거래처 정리</strong><small>다르게 적힌 상호를 한눈에</small></span><span class="arrow" aria-hidden="true">↗</span></button>
-        <button class="suggestion" data-task="model_normalization"><span class="card-icon blue" aria-hidden="true">▦</span><span><strong>모델·규격 살펴보기</strong><small>복잡한 표기에서 필요한 정보 찾기</small></span><span class="arrow" aria-hidden="true">↗</span></button>
+        <button class="suggestion" data-task="investigation"><span class="card-icon violet" aria-hidden="true">✧</span><span><strong>통합 조사 시작</strong><small>원본에서 필요한 열을 가져와 기업·물품을 함께 조사</small></span><span class="arrow" aria-hidden="true">↗</span></button>
         <button class="suggestion" data-prompt="이 작업에 필요한 엑셀 수식을 제안해줘."><span class="card-icon teal" aria-hidden="true">ƒ</span><span><strong>수식 작성 도움받기</strong><small>하고 싶은 작업을 말로 설명하기</small></span><span class="arrow" aria-hidden="true">↗</span></button>
       </section>
       <p class="preview-note">필요한 열을 골라 작업 시트에서 정리합니다.<br>원본 셀은 수정하지 않습니다.</p>
-      <button type="button" class="suggestion" data-open-cleaning-help>정제 방법 찾기 · 유사도 / 모델명 추출 / AI 의견</button>
       </div>
       <section id="conversation" role="log" aria-label="대화 내용" aria-live="polite" hidden></section>
       <section class="normalization-panel" id="cleaning-help" aria-labelledby="cleaning-help-title" hidden>
@@ -106,40 +105,66 @@
         <p id="cleaning-help-hint">방식을 선택하면 해당 기능의 설정이 표시됩니다.</p>
         <div id="cleaning-help-work"></div>
         <div id="cleaning-help-advice-panel" hidden>
-          <p>모델규격 정제는 데이터를 대문자로 바꿔 신고품명·거래품명·모델규격명 조합별 빈도 상위 100개를 검토합니다. 추가 열·결과 열은 조합별 첫 행의 예시와 열 설명을 참고합니다. 해외거래처 정제는 전체 행을 검토합니다. 원본 셀은 변경하지 않습니다.</p>
+          <p>현재 작업 조건에 맞는 행을 분석합니다. 모델규격 의견은 신고품명·거래품명·모델규격명을 대문자로 비교한 빈도 상위 100개 조합을 검토하고, 기업 의견은 대상 행을 나눠 검토합니다. 추가 열은 조합별 첫 행의 예시이며 셀은 변경하지 않습니다.</p>
           <button type="button" id="cleaning-help-advice">AI 의견 받기</button>
         </div>
       </section>
       <section class="normalization-panel" id="work-panel" hidden>
         <h2 id="work-title">작업 데이터 준비</h2><button type="button" data-close-task>작업 카드 닫기</button>
         <div id="work-setup">
-          <label>작업 종류 <select id="work-type"><option value="model_normalization">모델규격 정제</option><option value="counterparty_cleanup">해외거래처부호 정제</option></select></label>
-          <p>머리글을 포함한 원본 범위를 선택하세요. 떨어진 열도 함께 선택할 수 있습니다. 각 열은 같은 시작 행과 끝 행으로 선택하세요.</p>
+          <label hidden>작업 종류 <select id="work-type"><option value="investigation">통합 조사</option><option value="model_normalization" hidden>기존 모델규격 작업</option><option value="counterparty_cleanup" hidden>기존 해외거래처 작업</option></select></label>
+          <p>머리글을 포함한 원본 범위를 선택하세요. 다음 화면에서 지금 가져올 열을 고를 수 있습니다. 처음 선택하지 않은 같은 원본 시트의 열도 나중에 추가할 수 있습니다. 떨어진 열은 같은 시작 행과 끝 행으로 선택하세요.</p>
           <button type="button" id="work-select">선택 범위 가져오기</button>
           <button type="button" id="work-restore">저장된 작업 이어가기</button>
           <div id="work-mapping" hidden>
             <p id="work-source"></p>
-            <fieldset><legend>필수 열 · 서로 다른 세 열</legend><div id="work-required"></div></fieldset>
-            <details open><summary>추가로 가져올 열</summary>
+            <fieldset><legend>열 역할 · 필요한 것만 지정</legend><div id="work-required"></div></fieldset>
+            <details open><summary>가져올 열 선택</summary>
               <p id="work-extra-hint">추가 열과 설명은 선택 사항입니다. 원본 위치로 같은 이름의 열을 구분합니다.</p>
               <div id="work-extra-columns"></div>
             </details>
             <p id="work-selection-summary"></p>
-            <p>계산된 값과 표시 형식을 복사합니다. 숨겨진 행도 포함하고 원본은 유지합니다.</p>
+            <p>선택한 열을 작업표에 복사합니다. 나중에 열을 추가할 수 있도록 등록한 원본 범위 전체를 숨김 보관 시트에도 복사합니다. 원본 파일 크기에 따라 시간이 걸릴 수 있습니다. 복사 중 원본을 편집하지 마세요.</p>
             <button type="button" class="primary" id="work-start" disabled>작업 시작</button>
           </div>
         </div>
         <div id="work-current" hidden>
           <p id="work-current-summary"></p>
-          <details><summary>열 구성 보기</summary><pre id="work-column-summary"></pre></details>
           <div class="work-actions">
+            <button type="button" id="work-refresh">열 목록 새로고침</button>
+            <button type="button" data-open-cleaning-help>정제 도움</button>
             <button type="button" id="work-new">새 원본으로 시작</button>
           </div>
+          <section id="work-import" hidden>
+            <fieldset><legend>원본 시트에서 추가할 열 · 여러 개 선택</legend><div id="work-import-columns"></div></fieldset>
+            <p id="work-import-count" role="status">0개 선택</p>
+            <label id="work-import-order" hidden><input type="checkbox" id="work-import-confirm"> 작업표를 만든 뒤 원본 행을 정렬·추가·삭제하지 않았습니다.</label>
+            <button type="button" id="work-import-add">선택한 열 가져오기</button>
+            <p id="work-import-hint"></p>
+          </section>
+          <details><summary>열 구성 보기</summary><pre id="work-column-summary"></pre></details>
+          <details><summary>열 역할 지정</summary>
+            <label>작업표 열 <select id="work-role-column"></select></label>
+            <label>역할 <select id="work-role-value"><option value="reference">일반 열</option><option value="country_code">국가코드</option><option value="party_code">공급자부호</option><option value="company_name">공급자명</option><option value="declared_name">신고품명</option><option value="trade_name">거래품명</option><option value="model_spec">모델규격명</option></select></label>
+            <button type="button" id="work-role-save">역할 저장</button>
+          </details>
+          <fieldset id="work-scope-settings"><legend>후속 작업 대상</legend>
+            <label>조건 열 <select id="work-filter-column"></select></label>
+            <label>조건 <select id="work-filter-operator"><option value="equals">같음</option><option value="not_equals">다름</option><option value="contains">포함</option><option value="blank">빈칸</option><option value="not_blank">빈칸 아님</option></select></label>
+            <label>비교할 값 <input id="work-filter-value" type="text" maxlength="32767"></label>
+            <button type="button" id="work-filter-save">이 조건으로 작업</button>
+            <p id="work-filter-summary" role="status">전체 행</p>
+            <p>문자열은 대소문자와 공백을 구분합니다. Excel의 화면 필터는 작업 조건을 바꾸지 않습니다.</p>
+          </fieldset>
+          <label id="work-advice-settings">AI 의견 주제 <select id="work-advice-subject"><option value="company">공급자·기업</option><option value="model">모델규격 · 빈도 상위 100개</option></select></label>
           <section id="operations" aria-label="데이터 처리">
             <div id="op-settings">
-              <label>작업 기능 <select id="op-kind"><option value="preprocess">전처리</option><option value="split">문자열 분리</option><option value="group">같은 기준의 행에 대표값 적용</option><option value="replace">문자열 치환</option><option value="map">자동 매핑</option><option value="extract">모델명 후보 찾기</option></select></label>
+              <label>작업 기능 <select id="op-kind"><option value="set">값 지정</option><option value="preprocess">전처리</option><option value="split">문자열 분리</option><option value="group">같은 기준의 행에 대표값 적용</option><option value="replace">문자열 치환</option><option value="map">자동 매핑</option><option value="extract">모델명 후보 찾기</option></select></label>
               <label id="op-single">처리할 열 <select id="op-column"></select></label>
-              <p>현재 범위의 모든 행을 처리합니다. 필터로 숨겨진 행도 포함합니다.</p>
+              <p id="work-operation-scope">현재 조건: 전체 행</p>
+              <label>결과 저장 <select id="op-output-mode"><option value="new">새 열 만들기</option><option value="existing">기존 열에 반영</option></select></label>
+              <label>반영할 기존 열 <select id="op-existing-column"></select></label>
+              <div id="op-set" hidden><label>적용할 값 <input id="op-assigned-value" type="text" maxlength="32767"></label><p>빈 값으로 지정하면 대상 셀을 비웁니다. 적용 전 변경 내용을 확인하세요.</p></div>
               <div id="op-preprocess">
                 <fieldset><legend>위에서 아래로 적용 · ↑로 순서 변경</legend><div id="op-rules">
                   <div><label><input type="checkbox" value="normalize_fullwidth_ascii"> 전각 변환</label><button type="button" data-move aria-label="전각 변환 순서 올리기">↑</button></div>
@@ -238,10 +263,10 @@
             <section id="op-result" hidden>
               <p id="op-summary"></p>
               <div id="op-extraction-preview" hidden></div>
-              <label>결과 열 이름 <input type="text" id="op-name" maxlength="200"></label>
+              <div id="op-new-placement"><label>결과 열 이름 <input type="text" id="op-name" maxlength="200"></label>
               <label>기준 열 <select id="op-anchor"></select></label>
               <label>결과 위치 <select id="op-side"><option value="after">바로 뒤에 새 열</option><option value="before">바로 앞에 새 열</option></select></label>
-              <p>기존 열을 유지하고 새 결과 열을 만듭니다. 처리 범위 밖의 행은 빈칸으로 남습니다.</p>
+              <p>기존 열을 유지하고 새 결과 열을 만듭니다. 처리 범위 밖의 행은 빈칸으로 남습니다.</p></div>
               <button type="button" class="primary" id="op-apply" disabled>확인한 결과를 새 열로 만들기</button>
               <button type="button" id="op-edit">설정 다시 보기</button>
             </section>

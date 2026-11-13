@@ -29,6 +29,7 @@
                     worksheet_id: workspace.worksheet_id,
                     table_id: String(workspace.table_id),
                     task_type: workspace.task_type,
+                    row_filter: workspace.row_filter || null,
                     model_spec_column_id: models.length === 1 ? String(models[0].column_id) : null,
                     row_start: target.row_start,
                     row_count: target.row_count,
@@ -36,10 +37,10 @@
                 });
             },
 
-            preview: function (job, rows, signal) {
+            preview: function (job, rows, signal, selectedCount) {
                 return post(
                     path(job, "preview"),
-                    {rows: rows},
+                    {rows: rows, selected_count: selectedCount || rows.length},
                     signal
                 );
             },

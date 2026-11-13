@@ -27,7 +27,7 @@
         api: api,
         getWorkspace: function () { return workspace; },
         closeTaskCards: closeTaskCards,
-        resetTasks: function () { workspace.reset(); formula.reset(); },
+        resetTasks: function () { workspace.reset(); formula.reset(); updateWorkspaceButton(); },
         handleUIAction: handleUIAction,
         onConversationChanged: function (id) { if (documents) return documents.load(id); },
         onBusy: function (value) {
@@ -35,8 +35,15 @@
             if (help) help.updateControls();
             if (workspace) workspace.setBusy(value);
             if (formula) formula.setBusy(value);
+            updateWorkspaceButton();
         }
     });
+    function updateWorkspaceButton() {
+        var hasWorkspace = workspace && workspace.referenceTarget();
+        var button = document.getElementById("open-workspace");
+        button.textContent = hasWorkspace ? "열 추가" : "작업 준비";
+        button.title = hasWorkspace ? "원본 열을 현재 작업표에 추가" : "작업표 만들기 또는 저장된 작업 이어가기";
+    }
     function closeTaskCards() {
         if (help) help.dismiss();
         if (workspace) workspace.dismiss();
@@ -81,7 +88,9 @@
         });
     });
     document.getElementById("open-workspace").addEventListener("click", async function () {
-        if (!chat.isBusy()) { closeTaskCards(); await workspace.open(); }
+        if (chat.isBusy()) return;
+        if (workspace.referenceTarget()) await workspace.openSourceColumns();
+        else { closeTaskCards(); await workspace.open(); }
     });
     document.querySelectorAll('[data-close-task]').forEach(function (button) {
         button.addEventListener('click', function () { if (!chat.isBusy()) closeTaskCards(); });
@@ -90,11 +99,15 @@
     workspace = window.createWorkspaceController({
         api: api,
         enterConversation: chat.enterConversation,
+        showWorkspace: closeTaskCards,
         complete: completeTask,
         isBusy: chat.isBusy,
         setBusy: chat.setBusy,
         getConversationId: chat.getConversationId,
-        onWorkspaceReady: function (target) { if (documents) return documents.attachPending(target); }
+        onWorkspaceReady: function (target) {
+            updateWorkspaceButton();
+            if (documents) return documents.attachPending(target);
+        }
     });
     formula = window.createFormulaController({
         ui: window.createFormulaUI({

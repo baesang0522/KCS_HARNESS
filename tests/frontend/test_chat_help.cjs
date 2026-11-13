@@ -155,8 +155,9 @@ test('retry keeps request ID; new question changes it; stale saved conversation 
 });
 
 test('page bootstrap wires chat and formula callbacks before initialization', async () => {
-    const h = createDOM(); let workspaceOptions, formulaOptions;
-    const stub = {dismiss() {}, reset() {}, setBusy() {}, context: async () => null, referenceTarget: () => null,
+    const h = createDOM(); let workspaceOptions, formulaOptions, imports=0;
+    const stub = {dismiss() {}, reset() { this.referenceTarget=()=>null; }, setBusy() {}, context: async () => null, referenceTarget: () => null,
+        openSourceColumns:async()=>{imports++;},
         formulaTarget() {}, validateFormulaSource() {}, prepareFormulaOutput() {}, formulaResultColumns() {}, formulaResult() {}};
     h.window.apiClient = {requestJson: async url => url.endsWith('/documents') ? {documents: []} : {conversation_id: 'conversation'}, newRequestId: () => 'id'};
     h.window.createWorkspaceController = options => { workspaceOptions = options; return stub; };
@@ -168,6 +169,20 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
     assert.equal(formulaOptions.validateSource, stub.validateFormulaSource);
     assert.equal(formulaOptions.getResultColumns, stub.formulaResultColumns);
     assert.equal(h.document.querySelector('.send').disabled, false);
+    const button=h.document.getElementById('open-workspace');
+    assert.equal(button.textContent,'작업 준비');
+    stub.referenceTarget=()=>({workspace_id:'work',task_type:'investigation'});
+    await workspaceOptions.onWorkspaceReady(stub.referenceTarget());
+    for(const message of ['변경이 없어 작업을 마쳤습니다.','결과를 작성했습니다.']) {
+        workspaceOptions.complete(message);
+        assert.equal(button.textContent,'열 추가');assert.equal(button.hidden,false);
+        await button.emit('click');
+    }
+    assert.equal(imports,2);
+    workspaceOptions.setBusy(true);await button.emit('click');assert.equal(imports,2);
+    workspaceOptions.setBusy(false);
+    await h.document.getElementById('new-chat').emit('click');
+    assert.equal(button.textContent,'작업 준비');
 });
 
 test('all application scripts load in HTML order and the real controllers initialize', async () => {

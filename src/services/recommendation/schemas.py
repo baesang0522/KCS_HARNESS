@@ -36,6 +36,8 @@ class AdviceRequest(StrictModel):
     rows: list[AdviceRow] = Field(min_length=1, max_length=400000)
 
     selection: AdviceSelection | None = None
+    sparse: bool = False
+    range_row_count: int | None = Field(default=None, ge=1, le=400000)
 
     @model_validator(mode="after")
     def validate_data(self):
@@ -43,14 +45,21 @@ class AdviceRequest(StrictModel):
             raise ValueError("분석 대상 열이 중복되었습니다.")
         if self.selection is None and len(self.rows) != self.row_count:
             raise ValueError("전체 행 수와 전달된 행 수가 다릅니다.")
-        if self.row_start + self.row_count > 1048576:
+        extent = self.range_row_count if self.sparse else self.row_count
+        if extent is None or extent < self.row_count:
+            raise ValueError("분석 대상의 행 범위가 올바르지 않습니다.")
+        if len({row.excel_row for row in self.rows}) != len(self.rows):
+            raise ValueError("분석 행 번호가 중복되었습니다.")
+        if any(not self.row_start < row.excel_row <= self.row_start + extent for row in self.rows):
+            raise ValueError("분석 범위 밖의 행입니다.")
+        if self.row_start + extent > 1048576:
             raise ValueError("Excel 행 범위를 벗어났습니다.")
         if len(self.rows) * len(self.column_ids) > 2000000:
             raise ValueError("한 번에 최대 200만 셀을 분석합니다.")
 
         characters = 0
         for offset, row in enumerate(self.rows):
-            if self.selection is None and row.excel_row != self.row_start + offset + 1:
+            if self.selection is None and not self.sparse and row.excel_row != self.row_start + offset + 1:
                 raise ValueError("행이 누락되었거나 순서가 다릅니다.")
             if len(row.values) != len(self.column_ids):
                 raise ValueError("분석 열과 데이터의 열 수가 다릅니다.")
@@ -72,7 +81,7 @@ class AdviceRequest(StrictModel):
             if (len(set(selected.group_column_ids)) != 3 or
                 not set(selected.group_column_ids) <= set(self.column_ids)):
                 raise ValueError("집계 기준 열이 올바르지 않습니다.")
-            if any(row.count is None or not self.row_start < row.excel_row <= self.row_start + self.row_count
+            if any(row.count is None or not self.row_start < row.excel_row <= self.row_start + extent
                    for row in self.rows):
                 raise ValueError("집계 건수 또는 대표 행 번호가 올바르지 않습니다.")
             counts = sum(row.count for row in self.rows)

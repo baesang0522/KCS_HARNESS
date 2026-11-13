@@ -21,26 +21,27 @@
                 throw new Error("분석 대상 열이나 설명이 바뀌었습니다. 새 조언 요청을 보내세요.");
             }
         });
+        if (JSON.stringify(workspace.row_filter || null) !== JSON.stringify(expected.row_filter || null)) throw new Error("분석 조건이 바뀌었습니다. 다시 요청하세요.");
         var full = await Excel.run(async function (context) {
             var info = await window.workspaceTable.layout(context, workspace);
             return {row_start: info.body.rowIndex, row_count: info.body.rowCount, stamp: info.stamp};
         });
-        if (workspace.task_type === "model_normalization") {
+        if (workspace.task_type === "model_normalization" || (workspace.task_type === "investigation" && workspace.advice_subject === "model")) {
             var grouped = await window.recommendationSheet.readModelAdvice(workspace, full, columnIds, progress, check);
             check();
             return Object.assign({
                 worksheet_id: workspace.worksheet_id, table_id: String(workspace.table_id),
-                row_start: full.row_start, row_count: full.row_count, column_ids: columnIds
+                row_start: full.row_start, row_count: grouped.selection.total_rows, column_ids: columnIds, sparse: !!workspace.row_filter, range_row_count: full.row_count
             }, grouped);
         }
         var snapshot = await window.operationsSheet.read(workspace, full, columnIds, progress, check);
         check();
-        if (snapshot.stamp !== full.stamp || snapshot.rows.length !== full.row_count) {
+        if (snapshot.stamp !== full.stamp || (!workspace.row_filter && snapshot.rows.length !== full.row_count)) {
             throw new Error("읽는 동안 작업 표가 바뀌었습니다. 다시 요청하세요.");
         }
         return {
             worksheet_id: workspace.worksheet_id, table_id: String(workspace.table_id),
-            row_start: full.row_start, row_count: full.row_count, column_ids: columnIds,
+            row_start: full.row_start, row_count: snapshot.rows.length, column_ids: columnIds, sparse: !!workspace.row_filter, range_row_count: full.row_count,
             rows: snapshot.rows.map(function (row) { return {excel_row: row.excel_row, values: row.values}; })
         };
     };

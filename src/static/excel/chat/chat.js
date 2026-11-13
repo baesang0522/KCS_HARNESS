@@ -236,7 +236,7 @@
 
             var draft = advice ? message.value : null;
             var value = advice
-                ? "추가 열과 열 설명도 참고해서 AI 정제 의견을 줘. 모델규격 정제는 대문자 기준 빈도 상위 100개 조합으로 분석해줘."
+                ? "현재 작업 조건과 선택한 분석 주제에 맞춰 AI 정제 의견을 줘. 추가 열과 열 설명도 참고해줘."
                 : message.value.trim();
 
             if (!value) {

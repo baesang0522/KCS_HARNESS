@@ -23,8 +23,7 @@
         async function sampleRows() {
             if (!workspace || !target) return [];
             if (!ui.targets().length) return [];
-            var snapshot = await sheet.read(workspace, Object.assign({}, target, {row_count: Math.min(10, target.row_count)}),
-                ui.targets(), function () {}, function () {});
+            var snapshot = await sheet.read(workspace, target, ui.targets(), function () {}, function () {}, null, 10);
             return snapshot.rows;
         }
         async function loadValues() {
@@ -76,7 +75,8 @@
                 );
                 check();
                 var ids = operation.column_ids.concat(operation.kind === "group" ? [operation.value_column_id] : []);
-                var snapshot = await sheet.read(workspace, target, ids, progress, check);
+                var destination = ui.destination ? ui.destination() : null;
+                var snapshot = await sheet.read(workspace, target, ids, progress, check, destination);
                 var values = [], changed = 0, headers = [];
                 var size = operation.kind === "group" ? snapshot.rows.length : 10000;
                 // ponytail: 미리보기는 창 메모리에 보관. 200만 결과 셀을 넘으면 범위를 줄인다.
@@ -86,7 +86,7 @@
                     var result = await options.jobs.preview(
                         job,
                         rows,
-                        abort.signal
+                        abort.signal, snapshot.rows.length
                     );
                     check();
                     if (!Array.isArray(result.rows) || result.rows.length !== rows.length || !result.headers.length) throw new Error("결과 행 수가 요청과 다릅니다.");
@@ -100,6 +100,7 @@
                     progress("처리", values.length, snapshot.rows.length);
                 }
                 values.forEach(function (row) { while (row.length < headers.length) row.push(""); });
+                if (destination) changed = values.filter(function (row, i) { return row[0] !== snapshot.rows[i].destination; }).length;
                 if (!changed && !["group", "extract"].includes(operation.kind)) {
                     await options.jobs.status(job, "NO_CHANGE");
                     complete(
@@ -118,7 +119,7 @@
                     names: headers,
                     changed: changed
                 };
-                ui.preview(preview); options.status("변경 내용과 결과 위치를 확인하세요. 원본 열은 유지합니다.");
+                ui.preview(preview); options.status("변경 내용과 결과 위치를 확인하세요. 기존 열을 선택하면 해당 열의 대상 셀 값이 바뀝니다.");
             } catch (error) {
                 if (job) {
                     try {
@@ -157,6 +158,8 @@
                 action = operation.rules.map(function (rule) {
                     return labels[rule.operation] + (rule.operation === "remove_words" ? " " + JSON.stringify(rule.words) : "");
                 }).join(" → ");
+            } else if (operation.kind === "set") {
+                action = "지정값 입력 " + JSON.stringify(operation.assigned_value);
             } else if (operation.kind === "extract") {
                 action = operation.extraction_mode === "labelled" ? "MODEL·CODE·GRADE 뒤의 값 추출" : "문자·숫자 모델명 후보 추출";
                 if (index === 1) action += " / 추출상태: 단일 후보·미검출·복수 후보";
@@ -206,6 +209,11 @@
 
             try {
                 var output = ui.output();
+                var writeValues = data.values;
+                if (output.mode === "existing") {
+                    if (data.operation.kind === "split" && data.names.length !== 1) throw new Error("여러 열로 분리하는 결과는 새 열로 저장하세요.");
+                    writeValues = data.values.map(function (row) { return [row[0]]; });
+                }
                 options.setBusy(true);
 
                 var names = ["group", "extract"].includes(data.operation.kind)
@@ -215,13 +223,14 @@
                             (data.names.length > 1 ? " " + (i + 1) : "");
                     });
 
+                if (output.mode === "existing") names = [data.snapshot.output_columns.find(function (c) { return String(c.column_id) === output.column_id; }).header];
                 invalidate(true);
                 applyRequested = true;
                 await options.jobs.beginApply(data.job, output);
 
                 writeStarted = true;
                 result = await sheet.write(
-                    data.snapshot, data.values, names, output, progress
+                    data.snapshot, writeValues, names, output, progress
                 );
 
                 await options.jobs.status(
@@ -233,7 +242,7 @@
                 );
                 recorded = true;
                 result.columns.forEach(function (column, index) {
-                    column.description = resultDescription(data, index);
+                    if (output.mode !== "existing") column.description = resultDescription(data, index);
                 });
                 await options.result(result, data.job);
 

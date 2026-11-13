@@ -9,9 +9,10 @@
             {key: "party_code", labels: ["해외거래처부호", "해외거래처코드"]},
             {key: "company_name", labels: ["해외거래처상호", "상호명", "상호", "해외거래처명"]}]}
     };
+    profiles.investigation = {name: "통합 조사", prefix: "조사", roles: profiles.counterparty_cleanup.roles.concat(profiles.model_normalization.roles)};
     window.workspaceProfiles = profiles;
     window.createWorkspaceController = function (options) {
-        var ui = window.createWorkspaceUI(), type = "model_normalization";
+        var ui = window.createWorkspaceUI(), type = "investigation";
         var source = null, workspace = null, target = null, creationName = null, ready = false;
         var lastResults = [], finalized = null, lastFormula = null;
         var jobs = window.createOperationJobs(
@@ -31,9 +32,9 @@
             setBusy: options.setBusy, status: ui.status, complete: options.complete, refresh: refresh,
             changed: function () { lastFormula = null; finalized = null; },
             result: async function (result) {
-                workspace.columns = workspace.columns.concat(result.columns);
+                workspace.columns = workspace.columns.filter(function (c) { return !result.columns.some(function (r) { return String(r.column_id) === String(c.column_id); }); }).concat(result.columns);
                 lastResults = result.columns.map(function (c) { return String(c.column_id); });
-                target = Object.assign({}, result, {worksheet_id: workspace.worksheet_id, sheet_name: workspace.sheet_name});
+                target = Object.assign({}, result, {worksheet_id: workspace.worksheet_id, sheet_name: workspace.sheet_name, row_count: result.range_row_count || result.row_count});
                 finalized = null; lastFormula = null; display(lastResults, true);
                 try { await save(); } catch (error) { throw new Error("결과 작성은 완료됐지만 작업 정보 저장에 실패했습니다. " + error.message); }
             },
@@ -76,7 +77,7 @@
                     return Object.assign({role: "reference", description: ""}, known || {}, column);
                 });
                 if (workspace.columns.length > 200) throw new Error("작업 표는 최대 200열입니다.");
-                if (profiles[workspace.task_type].roles.some(function (role) {
+                if (workspace.task_type !== "investigation" && profiles[workspace.task_type].roles.some(function (role) {
                     return workspace.columns.filter(function (c) { return c.role === role.key; }).length !== 1;
                 })) throw new Error("필수 열이 삭제되었거나 바뀌었습니다. 원본에서 새 작업을 시작하세요.");
                 lastResults = lastResults.filter(function (id) { return workspace.columns.some(function (c) { return String(c.column_id) === id; }); });
@@ -105,6 +106,7 @@
                 var role = workspace.task_type === "model_normalization" ? "model_spec" : "company_name";
                 ids = workspace.columns.filter(function (c) { return c.role === role; }).map(function (c) { return String(c.column_id); });
             }
+            if (!ids.length) ids = workspace.columns.slice(0, 1).map(function (c) { return String(c.column_id); });
             ui.current(workspace, target); operations.show(workspace, target, ids, resetMode);
         }
         function change() {
@@ -112,12 +114,12 @@
             creationName = null;
             var indexes = ui.mapping();
             var count = new Set(indexes.filter(function (index) { return index >= 0; })).size;
-            ready = indexes.length === 3 && count === 3;
+            ready = type === "investigation" ? count === indexes.filter(function (i) { return i >= 0; }).length && count + ui.extras().length > 0 : indexes.length === 3 && count === 3;
             source.mapping = {};
             profiles[type].roles.forEach(function (role, i) { source.mapping[role.key] = indexes[i]; });
-            source.reference_columns = ui.extras(); source.task_type = type; source.roles = profiles[type].roles.map(function (r) { return r.key; });
+            source.reference_columns = ui.extras(); source.task_type = type; source.roles = profiles[type].roles.filter(function (_, i) { return indexes[i] >= 0; }).map(function (r) { return r.key; });
             ui.valid(ready, count, source.reference_columns.length, source.data_row_count);
-            ui.status(ready ? "열 구성을 확인한 뒤 작업을 시작하세요. 필터로 숨겨진 행도 복사합니다." : "필수 세 역할에 서로 다른 열을 지정하세요.");
+            ui.status(ready ? "열 구성을 확인한 뒤 작업을 시작하세요. 필터로 숨겨진 행도 복사합니다." : "가져올 열을 선택하고, 역할은 서로 다른 열에 지정하세요.");
         }
         async function select() {
             if (options.isBusy()) return;
@@ -133,9 +135,10 @@
             options.setBusy(true);
             try {
                 if (!creationName) creationName = profiles[type].prefix + "_" + options.api.newRequestId().replace(/-/g, "").slice(0, 16);
-                var next = await window.workspaceCopy.create(source, creationName, function (done, total) { ui.status("작업 시트 복사 · " + done + "/" + total + "행"); });
+                var next = await window.workspaceCopy.create(source, creationName, function (done, total, phase) { ui.status((phase || "작업표 복사") + " · " + done + "/" + total + "행"); });
                 workspace = next; target = next.target; lastResults = []; finalized = null; lastFormula = null;
                 var defaultRole = type === "model_normalization" ? "model_spec" : "company_name";
+                if (type === "investigation") workspace.advice_subject = "company";
                 display(workspace.columns.filter(function (c) {
                     return c.role === defaultRole;
                 }).map(function (c) {
@@ -261,6 +264,7 @@
             }
         }
         function newSource() {
+            type = "investigation"; ui.open(type);
             similarity.reset();
             source = null; ready = false; creationName = null;
             workspace = target = null; lastResults = []; lastFormula = null; finalized = null;
@@ -274,7 +278,7 @@
             try {
                 await save();
 
-                type = nextType || type;
+                type = workspace ? workspace.task_type : "investigation";
                 ui.open(type);
 
                 if (!workspace || workspace.task_type !== type) {
@@ -293,7 +297,67 @@
                 options.setBusy(wasBusy);
             }
         }
+        async function manage(action) {
+            if (options.isBusy() || !workspace) return;
+            options.setBusy(true);
+            var imported = 0;
+            try {
+                if (action === "sources" && options.showWorkspace) {
+                    options.showWorkspace(); ui.open(type);
+                }
+                // Read form values before refresh repaints the current settings.
+                var filter = ui.filter(), role = ui.role(), subject = ui.subject(), sourceColumns = ui.importSelection();
+                var importPolicy = ui.importPolicy();
+                await refresh(); operations.invalidate(); similarity.reset(); finalized = lastFormula = null;
+                if (action === "filter") {
+                    if (filter && !workspace.columns.some(function (c) { return String(c.column_id) === filter.column_id; })) throw new Error("조건 열이 삭제되었습니다.");
+                    workspace.row_filter = filter;
+                } else if (action === "role") {
+                    var column = workspace.columns.find(function (c) { return String(c.column_id) === role.column_id; });
+                    if (!column) throw new Error("역할을 지정할 열이 없습니다.");
+                    if (workspace.task_type !== "investigation" && column.role !== role.role &&
+                        profiles[workspace.task_type].roles.some(function (r) { return r.key === column.role; })) {
+                        throw new Error("이전 작업표의 필수 역할은 유지해야 합니다. 자유롭게 구성하려면 새 통합 조사를 시작하세요.");
+                    }
+                    if (role.role !== "reference") workspace.columns.forEach(function (c) { if (c.role === role.role) c.role = "reference"; });
+                    column.role = role.role;
+                } else if (action === "subject") workspace.advice_subject = subject;
+                else if (action === "sources") {
+                    var available = await window.sourceColumns.list(workspace);
+                    ui.importColumns(available);
+                    ui.status(available.length ? "추가할 원본 열을 여러 개 선택하고 ‘선택한 열 가져오기’를 누르세요." : "원본 시트에서 추가 가능한 열을 모두 가져왔습니다.");
+                    return;
+                }
+                else if (action === "import") {
+                    if (!sourceColumns.length) throw new Error("추가할 원본 열을 선택하세요.");
+                    if (workspace.columns.length + sourceColumns.length > 200) throw new Error("작업 표는 최대 200열입니다. 선택한 열 수를 줄이세요.");
+                    for (var sourceColumn of sourceColumns) {
+                        var result = await window.sourceColumns.append(workspace, sourceColumn.column_id, function (label, done, total) {
+                            ui.status("열 가져오기 " + (imported + 1) + "/" + sourceColumns.length + " · " + label + " · " + done + "/" + total);
+                        }, Object.assign({}, importPolicy, {header: sourceColumn.header}));
+                        workspace.columns = workspace.columns.concat(result.columns);
+                        imported++;
+                        await save();
+                    }
+                    await refresh(); ui.importColumns(await window.sourceColumns.list(workspace));
+                }
+                await save(); display(operations.targets());
+                ui.status(action === "import" ? imported + "개 열을 추가했습니다. 아래에서 처리할 열을 선택해 전처리할 수 있습니다." : action === "filter" ? "작업 조건을 저장했습니다. 다음 미리보기에서 일치 행 수와 변경 내용을 확인하세요." : "현재 열과 설정으로 작업을 이어갑니다.");
+            } catch (error) {
+                if (action === "import") {
+                    try { ui.importColumns(await window.sourceColumns.list(workspace)); display(operations.targets()); }
+                    catch (_) { ui.importColumns([]); }
+                }
+                ui.status((imported ? imported + "개 열은 추가됐고 나머지는 중단했습니다. " : "") + error.message);
+            }
+            finally { options.setBusy(false); }
+        }
         ui.bind({
+            refresh: function () { return manage("refresh"); },
+            "import-add": function () { return manage("import"); },
+            "role-save": function () { return manage("role"); },
+            "filter-save": function () { return manage("filter"); },
+            subject: function () { return manage("subject"); },
             select: select,
             start: start,
             restore: restore,
@@ -330,6 +394,7 @@
         });
         return {
             open: open,
+            openSourceColumns: function () { return manage("sources"); },
             dismiss: function () { operations.invalidate(); similarity.reset(); ui.hide(); },
             reset: function () { similarity.reset(); source = workspace = target = null; lastResults = []; lastFormula = null; ready = false; finalized = null; operations.reset(); ui.reset(); },
             setBusy: function (busy) { ui.busy(busy, ready); operations.busy(busy); similarity.busy(); },
@@ -339,6 +404,7 @@
                 await refresh();
                 var sampleRows = await operations.sampleRows();
                 return {workspace_id: workspace.workspace_id,
+                    row_filter: workspace.row_filter || null, advice_subject: workspace.advice_subject || (workspace.task_type === "model_normalization" ? "model" : "company"),
                     task_type: workspace.task_type, worksheet_id: workspace.worksheet_id,
                     table_id: String(workspace.table_id), sheet_name: workspace.sheet_name, row_count: target.row_count,
                     columns: workspace.columns.map(function (c) { return {column_id: String(c.column_id), header: c.header,
