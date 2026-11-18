@@ -200,9 +200,8 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
         h.document.getElementById('message').value='이 회사와 비슷한 행만 표시';
         await h.document.getElementById('composer').emit('submit');
         await new Promise(resolve=>setImmediate(resolve));
-        assert(reviewRequest,h.document.getElementById('notice').textContent+' '+h.document.getElementById('conversation').textContent);
-        assert.equal(reviewRequest.column,'company');assert.equal(reviewRequest.request.assigned_value,'분석대상');
-        if(action.request)assert.equal(reviewRequest.request.match_text,'JIANGSU');
+        assert.equal(reviewRequest,undefined);
+        assert.match(h.document.getElementById('notice').textContent,/현재 사용하지|보류 중/);
     }
 });
 
@@ -216,6 +215,8 @@ test('all application scripts load in HTML order and the real controllers initia
             : url.endsWith('/documents') ? {documents: []} : url.endsWith('/investigation') ? {revision:0,goal:'목표',conditions:[],document_notes:{},columns:[]} : {answer: '도움 카드를 열었어.', ui_action: {type: 'open_cleaning_help'}}};
     };
     const scripts = h.document.querySelectorAll('script').map(node => node.getAttribute('src')).filter(Boolean);
+    assert.equal(scripts.some(file=>file.startsWith('group_review/')),false);
+    assert.equal(h.document.getElementById('work-groups'),null);assert.equal(h.document.getElementById('gr-panel'),null);
     scripts.filter(file => !file.startsWith('vendor/')).forEach(file => h.load(file));
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(requests.map(r => r.url), ['/conversations', '/conversations/conversation/documents', '/conversations/conversation/investigation']);

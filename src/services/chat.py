@@ -98,8 +98,10 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
             elif decision.intent == "similarity":
                 action = {"type": "configure_similarity", "similarity": decision.similarity.model_dump()}
             elif decision.intent == "group_review":
-                action = {"type": "open_group_review", "column_ids": decision.analysis_column_ids,
-                          "request": decision.group_review_request.model_dump() if decision.group_review_request else None}
+                # 묶음 검토 보류: 재사용 여부 검토 후 아래 연결과 보관 코드를 삭제한다.
+                # action = {"type": "open_group_review", "column_ids": decision.analysis_column_ids,
+                #           "request": decision.group_review_request.model_dump() if decision.group_review_request else None}
+                answer = "묶음 검토는 현재 사용하지 않습니다. 작업 범위는 상단 ‘작업 범위’에서 지정하세요."
             elif decision.intent == "cleaning_help":
                 action = {"type": "open_cleaning_help", "column_ids": decision.analysis_column_ids}
             elif decision.intent == "investigation":

@@ -57,9 +57,9 @@ class Element {
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
 }
 
-function createDOM() {
+function createDOM(html = fs.readFileSync(path.join(root, 'taskpane.html'), 'utf8')) {
     const document = new Element('document'), stack = [document];
-    const html = fs.readFileSync(path.join(root, 'taskpane.html'), 'utf8');
+    html = html.replace(/<!--[\s\S]*?-->/g, '');
     for (const match of html.matchAll(/<(\/?)([a-z][\w-]*)([^>]*)>/gi)) {
         const [, closing, tag, rest] = match;
         if (closing) { while (stack.length > 1 && stack.pop().tagName !== tag) {} continue; }

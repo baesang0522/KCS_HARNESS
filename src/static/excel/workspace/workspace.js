@@ -49,40 +49,41 @@
                 return {workspace: workspace, target: target};
             }
         });
-        async function openGroups(columnId, request) {
-            try {
-                if (!workspace) throw new Error("먼저 작업표를 만들거나 저장된 작업을 이어가세요.");
-                if (options.showWorkspace) options.showWorkspace();
-                if (!groupReview) groupReview = window.createGroupReview({
-                    api: options.api, isBusy: options.isBusy, setBusy: options.setBusy,
-                    getInput: async function () {
-                        await refresh();
-                        var whole = await Excel.run(async function (context) {
-                            var info = await window.workspaceTable.layout(context, workspace);
-                            return {row_start: info.body.rowIndex, row_count: info.body.rowCount};
-                        });
-                        return {workspace: workspace, target: whole};
-                    },
-                    saveReview: async function (review) {
-                        var old = workspace.group_reviews || [];
-                        workspace.group_reviews = old.filter(function (r) { return r.id !== review.id; }).concat(review);
-                        try { await save(); } catch (error) { workspace.group_reviews = old; throw error; }
-                    },
-                    register: async function (result) {
-                        workspace.columns = workspace.columns.filter(function (c) { return !result.columns.some(function (r) { return String(r.column_id) === String(c.column_id); }); }).concat(result.columns);
-                        operations.invalidate(); lastFormula = finalized = null;
-                        try { await refresh(); await save(); }
-                        catch (error) { throw new Error("셀 반영은 끝났지만 작업 정보 저장에 실패했습니다. 자동 재실행하지 말고 결과 열을 확인하세요. " + error.message); }
-                    },
-                    setFilter: async function (filter) {
-                        await refresh();
-                        if (!workspace.columns.some(function (c) { return String(c.column_id) === filter.column_id; })) throw new Error("표시한 열이 삭제되었습니다.");
-                        workspace.row_filter = filter; operations.invalidate(); lastFormula = finalized = null; await save();
-                    }
-                });
-                await groupReview.open(columnId, request);
-            } catch (error) { document.getElementById("notice").textContent = error.message; }
-        }
+        // 묶음 검토 보류(2026-11-18): 재사용 여부 검토 후 불필요하면 삭제. 기존 저장 정보는 보존.
+        // async function openGroups(columnId, request) {
+        //     try {
+        //         if (!workspace) throw new Error("먼저 작업표를 만들거나 저장된 작업을 이어가세요.");
+        //         if (options.showWorkspace) options.showWorkspace();
+        //         if (!groupReview) groupReview = window.createGroupReview({
+        //             api: options.api, isBusy: options.isBusy, setBusy: options.setBusy,
+        //             getInput: async function () {
+        //                 await refresh();
+        //                 var whole = await Excel.run(async function (context) {
+        //                     var info = await window.workspaceTable.layout(context, workspace);
+        //                     return {row_start: info.body.rowIndex, row_count: info.body.rowCount};
+        //                 });
+        //                 return {workspace: workspace, target: whole};
+        //             },
+        //             saveReview: async function (review) {
+        //                 var old = workspace.group_reviews || [];
+        //                 workspace.group_reviews = old.filter(function (r) { return r.id !== review.id; }).concat(review);
+        //                 try { await save(); } catch (error) { workspace.group_reviews = old; throw error; }
+        //             },
+        //             register: async function (result) {
+        //                 workspace.columns = workspace.columns.filter(function (c) { return !result.columns.some(function (r) { return String(r.column_id) === String(c.column_id); }); }).concat(result.columns);
+        //                 operations.invalidate(); lastFormula = finalized = null;
+        //                 try { await refresh(); await save(); }
+        //                 catch (error) { throw new Error("셀 반영은 끝났지만 작업 정보 저장에 실패했습니다. 자동 재실행하지 말고 결과 열을 확인하세요. " + error.message); }
+        //             },
+        //             setFilter: async function (filter) {
+        //                 await refresh();
+        //                 if (!workspace.columns.some(function (c) { return String(c.column_id) === filter.column_id; })) throw new Error("표시한 열이 삭제되었습니다.");
+        //                 workspace.row_filter = filter; operations.invalidate(); lastFormula = finalized = null; await save();
+        //             }
+        //         });
+        //         await groupReview.open(columnId, request);
+        //     } catch (error) { document.getElementById("notice").textContent = error.message; }
+        // }
         function referenceTarget() {
             if (!workspace) return null;
             return {workspace_id: workspace.workspace_id, worksheet_id: workspace.worksheet_id,
@@ -404,11 +405,11 @@
             finally { options.setBusy(false); }
         }
         ui.bind({
-            groups: async function () {
-                if (options.isBusy()) return;
-                options.setBusy(true);
-                try { await openGroups(); } finally { options.setBusy(false); }
-            },
+        //     groups: async function () {
+        //         if (options.isBusy()) return;
+        //         options.setBusy(true);
+        //         try { await openGroups(); } finally { options.setBusy(false); }
+        //     },
             refresh: function () { return manage("refresh"); },
             "import-add": function () { return manage("import"); },
             "role-save": function () { return manage("role"); },
@@ -479,7 +480,7 @@
                 await refresh();
                 return window.readRecommendation(workspace, columnIds, expected, progress, check);
             },
-            openGroups: openGroups,
+            // openGroups: openGroups, // 묶음 검토 보류(2026-11-18): 재사용 여부 검토 후 불필요하면 삭제. 기존 저장 정보는 보존.
             configureSimilarity: async function (settings) {
                 if (!workspace) throw new Error(window.errorMessages.WORKSPACE_SETUP_REQUIRED);
                 await refresh(); ui.open(workspace.task_type); display([settings.column_id]);

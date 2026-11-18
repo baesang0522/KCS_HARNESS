@@ -49,5 +49,7 @@ class TaskpaneAssetsTests(unittest.TestCase):
             self.assertLess(paths.index(dependency), paths.index(consumer))
         base = Path(__file__).resolve().parents[2] / 'src/static/excel'
         for file in base.rglob('*.js'):
-            if 'vendor' not in file.parts:
+            if 'group_review' in file.parts:
+                self.assertNotIn(file.relative_to(base).as_posix(), paths)
+            elif 'vendor' not in file.parts:
                 self.assertIn(file.relative_to(base).as_posix(), paths)

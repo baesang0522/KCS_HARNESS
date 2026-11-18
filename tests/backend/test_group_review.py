@@ -19,30 +19,35 @@ class GroupReviewTests(unittest.TestCase):
         request = SimilarityRequest(settings={'column_id':'model','method':'sequence'},rows=[{'excel_row':i+1,'value':v} for i,v in enumerate(['A','B','C'])])
         self.assertEqual(inspect_similarity(request)['pair_count'],3)
 
-    def test_review_tool_only_opens_card_and_validates_column(self):
+    def test_review_tool_is_not_registered_but_conditional_update_remains(self):
         workspace={'columns':[{'column_id':'custom','role':'reference'}],'target_column_ids':['custom']}
         tools={tool.name:tool for tool in build_request_tools({'workspace':workspace})}
-        card=tools['open_group_review'].invoke({'column_id':'custom'})
-        decision=RequestDecision.model_validate(card)
-        self.assertEqual(decision.intent,'group_review')
-        self.assertIsNone(decision.operation)
-        with self.assertRaises(ValueError): tools['open_group_review'].invoke({'column_id':'deleted'})
-        ChatResponse(conversation_id='c',request_id='r',answer='확인',reasoning=[],ui_action={'type':'open_group_review','column_ids':['custom']})
-        with self.assertRaises(ValidationError): RequestDecision(intent='group_review',answer='확인',analysis_column_ids=['a','b'])
+        self.assertNotIn('open_group_review', tools)
+        self.assertIn('update_matching_rows', tools)
+        # 보류된 도구의 기존 기대값: 재사용 여부 검토 후 삭제.
+        # card=tools['open_group_review'].invoke({'column_id':'custom'})
+        # decision=RequestDecision.model_validate(card)
+        # self.assertEqual(decision.intent,'group_review')
+        # self.assertIsNone(decision.operation)
+        # with self.assertRaises(ValueError): tools['open_group_review'].invoke({'column_id':'deleted'})
+        # ChatResponse(conversation_id='c',request_id='r',answer='확인',reasoning=[],ui_action={'type':'open_group_review','column_ids':['custom']})
+        # with self.assertRaises(ValidationError): RequestDecision(intent='group_review',answer='확인',analysis_column_ids=['a','b'])
 
 
 class ConditionalMarkTests(unittest.TestCase):
     def test_even_set_value_cannot_bypass_row_selection(self):
         workspace={'columns':[{'column_id':'company','role':'company_name'}],'target_column_ids':['company']}
         tools={tool.name:tool for tool in build_request_tools({'workspace':workspace})}
-        for name,args in [('set_value',{'value':'분석대상'}),('open_group_review',{'assigned_value':'분석대상'})]:
-            card=tools[name].invoke(dict(column_id='company',match_text='JIANGSU SHAGANG INTL TRADE',output_name='분석대상',**args))
-            decision=RequestDecision.model_validate(card)
-            self.assertEqual(decision.intent,'group_review')
-            self.assertIsNone(decision.operation)
-            self.assertEqual(decision.group_review_request.match_text,'JIANGSU SHAGANG INTL TRADE')
-            self.assertEqual(decision.group_review_request.output_name,'분석대상')
-            self.assertEqual(decision.group_review_request.assigned_value,'분석대상')
-        fallback=tools['set_value'].invoke({'value':'분석대상'})
-        self.assertEqual(fallback['intent'],'group_review')
-        self.assertNotIn('operation',fallback)
+        self.assertNotIn('set_value', tools)
+        self.assertNotIn('open_group_review', tools)
+        # for name,args in [('set_value',{'value':'분석대상'}),('open_group_review',{'assigned_value':'분석대상'})]:
+        #     card=tools[name].invoke(dict(column_id='company',match_text='JIANGSU SHAGANG INTL TRADE',output_name='분석대상',**args))
+        #     decision=RequestDecision.model_validate(card)
+        #     self.assertEqual(decision.intent,'group_review')
+        #     self.assertIsNone(decision.operation)
+        #     self.assertEqual(decision.group_review_request.match_text,'JIANGSU SHAGANG INTL TRADE')
+        #     self.assertEqual(decision.group_review_request.output_name,'분석대상')
+        #     self.assertEqual(decision.group_review_request.assigned_value,'분석대상')
+        # fallback=tools['set_value'].invoke({'value':'분석대상'})
+        # self.assertEqual(fallback['intent'],'group_review')
+        # self.assertNotIn('operation',fallback)

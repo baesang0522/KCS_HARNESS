@@ -158,7 +158,7 @@ test('direct scope selection persists without cell writes or groups and filters 
     assert.equal(node('work-tools').hidden,true);assert.equal(node('work-scope').hidden,true);
     assert.equal(node('work-title').textContent,'열 추가');
     assert.equal(node('work-import').parentNode,node('work-current'));
-    assert.equal(node('work-tools').contains(node('work-groups')),true);
+    assert.equal(node('work-groups'),null);assert.equal(node('gr-panel'),null);
     assert.equal(node('work-tools').contains(node('operations')),true);
     assert(node('work-status').textContent.includes('모두 가져왔습니다'));
 });

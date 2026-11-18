@@ -41,11 +41,12 @@ class InvestigationTests(unittest.IsolatedAsyncioTestCase):
     def test_set_value_and_clear_value_preserve_physical_row_numbers(self):
         workspace = self.workspace()
         tools = {tool.name: tool for tool in build_request_tools({'workspace': workspace})}
+        self.assertNotIn('set_value', tools)
         for value in ['확정', '']:
-            card = tools['set_value'].invoke(dict(column_id='custom', value=value))
-            self.assertEqual(card['intent'], 'group_review')
-            self.assertNotIn('operation', card)
-            self.assertEqual(card['group_review_request']['assigned_value'], value)
+            # card = tools['set_value'].invoke(dict(column_id='custom', value=value))
+            # self.assertEqual(card['intent'], 'group_review')
+            # self.assertNotIn('operation', card)
+            # self.assertEqual(card['group_review_request']['assigned_value'], value)
             result = execute(OperationRequest(operation=dict(kind='set',column_ids=['custom'],assigned_value=value), rows=[
                 dict(excel_row=10, values=['기존']), dict(excel_row=70, values=['수정'])]))
             self.assertEqual([row.excel_row for row in result.rows], [10, 70])
