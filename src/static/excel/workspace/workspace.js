@@ -30,10 +30,11 @@
             isBusy: options.isBusy,
             setBusy: options.setBusy, status: ui.status, complete: options.complete, refresh: refresh,
             changed: function () { lastFormula = null; finalized = null; },
-            result: async function (result) {
+            result: async function (result, job) {
                 workspace.columns = workspace.columns.filter(function (c) { return !result.columns.some(function (r) { return String(r.column_id) === String(c.column_id); }); }).concat(result.columns);
                 lastResults = result.columns.map(function (c) { return String(c.column_id); });
-                target = Object.assign({}, result, {worksheet_id: workspace.worksheet_id, sheet_name: workspace.sheet_name, row_count: result.range_row_count || result.row_count});
+                var keptRange = job && job.source.operation.condition ? {row_start: target.row_start, row_count: target.row_count} : {};
+                target = Object.assign({}, result, {worksheet_id: workspace.worksheet_id, sheet_name: workspace.sheet_name, row_count: result.range_row_count || result.row_count}, keptRange);
                 finalized = null; lastFormula = null; display(lastResults, true);
                 try { await save(); } catch (error) { throw new Error("결과 작성은 완료됐지만 작업 정보 저장에 실패했습니다. " + error.message); }
             },
@@ -338,15 +339,31 @@
             options.setBusy(true);
             var imported = 0;
             try {
-                if (action === "sources" && options.showWorkspace) {
-                    options.showWorkspace(); ui.open(type);
+                if (action === "sources" || action === "scope") {
+                    if (options.showWorkspace) options.showWorkspace();
+                    ui.open(type); ui.mode(action === "sources" ? "import" : "scope");
                 }
                 // Read form values before refresh repaints the current settings.
-                var role = ui.role(), sourceColumns = ui.importSelection();
+                var role = ui.role(), sourceColumns = ui.importSelection(), filter = ui.scope();
                 var importPolicy = ui.importPolicy();
                 await refresh(); operations.invalidate(); similarity.reset(); finalized = lastFormula = null;
-                if (action === "clear-filter") {
-                    workspace.row_filter = null;
+                if (action === "scope") {
+                    ui.current(workspace, target); ui.status("조건 열과 값을 선택하고 ‘범위 적용’을 누르세요.");
+                    return;
+                }
+                if (action === "scope-apply" || action === "clear-filter") {
+                    if (action === "scope-apply") {
+                        if (!workspace.columns.some(function (c) { return String(c.column_id) === filter.column_id; })) throw new Error("조건 열을 다시 선택하세요.");
+                        if (!["equals", "not_equals", "contains", "blank", "not_blank"].includes(filter.operator)) throw new Error("조건을 다시 선택하세요.");
+                        if (!["blank", "not_blank"].includes(filter.operator) && !filter.value.trim()) throw new Error("비교할 값을 입력하세요. 빈 셀은 ‘빈칸’ 조건을 선택하세요.");
+                        if (filter.value.length > 32767) throw new Error("비교할 값이 너무 깁니다.");
+                    }
+                    var previousFilter = workspace.row_filter;
+                    workspace.row_filter = action === "clear-filter" ? null : filter;
+                    try { await save(); } catch (error) { workspace.row_filter = previousFilter; throw error; }
+                    display(operations.targets());
+                    ui.status(action === "clear-filter" ? "작업 조건을 해제했습니다. 다음 작업부터 전체 행을 사용합니다." : "작업 범위를 적용했습니다. 다음 작업부터 이 조건을 사용합니다. 셀 값은 변경하지 않았습니다.");
+                    return;
                 } else if (action === "role") {
                     var column = workspace.columns.find(function (c) { return String(c.column_id) === role.column_id; });
                     if (!column) throw new Error("역할을 지정할 열이 없습니다.");
@@ -376,7 +393,7 @@
                     await refresh(); ui.importColumns(await window.sourceColumns.list(workspace));
                 }
                 await save(); display(operations.targets());
-                ui.status(action === "import" ? imported + "개 열을 추가했습니다. 아래에서 처리할 열을 선택해 전처리할 수 있습니다." : action === "clear-filter" ? "작업 조건을 해제했습니다. 다음 작업부터 전체 행을 사용합니다." : "현재 열과 설정으로 작업을 이어갑니다.");
+                ui.status(action === "import" ? imported + "개 열을 추가했습니다." : "현재 열과 설정으로 작업을 이어갑니다.");
             } catch (error) {
                 if (action === "import") {
                     try { ui.importColumns(await window.sourceColumns.list(workspace)); display(operations.targets()); }
@@ -396,6 +413,8 @@
             "import-add": function () { return manage("import"); },
             "role-save": function () { return manage("role"); },
             "clear-filter": function () { return manage("clear-filter"); },
+            "scope-clear": function () { return manage("clear-filter"); },
+            "scope-apply": function () { return manage("scope-apply"); },
             select: select,
             start: start,
             restore: restore,
@@ -433,6 +452,7 @@
         });
         return {
             open: open,
+            openScope: function () { return manage("scope"); },
             openSourceColumns: function () { return manage("sources"); },
             dismiss: function () { operations.invalidate(); similarity.reset(); ui.hide(); if (groupReview) groupReview.dismiss(); },
             reset: function () { if (groupReview) groupReview.dismiss(); similarity.reset(); source = workspace = target = null; lastResults = []; lastFormula = null; ready = false; finalized = null; operations.reset(); ui.reset(); },

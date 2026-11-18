@@ -79,6 +79,7 @@ class Operation(StrictModel):
     extraction_mode: Literal["alphanumeric", "labelled"] | None = None
     assigned_value: Text | None = None
     condition: RowFilter | None = None
+    condition_scope: Literal["current", "all"] = "current"
     destination_column_id: ColumnId | None = None
 
     @property

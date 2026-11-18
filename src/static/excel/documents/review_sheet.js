@@ -27,7 +27,7 @@
             if (!cells[0]) throw new Error('빈 그룹을 채워 주세요. (' + (index + 1) + '번째 항목)');
             var target = {kind: kind, group: cells[0]};
             if (kind === 'supplier') {
-                if (!cells[1] || !cells[2]) throw new Error('구분과 회사명을 채워 주세요. (' + (index + 1) + '번째 항목)');
+                if (!cells[2]) throw new Error('회사명을 채워 주세요. (' + (index + 1) + '번째 항목)');
                 target.category = cells[1]; target.company_name = cells[2];
             } else if (kind === 'item') {
                 target.hs_codes = cells[1] ? cells[1].split(/[,，\n]/).map(function (s) { return s.trim(); }) : [];
@@ -70,7 +70,7 @@
                 try {
                     sheet.getRange('A1').numberFormat = [['@']];
                     sheet.getRange('A1').values = [["'" + filename]];
-                    sheet.getRange('A2').values = [['표 안에서 수정·추가·행 삭제 후 추가 기능의 수정 내용 반영을 누르세요. 근거 페이지는 쉼표로 구분하세요.']];
+                    sheet.getRange('A2').values = [['표 안에서 수정·추가·행 삭제 후 추가 기능의 수정 내용 반영을 누르세요.']];
                     var grid = [headers[kind]].concat(data), range = sheet.getRangeByIndexes(3, 0, grid.length, headers[kind].length);
                     range.numberFormat = grid.map(function (row) { return row.map(function () { return '@'; }); });
                     range.values = grid.map(function (row) { return row.map(function (value) { return value ? "'" + value : ''; }); });
@@ -103,7 +103,6 @@
                 var snapshot = await tableSnapshot(context, entry);
                 rows = rows.concat(parse(entry.kind, snapshot.values));
             }
-            if (rows.length > 100) throw new Error('검토 항목은 최대 100개예요.');
             return {rows: rows, baseline: meta.baseline};
         });
     }
@@ -116,7 +115,6 @@
         if (!count.value) return snapshot;
         var body = table.getDataBodyRange();
         body.load('rowIndex,columnIndex,rowCount,columnCount'); await context.sync();
-        if (body.rowCount > 100) throw new Error('검토 항목은 최대 100행이에요. 빈 표 행도 정리해 주세요.');
         body.load('values,formulas'); await context.sync();
         if (body.formulas.some(function (row) { return row.some(function (v) { return typeof v === 'string' && v[0] === '='; }); })) throw new Error('검토 표에는 수식 대신 값을 입력하세요.');
         snapshot.row_start = body.rowIndex; snapshot.column_start = body.columnIndex; snapshot.values = body.values;

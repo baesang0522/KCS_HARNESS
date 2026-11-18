@@ -25,10 +25,22 @@ class DocumentLink(BaseModel):
         return self
 
 
+class DocumentTable(BaseModel):
+    headers: list[str]
+    rows: list[list[str]]
+
+    @model_validator(mode="after")
+    def check_columns(self):
+        if not self.headers or any(len(row) != len(self.headers) for row in self.rows):
+            raise ValueError("표의 헤더와 데이터 열 수가 다릅니다. 빈 열도 유지해야 합니다.")
+        return self
+
+
 class DocumentPage(BaseModel):
     page_number: int = Field(ge=1)
     text: str
     readable: bool
+    tables: list[DocumentTable] = Field(default_factory=list)
 
 
 class ReferenceDocument(BaseModel):

@@ -90,13 +90,13 @@ test('large alternating selections use bounded batches instead of one Excel roun
     assert(h.syncs<250,`too many round trips: ${h.syncs}`);
 });
 
-test('workspace keeps a saved condition without the removed filter card, and can explicitly clear it',async()=>{
+test('direct scope selection persists without cell writes or groups and filters the next operation',async()=>{
     const {createDOM}=require('../helpers/taskpane_dom.cjs');
     const h=createDOM(),host=createInvestigationHost();
     const f=host.workspace(['id','사용자 값','검토표시'],[[1,'old','OK'],[2,'keep','NO'],[3,'old','OK']]);
-    const saved={...f.work,workspace_id:'work',target:f.target,row_filter:{column_id:f.work.columns[1].column_id,operator:'equals',value:'OK'}};let stored=saved,busy=false,controller,job,revealed=0;
+    const saved={...f.work,workspace_id:'work',target:f.target,row_filter:{column_id:f.work.columns[1].column_id,operator:'equals',value:'OK'}};let stored=saved,busy=false,controller,job,revealed=0,failSave=false;
     h.sandbox.Excel=host.Excel;h.sandbox.Office={context:{requirements:{isSetSupported:()=>true}}};
-    h.window.workspaceStore={current:async()=>stored,save:async work=>{stored=structuredClone(work);}};
+    h.window.workspaceStore={current:async()=>stored,save:async work=>{if(failSave)throw Error('저장 실패');stored=structuredClone(work);}};
     h.window.sourceColumns={list:async()=>[]};
     h.window.createMappingEditor=()=>({reset(){},get:()=>[],set(){},catalog(){},bind(){}});
     h.window.createSimilarityController=()=>({reset(){},show(){},busy(){}});
@@ -114,7 +114,31 @@ test('workspace keeps a saved condition without the removed filter card, and can
         setBusy:v=>{busy=v;controller?.setBusy(v);},complete:noop,enterConversation:noop});
     const node=id=>h.document.getElementById(id);
     await node('work-restore').emit('click');
-    assert.equal(node('work-scope-settings'),null);
+    const before=structuredClone(f.sheet.cells);
+    await controller.openScope();
+    assert.equal(node('work-tools').hidden,true);assert.equal(node('work-import').hidden,true);
+    assert.equal(node('work-scope').hidden,false);assert.equal(node('work-title').textContent,'작업 범위');
+    node('work-scope-value').value='';await node('work-scope-apply').emit('click');
+    assert.match(node('work-status').textContent,/비교할 값/);assert.equal(stored.row_filter.value,'OK');
+    node('work-scope-column').value='deleted';node('work-scope-value').value='NO';
+    await node('work-scope-apply').emit('click');assert.match(node('work-status').textContent,/조건 열/);
+    assert.equal(stored.row_filter.value,'OK');
+    node('work-scope-column').value=f.work.columns[1].column_id;
+    failSave=true;await node('work-scope-apply').emit('click');failSave=false;
+    assert.match(node('work-status').textContent,/저장 실패/);assert.equal(stored.row_filter.value,'OK');
+    assert.equal((await controller.context()).row_filter.value,'OK');
+    await node('work-scope-clear').emit('click');assert.equal(stored.row_filter,null);
+    node('work-scope-column').value=f.work.columns[1].column_id;
+    node('work-scope-operator').value='blank';await node('work-scope-operator').emit('change');
+    assert.equal(node('work-scope-value-label').hidden,true);
+    await node('work-scope-apply').emit('click');assert.equal(stored.row_filter.operator,'blank');
+    node('work-scope-operator').value='equals';await node('work-scope-operator').emit('change');
+    assert.equal(node('work-scope-value-label').hidden,false);
+    node('work-scope-value').value='OK';await node('work-scope-apply').emit('click');
+    assert.equal(stored.row_filter.value,'OK');assert.equal(node('work-tools').hidden,true);
+    assert.deepEqual(f.sheet.cells,before);assert.equal(stored.group_reviews,undefined);
+    await controller.openScope();assert.equal(node('work-scope-value').value,'OK');
+    await controller.open();assert.equal(node('work-tools').hidden,false);assert.equal(node('work-scope').hidden,true);
     assert.match(node('work-operation-scope').textContent,/OK/);
     node('op-kind').value='set';node('op-column').value=f.work.columns[0].column_id;
     node('op-assigned-value').value='confirmed';node('op-output-mode').value='existing';node('op-existing-column').value=f.work.columns[0].column_id;
@@ -129,8 +153,13 @@ test('workspace keeps a saved condition without the removed filter card, and can
     await node('work-clear-filter').emit('click');assert.equal(stored.row_filter,null);
     assert.equal(node('work-clear-filter').hidden,true);
     await controller.openSourceColumns();
-    assert.equal(revealed,1);assert.equal(node('work-panel').hidden,false);
+    assert.equal(revealed,3);assert.equal(node('work-panel').hidden,false);
     assert.equal(node('work-import').hidden,false);assert.equal(node('work-import-add').disabled,true);
+    assert.equal(node('work-tools').hidden,true);assert.equal(node('work-scope').hidden,true);
+    assert.equal(node('work-title').textContent,'열 추가');
+    assert.equal(node('work-import').parentNode,node('work-current'));
+    assert.equal(node('work-tools').contains(node('work-groups')),true);
+    assert.equal(node('work-tools').contains(node('operations')),true);
     assert(node('work-status').textContent.includes('모두 가져왔습니다'));
 });
 
@@ -299,6 +328,8 @@ for (const failSecond of [false, true]) test(`multiple imports preserve row iden
     for(const check of node('work-import-columns').querySelectorAll('input')){check.checked=true;await check.emit('change');}
     node('work-import-confirm').checked=true;await node('work-import-confirm').emit('change');
     await node('work-import-add').emit('click');
+    assert.equal(node('work-tools').hidden,true);assert.equal(node('work-scope').hidden,true);
+    assert.equal(node('work-title').textContent,'열 추가');
     assert.deepEqual(calls,['live:0','live:1']);
     assert(saves.some(work=>work.columns.length===2 && work.columns[1].source_column_index===0),'first import link not persisted');
     if(failSecond){
@@ -319,5 +350,6 @@ for (const failSecond of [false, true]) test(`multiple imports preserve row iden
     assert.equal(node('work-scope-settings'),null);assert.equal(node('work-advice-settings'),null);
     assert.equal(node('work-import-add').disabled,true);
     await controller.open();
+    assert.equal(node('work-tools').hidden,false);assert.equal(node('work-import').hidden,true);
     assert.equal(node('work-scope-settings'),null);assert.equal(node('work-advice-settings'),null);
 });

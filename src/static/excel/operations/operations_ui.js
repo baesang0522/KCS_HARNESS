@@ -18,7 +18,7 @@
             var filter = conditional.condition;
             var labels = {equals: "같음", not_equals: "다름", contains: "포함", blank: "빈칸", not_blank: "빈칸 아님"};
             document.getElementById("work-title").textContent = "조건에 맞는 값 변경";
-            el("condition").textContent = "작업표 전체에서 ‘" + name(filter.column_id) + "’ · " + labels[filter.operator] +
+            el("condition").textContent = (conditional.condition_scope === "all" ? "작업표 전체에서 ‘" : "현재 작업 범위 안에서 ‘") + name(filter.column_id) + "’ · " + labels[filter.operator] +
                 (filter.operator.includes("blank") ? "" : " · " + JSON.stringify(filter.value)) +
                 " → ‘" + name(conditional.destination_column_id) + "’에 " + JSON.stringify(conditional.assigned_value) +
                 " 입력. 나머지 행은 유지합니다. 문자열은 대소문자와 공백을 구분합니다.";

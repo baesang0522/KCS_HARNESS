@@ -32,12 +32,11 @@ test('item alternatives retain HS OR and specification-specific thickness condit
     assert.deepEqual(plain((await h.review.read('c','d')).rows),rows);
     assert.throws(()=>h.review.parse('item',[['1','','','','1']]),/HS/);
 });
-test('renamed headers, missing tables, formula cells, oversized reviews and malformed pages reject before save',async()=>{
+test('renamed headers, missing tables, formula cells and malformed pages reject before save',async()=>{
     const h=setup();await h.review.ensure('c','d','파일.pdf',[row()]);const s=h.sheets[0],t=s.tables.items[0];
     s.cells[3][0]='바꾼 열';await assert.rejects(h.review.read('c','d'),/열 이름/);s.cells[3][0]='그룹';
     s.cells[4][2]='=NOW()';await assert.rejects(h.review.read('c','d'),/수식/);s.cells[4][2]='회사';
     s.cells[4][3]='1쪽';await assert.rejects(h.review.read('c','d'),/근거 페이지/);s.cells[4][3]='1';
-    t.count=101;await assert.rejects(h.review.read('c','d'),/100행/);t.count=1;
     s.tables.items=[];await assert.rejects(h.review.read('c','d'),/table not found/);
 });
 test('empty rows mean deletion, manual rows allow blank evidence, different chats do not reuse sheets',async()=>{
@@ -47,7 +46,8 @@ test('empty rows mean deletion, manual rows allow blank evidence, different chat
     assert.deepEqual(plain((await h.review.read('c','d')).rows),[]);
     assert.deepEqual(plain(h.review.parse('supplier',[['1','기타','추가 회사','']])[0].source_pages),[]);
     assert.equal(await h.review.read('other','d'),null);
-    assert.throws(()=>h.review.parse('supplier',[['1','','추가 회사','']]),/구분/);
+    assert.equal(h.review.parse('supplier',[['1','','English Only Co.','']])[0].target.category,'');
+    assert.throws(()=>h.review.parse('supplier',[['1','한글명','','']]),/회사명/);
 });
 test('snapshot conflicts and partial write errors preserve all existing sheets',async()=>{
     const h=setup();await h.review.ensure('c','d','파일.pdf',[row()]);
@@ -87,4 +87,15 @@ test('preprocess writes values as literal text and reports uncertainty after a w
     await h.review.writePreprocess('c','d',snapshot,['=1+1']);assert.equal(h.sheets[0].cells[4][2],'=1+1');assert.equal(h.sheets[0].formats[4][2],'@');
     h.sheets[0].cells[4][2]='한글=1+1';h.sheets[0].protected=true;
     await assert.rejects(h.review.writePreprocess('c','d',snapshot,['=1+1']),/완료했는지 확인하지 못/);
+});
+
+test('236 review rows survive Excel creation, edits, preprocessing and saved baseline without a 100-row cap',async()=>{
+    const h=setup(),rows=Array.from({length:236},(_,i)=>row('MODEL-'+i));
+    await h.review.ensure('chat','large','모델명.pdf',rows);
+    const s=h.sheets[0];assert.equal(s.tables.items[0].count,236);s.cells[239][2]='last edited';
+    const draft=await h.review.read('chat','large');assert.equal(draft.rows.length,236);assert.equal(draft.rows[235].target.company_name,'last edited');
+    const target=(await h.review.preprocessTargets('chat','large'))[2],snapshot=await h.review.readPreprocess('chat','large',target);
+    await h.review.writePreprocess('chat','large',snapshot,snapshot.values.map(r=>r[2].toUpperCase()));
+    const saved=await h.review.read('chat','large');await h.review.markSaved('chat','large',saved.rows);
+    assert.equal((await h.review.read('chat','large')).baseline.length,236);assert.equal(s.cells[239][2],'LAST EDITED');
 });

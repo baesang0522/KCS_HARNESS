@@ -9,7 +9,9 @@ from pydantic import Field, model_validator
 
 from prompts.loader import load_agent_prompt
 from services.documents.schemas import DocumentLink, DocumentWorkspace
+from services.documents.chunks import flatten_sources, group_sources, next_source_chunk
 from services.documents.service import find_document
+from services.documents.tables import is_model_table, split_model_cell, split_company_name
 from services.errors import ConflictError, DocumentError, ModelProcessingError
 from services.operations.schemas import ColumnId, StrictModel, WorkspaceColumn, WorkspaceContext
 from services.recommendation.model_io import ask
@@ -31,7 +33,7 @@ RequiredText = Annotated[str, Field(min_length=1, max_length=1000, pattern=r"\S"
 class SupplierTarget(StrictModel):
     kind: Literal["supplier"]
     group: RequiredText
-    category: RequiredText
+    category: str = Field(max_length=1000)
     company_name: RequiredText
 
 
@@ -65,8 +67,8 @@ class ReviewRow(StrictModel):
 
 class SaveReview(StrictModel):
     revision: int = Field(ge=0)
-    expected_rows: list[ReviewRow] = Field(max_length=100)
-    rows: list[ReviewRow] = Field(max_length=100)
+    expected_rows: list[ReviewRow]
+    rows: list[ReviewRow]
 
 
 class Candidate(StrictModel):
@@ -78,7 +80,8 @@ class Candidate(StrictModel):
 
 
 class Extraction(StrictModel):
-    conditions: list[Candidate] = Field(max_length=50)
+    conditions: list[Candidate]
+    continuation_sources: list[SourceReference] = Field(default_factory=list)
     warnings: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=10)
 
 
@@ -132,7 +135,7 @@ class ConditionInput(StrictModel):
 class SaveInvestigation(StrictModel):
     revision: int = Field(ge=0)
     goal: str = Field(min_length=1, max_length=2000)
-    conditions: list[ConditionInput] = Field(max_length=100)
+    conditions: list[ConditionInput]
     active_condition_id: UUID | None = None
     workspace: WorkspaceContext | None = None
     bind_workspace: bool = False
@@ -151,11 +154,6 @@ def same_workspace(left, right):
 def check_revision(state, revision):
     if state.revision != revision:
         raise ConflictError("조사 조건이 갱신됐습니다. 새로 불러온 뒤 다시 저장하세요.")
-
-
-def validate_size(state):
-    if len(state.conditions) > 100 or len(state.model_dump_json().encode("utf-8")) > 64000:
-        raise DocumentError("조사 조건은 최대 100개·64KB입니다. 조건을 정리하거나 새 대화를 시작하세요.")
 
 
 def invalidate_document(conversation, document_id):
@@ -233,7 +231,6 @@ def save_investigation(conversation, payload):
     next_state.conditions = conditions
     next_state.active_condition_id = payload.active_condition_id
     next_state.revision += 1
-    validate_size(next_state)
     conversation.investigation = next_state
     return next_state
 
@@ -253,6 +250,34 @@ def evidence_sources(document):
     return pages, sources
 
 
+def model_table_extraction(document):
+    readable = [page for page in document.pages if page.readable]
+    if not readable or any(not page.tables or not all(is_model_table(t) for t in page.tables) for page in readable):
+        return None
+    conditions, warnings = [], []
+    for page in readable:
+        for table in page.tables:
+            for row in table.rows:
+                for category, value in zip(table.headers[1:], row[1:]):
+                    if not value.strip():
+                        continue
+                    model, note = split_model_cell(value)
+                    if not model:
+                        return None
+                    target = ItemTarget(kind="item", group=category, hs_codes=[], specification=model, requirements=note)
+                    title, description = target_description(target)
+                    quote = f"{table.headers[0]} {row[0]} / {category}: {value}"
+                    conditions.append(Condition(title=title, description=description, target=target,
+                        source_document_id=document.document_id, source_pages=[page.page_number],
+                        evidence=[Evidence(document_id=document.document_id, filename=document.filename,
+                                           page_number=page.page_number, quote=quote)]))
+        for line in page.text.splitlines():
+            if not line.startswith('|') and any(word in line for word in ['판독 유의', '원본 확인', '원본 대조', '잘림', '가려짐']):
+                if line not in warnings:
+                    warnings.append(line)
+    return conditions, warnings
+
+
 async def extract_conditions(conversation, payload, runtime, request_id):
     state = conversation.investigation
     check_revision(state, payload.revision)
@@ -263,42 +288,79 @@ async def extract_conditions(conversation, payload, runtime, request_id):
     if document.link and document.link.workspace and state.workspace and not same_workspace(
             document.link.workspace.model_dump(), state.workspace.model_dump()):
         raise ConflictError("문서와 조사의 연결 작업표가 다릅니다. 연결을 확인하세요.")
-    pages, sources = evidence_sources(document)
-    prompt = load_agent_prompt(Path(__file__).resolve().parents[1] / "prompts/investigation.yml").render()
-    data = {"goal": state.goal, "filename": document.filename, "pages": pages,
-            "response_schema": Extraction.model_json_schema()}
-    # shortcut: 첫 PoC는 문서 전체를 한 번에 읽는다. 큰 문서가 필요하면 근거를 유지하는 분할 추출을 추가한다.
-    if len((prompt + json.dumps(data, ensure_ascii=False)).encode("utf-8")) > 48000:
-        raise DocumentError("조사 조건 추출 입력이 48KB를 넘습니다. 필요한 부분으로 PDF를 나눠 첨부하세요. 본문은 임의로 생략하지 않습니다.")
-    try:
-        extracted = await asyncio.wait_for(
-            ask(runtime.advice_model, prompt, "conditions", data, Extraction),
-            timeout=runtime.settings.llm.timeout_seconds + 10)
-    except Exception as error:
-        raise ModelProcessingError("조사 조건 응답을 확인하지 못했습니다. 조건은 저장하지 않았습니다. 다시 읽어 주세요.") from error
     next_state = state.model_copy(deep=True)
-    for candidate in extracted.conditions:
-        if not candidate.title.strip() or not candidate.description.strip():
-            raise ModelProcessingError("빈 조사 조건이 반환되어 저장하지 않았습니다.")
-        evidence = []
-        for item in candidate.evidence:
-            quote = sources.get((item.page_number, item.source_id))
-            if quote is None:
-                raise ModelProcessingError(
-                    f"AI가 ‘{candidate.title}’의 근거 위치를 잘못 지정했습니다 "
-                    f"({item.page_number}쪽, 구절 {item.source_id}). PDF는 유지했으며 조건은 저장하지 않았습니다. 추출 다시 시도를 눌러 주세요.")
-            evidence.append(Evidence(page_number=item.page_number, quote=quote,
-                                     document_id=document.document_id, filename=document.filename))
-        next_state.conditions.append(Condition(**candidate.model_dump(exclude={"evidence"}), evidence=evidence,
-            source_document_id=document.document_id, source_pages=sorted({item.page_number for item in evidence})))
+    catalog = model_table_extraction(document)
+    if catalog is not None:
+        conditions, warnings = catalog
+        next_state.conditions.extend(conditions)
+    else:
+        pages, sources = evidence_sources(document)
+        prompt = load_agent_prompt(Path(__file__).resolve().parents[1] / "prompts/investigation.yml").render()
+        entries = flatten_sources(pages)
+        offset, context, warnings, seen = 0, [], [], set()
+        while offset < len(entries):
+            if request_id in conversation.cancelled_requests:
+                raise ConflictError("사용자가 조사 조건 읽기를 중지했습니다.")
+            base = {"goal": state.goal, "filename": document.filename, "context_pages": group_sources(context)}
+            try:
+                batch = next_source_chunk(entries, offset, prompt, base, Extraction)
+            except ValueError as error:
+                raise ModelProcessingError("이어 읽을 공통 근거를 AI 요청에 구성하지 못했습니다. 조건은 저장하지 않았습니다. 다시 읽어 주세요.") from error
+            data = {**base, "pages": group_sources(batch), "has_more": offset + len(batch) < len(entries)}
+            try:
+                extracted = await asyncio.wait_for(
+                    ask(runtime.advice_model, prompt, "conditions", data, Extraction),
+                    timeout=runtime.settings.llm.timeout_seconds + 10)
+            except Exception as error:
+                raise ModelProcessingError("조사 조건 응답을 확인하지 못했습니다. 조건은 저장하지 않았습니다. 다시 읽어 주세요.") from error
+            available = {(item["page_number"], item["source_id"]): item for item in [*context, *batch]}
+            current = {(item["page_number"], item["source_id"]) for item in batch}
+            for candidate in extracted.conditions:
+                if not candidate.title.strip() or not candidate.description.strip():
+                    raise ModelProcessingError("빈 조사 조건이 반환되어 저장하지 않았습니다.")
+                references = {(item.page_number, item.source_id) for item in candidate.evidence}
+                evidence = []
+                for item in candidate.evidence:
+                    quote = sources.get((item.page_number, item.source_id))
+                    if (item.page_number, item.source_id) not in available:
+                        raise ModelProcessingError(
+                            f"AI가 ‘{candidate.title}’의 근거 위치를 잘못 지정했습니다 "
+                            f"({item.page_number}쪽, 구절 {item.source_id}). PDF는 유지했으며 조건은 저장하지 않았습니다. 추출 다시 시도를 눌러 주세요.")
+                    evidence.append(Evidence(page_number=item.page_number, quote=quote,
+                                             document_id=document.document_id, filename=document.filename))
+                # Context is repeated for interpretation, not for extracting the same rows again.
+                if not references & current:
+                    continue
+                if isinstance(candidate.target, SupplierTarget):
+                    names = split_company_name(candidate.target.company_name)
+                    if names:
+                        candidate.target.category, candidate.target.company_name = names
+                key = (candidate.target.model_dump_json(), tuple(sorted(references)))
+                if key in seen:
+                    continue
+                seen.add(key)
+                next_state.conditions.append(Condition(**candidate.model_dump(exclude={"evidence"}), evidence=evidence,
+                    source_document_id=document.document_id, source_pages=sorted({item.page_number for item in evidence})))
+            carried = []
+            for reference in extracted.continuation_sources:
+                key = (reference.page_number, reference.source_id)
+                if key not in available:
+                    raise ModelProcessingError("AI가 이어 읽을 원문 근거를 잘못 지정했습니다. 조건은 저장하지 않았습니다. 다시 읽어 주세요.")
+                if available[key] not in carried:
+                    carried.append(available[key])
+            # Keep the boundary source too, so a wrapped name or sentence can continue.
+            if batch[-1] not in carried:
+                carried.append(batch[-1])
+            context = carried
+            warnings.extend(warning for warning in extracted.warnings if warning not in warnings)
+            offset += len(batch)
     if request_id in conversation.cancelled_requests:
         raise ConflictError("사용자가 조사 조건 읽기를 중지했습니다.")
     next_state.extracted_conditions[document_id] = [item.model_copy(deep=True) for item in next_state.conditions
                                                    if belongs_to_document(item, document_id)]
-    next_state.document_notes[document_id] = extracted.warnings + [
+    next_state.document_notes[document_id] = warnings + [
         f"{page.page_number}쪽은 읽을 수 있는 텍스트가 없습니다." for page in document.pages if not page.readable]
     next_state.revision += 1
-    validate_size(next_state)
     conversation.investigation = next_state
     return next_state
 
@@ -408,6 +470,5 @@ def save_review(conversation, document_id, payload):
     if next_state.active_condition_id not in {item.condition_id for item in next_state.conditions}:
         next_state.active_condition_id = None
     next_state.revision += 1
-    validate_size(next_state)
     conversation.investigation = next_state
     return next_state

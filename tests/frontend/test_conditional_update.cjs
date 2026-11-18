@@ -1,11 +1,11 @@
 const test=require('node:test'), assert=require('node:assert/strict');
 const {createDOM}=require('../helpers/taskpane_dom.cjs');
 const {createInvestigationHost}=require('../helpers/investigation_host.cjs');
-async function fixture(rows) {
+async function fixture(rows, scopeRows = 1) {
     const h=createDOM(), host=createInvestigationHost();
     const f=host.workspace(['id','제품 설명','검토메모'],rows || [[1,'AB-12 ONE','old'],[2,'OTHER','=1+1'],[3,'AB-12 TWO','manual']]);
     // A previous task selected only one row and saved a different filter.
-    let stored={...f.work,workspace_id:'work',target:{...f.target,row_count:1},
+    let stored={...f.work,workspace_id:'work',target:{...f.target,row_count:scopeRows},
         row_filter:{column_id:f.work.columns[1].column_id,operator:'equals',value:'old'}};
     let busy=false, controller, job;const completed=[], requests=[];
     h.sandbox.Excel=host.Excel;h.sandbox.Office={context:{requirements:{isSetSupported:()=>true}}};
@@ -26,12 +26,12 @@ async function fixture(rows) {
         setBusy:v=>{busy=v;controller?.setBusy(v);},complete:text=>completed.push(text),enterConversation(){}});
     const node=id=>h.document.getElementById(id);
     await node('work-restore').emit('click');
-    const operation={kind:'set',column_ids:[f.work.columns[0].column_id],assigned_value:'재확인',rules:[],delimiter:null,
+    const operation={kind:'set',condition_scope:'all',column_ids:[f.work.columns[0].column_id],assigned_value:'재확인',rules:[],delimiter:null,
         condition:{column_id:f.work.columns[0].column_id,operator:'contains',value:'AB-12'},
         destination_column_id:f.work.columns[1].column_id};
     return {...f,h,host,controller,node,operation,requests,completed,getStored:()=>stored};
 }
-test('explicit condition previews the whole current table, hides grouping/settings, and updates only matching existing cells',async()=>{
+test('explicit all-scope condition previews the whole current table, hides grouping/settings, and updates only matching existing cells',async()=>{
     const f=await fixture(), before=structuredClone(f.sheet.cells);
     await f.controller.configure(f.operation);await f.controller.previewOperation();
     assert.deepEqual(f.sheet.cells,before,'preview must not write');
@@ -41,7 +41,8 @@ test('explicit condition previews the whole current table, hides grouping/settin
     assert.match(f.node('op-condition').textContent,/제품 설명.*AB-12.*검토메모.*재확인/);
     assert.match(f.node('op-summary').textContent,/2행 중 2행/);
     assert.equal(f.requests.find(r=>r.url==='/operation-jobs').body.row_count,3);
-    assert.deepEqual(f.requests.find(r=>r.url==='/operation-jobs').body.row_filter,f.operation.condition);
+    assert.equal(f.requests.find(r=>r.url==='/operation-jobs').body.row_filter,null);
+    assert.equal(f.requests.find(r=>r.url==='/operation-jobs').body.operation.condition_scope,'all');
     await f.node('op-apply').emit('click');
     assert.deepEqual(f.sheet.cells.slice(1).map(r=>r[2]),['재확인','=1+1','재확인']);
     assert.equal(f.table.columns.items.length,3);
@@ -102,4 +103,58 @@ test('3092 current rows are checked despite a one-row cached target',async()=>{
     await f.node('op-apply').emit('click');
     assert.equal(f.sheet.cells.slice(1).filter(r=>r[2]==='재확인').length,1546);
     assert.equal(f.sheet.cells.slice(1).filter(r=>r[2]==='keep').length,1546);
+});
+
+test('current scope intersects the existing row range, existing filter and new condition; all bypasses only for that request',async()=>{
+    const rows=[[1,'AB-12 ONE','old'],[2,'AB-12 TWO','keep'],[3,'OTHER','old'],[4,'AB-12 FOUR','old']];
+    for(const scope of ['current','all']) {
+        const f=await fixture(rows,3);f.operation.condition_scope=scope;
+        await f.controller.configure(f.operation);await f.controller.previewOperation();
+        assert.match(f.node('op-condition').textContent,scope==='current'?/현재 작업 범위 안에서/:/작업표 전체에서/);
+        const job=f.requests.find(r=>r.url==='/operation-jobs').body;
+        assert.equal(job.row_count,scope==='current'?3:4);
+        assert.equal(job.row_filter?.value,scope==='current'?'old':undefined);
+        await f.node('op-apply').emit('click');
+        assert.deepEqual(f.sheet.cells.slice(1).map(r=>r[2]),scope==='current'?['재확인','keep','old','old']:['재확인','재확인','old','재확인']);
+        assert.equal(f.getStored().row_filter.value,'old');
+        assert.equal(f.getStored().target.row_count,3,'explicit whole-table request must preserve the saved current range');
+        if(scope==='all') {
+            f.sheet.cells[1][2]='old';f.sheet.cells[4][2]='old';
+            await f.controller.configure({...f.operation,condition_scope:'current',assigned_value:'후속'});
+            await f.controller.previewOperation();await f.node('op-apply').emit('click');
+            assert.equal(f.sheet.cells[1][2],'후속');assert.equal(f.sheet.cells[4][2],'old');
+        }
+    }
+});
+test('omitted scope keeps the current range and rereads manually changed filter values on the next request',async()=>{
+    const f=await fixture([[1,'AB-12','old'],[2,'AB-12','keep']],2);delete f.operation.condition_scope;
+    await f.controller.configure(f.operation);await f.controller.previewOperation();await f.node('op-apply').emit('click');
+    assert.deepEqual(f.sheet.cells.slice(1).map(r=>r[2]),['재확인','keep']);
+    f.sheet.cells[2][2]='old';await f.controller.configure(f.operation);await f.controller.previewOperation();
+    await f.node('op-apply').emit('click');assert.deepEqual(f.sheet.cells.slice(1).map(r=>r[2]),['재확인','재확인']);
+});
+test('changes to the inherited filter after preview reject writes, even when the new condition did not change',async()=>{
+    for(const index of [1,2]) {
+        const f=await fixture([[1,'AB-12','old'],[2,'AB-12','keep']],2);f.operation.condition_scope='current';
+        await f.controller.configure(f.operation);await f.controller.previewOperation();
+        f.sheet.cells[index][2]=index===1?'manual':'old';const before=structuredClone(f.sheet.cells);
+        await f.node('op-apply').emit('click');assert.deepEqual(f.sheet.cells,before);assert.match(f.completed.at(-1),/바뀌/);
+    }
+});
+test('current-scope writes can change the new condition column or the column shared by both conditions',async()=>{
+    for(const shared of [false,true]) {
+        const f=await fixture([[1,'AB-12','old'],[2,'AB-12','keep']],2);f.operation.condition_scope='current';
+        if(shared){f.operation.column_ids=[f.operation.destination_column_id];f.operation.condition={column_id:f.operation.destination_column_id,operator:'contains',value:'ol'};}
+        else f.operation.destination_column_id=f.operation.column_ids[0];
+        await f.controller.configure(f.operation);await f.controller.previewOperation();await f.node('op-apply').emit('click');
+        assert.equal(f.sheet.cells[1][shared?2:1],'재확인');assert.equal(f.sheet.cells[2][shared?2:1],shared?'keep':'AB-12');
+        assert.doesNotMatch(f.completed.at(-1),/일부 반영|바뀌었습니다/);
+    }
+});
+test('current scope processes beyond 10,000 rows including the last matching row',async()=>{
+    const count=10002,f=await fixture(Array.from({length:count},(_,i)=>[i+1,'AB-12',i%2?'old':'keep']),count);
+    f.operation.condition_scope='current';await f.controller.configure(f.operation);await f.controller.previewOperation();
+    await f.node('op-apply').emit('click');assert.equal(f.sheet.cells[count][2],'재확인');
+    assert.equal(f.sheet.cells.slice(1).filter(r=>r[2]==='재확인').length,5001);
+    assert.equal(f.sheet.cells.slice(1).filter(r=>r[2]==='keep').length,5001);
 });

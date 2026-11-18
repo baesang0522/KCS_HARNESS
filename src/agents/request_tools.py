@@ -123,16 +123,19 @@ def build_request_tools(task_context: dict):
     @tool
     def update_matching_rows(condition_column_id: str,
                              operator: Literal["equals", "not_equals", "contains", "blank", "not_blank"],
-                             value: str, destination_column_id: str, assigned_value: str) -> dict:
+                             value: str, destination_column_id: str, assigned_value: str,
+                             scope: Literal["current", "all"] = "current") -> dict:
         """명확한 단일 조건에 맞는 행의 기존 열 값만 변경하는 미리보기를 준비한다.
         조건 열과 반영할 기존 열의 실제 ID를 각각 전달한다. 같은 열도 가능하다.
+        그중에서/현재 대상 안에서는 scope=current, 전체 작업표에서 다시 찾기는 scope=all이다.
+        범위 지정이 없으면 current를 사용한다. 현재 범위와 새 조건은 함께 적용한다.
         문자열 포함은 contains, 전체 값 일치는 equals이며 공백·대소문자를 구분한다.
         맞지 않는 행은 유지한다. 비슷한 회사 판단, 새 열 생성, 복합 조건에는 사용하지 않는다.
         """
         result = card(kind="set", column_ids=[condition_column_id],
                       condition=dict(column_id=condition_column_id, operator=operator, value=value),
-                      destination_column_id=destination_column_id, assigned_value=assigned_value)
-        result["answer"] = "조건에 맞는 행을 찾아 변경 내용을 준비할게요. 미리보기를 확인하고 적용하면 기존 열에 반영됩니다."
+                      destination_column_id=destination_column_id, assigned_value=assigned_value, condition_scope=scope)
+        result["answer"] = ("작업표 전체에서" if scope == "all" else "현재 작업 범위 안에서") + " 조건에 맞는 행의 변경 내용을 준비할게요. 미리보기를 확인하고 적용하면 기존 열에 반영됩니다."
         return result
 
     @tool

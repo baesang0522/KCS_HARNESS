@@ -193,10 +193,7 @@ class InvestigationConditionTests(unittest.TestCase):
         result = self.client.post(f'/conversations/{other}/investigation/extractions/{uuid4()}', json=dict(document_id=self.did, revision=0))
         self.assertEqual(result.status_code, 404)
 
-    def test_large_input_and_invalid_model_output_do_not_create_partial_conditions(self):
-        self.conversation.documents[self.did].pages[0].text = '가' * 20000
-        self.assertEqual(self.extract().status_code, 422)
-        self.assertEqual(self.calls, [])
+    def test_invalid_model_output_does_not_create_partial_conditions(self):
         self.conversation.documents[self.did].pages[0].text = '조건'
         self.app.state.runtime.advice_model.ainvoke = AsyncMock(return_value=AIMessage(content='잘못된 JSON'))
         self.assertEqual(self.extract().status_code, 502)
@@ -343,6 +340,21 @@ class InvestigationConditionTests(unittest.TestCase):
         self.assertEqual(self.extract().status_code, 502)
         self.assertEqual(self.read()['conditions'], [])
 
+
+    def test_bilingual_supplier_names_are_split_only_on_initial_extraction(self):
+        names=[('바오 스틸','Baoshan Iron & Steel Co., Ltd.'),('우한 스틸','Wuhan Iron & Steel Co., Ltd.'),
+               ('메이산 스틸','Shanghai Meishan Iron & Steel Co., Ltd.'),('바오스틸 짠장','Baosteel Zhanjiang Iron & Steel Co., Ltd.'),
+               ('산동 르자오','Shandong Iron And Steel Group Rizhao Co., Ltd.')]
+        self.output={'conditions':[dict(title=ko,description='제조사 또는 관계회사 '+ko+'('+en+')',
+            target=dict(kind='supplier',group='1',category='회사',company_name=ko+'('+en+')'),
+            evidence=[dict(page_number=1,source_id=1)],uncertainty='') for ko,en in names],'warnings':[]}
+        response=self.extract();self.assertEqual(response.status_code,200,response.text)
+        rows=response.json()['reviews'][self.did]
+        self.assertEqual([(row['target']['category'],row['target']['company_name']) for row in rows],names)
+        changed=copy.deepcopy(rows);changed[0]['target']['category']='사용자 표기'
+        saved=self.client.put(self.base+'/reviews/'+self.did,json=dict(revision=response.json()['revision'],expected_rows=rows,rows=changed))
+        self.assertEqual(saved.status_code,200,saved.text)
+        self.assertEqual(self.extract().json()['reviews'][self.did][0]['target']['category'],'사용자 표기')
 
 class InvestigationCancellationTests(unittest.IsolatedAsyncioTestCase):
     async def test_cancel_extraction_preserves_document_and_existing_state(self):

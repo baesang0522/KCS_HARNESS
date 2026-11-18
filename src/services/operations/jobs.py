@@ -46,8 +46,8 @@ class CreateOperationJob(StrictModel):
     @model_validator(mode="after")
     def validate_scope(self):
         self.operation.validate_ready()
-        if self.operation.condition and self.row_filter != self.operation.condition:
-            raise ValueError("조건부 값 변경의 행 조건이 누락되거나 바뀌었습니다.")
+        if self.operation.condition and self.operation.condition_scope == "all" and self.row_filter is not None:
+            raise ValueError("전체 범위 요청에는 기존 행 필터를 적용하지 않습니다.")
         if self.operation.kind == "extract" and (
             self.model_spec_column_id is None
             or self.operation.column_ids != [self.model_spec_column_id]
@@ -283,8 +283,10 @@ def operation_history_context(
             "executed_range": {
                 "first_excel_row": job.source.row_start + 1,
                 "row_count": job.source.row_count,
-                **({"row_filter": job.source.row_filter.model_dump(),
-                    "matching_row_count": job.selected_count} if job.source.row_filter else {}),
+                **({"row_filter": job.source.row_filter.model_dump()} if job.source.row_filter else {}),
+                **({"condition": operation.condition.model_dump(), "condition_scope": operation.condition_scope}
+                   if operation.condition else {}),
+                **({"matching_row_count": job.selected_count} if job.source.row_filter or operation.condition else {}),
             },
         })
 

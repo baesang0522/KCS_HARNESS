@@ -30,12 +30,13 @@
         });
         return result;
     }
-    async function scope(context, info, target, filter, progress, check, ownChanges, limit, identityFilter) {
+    async function scope(context, info, target, filter, progress, check, ownChanges, limit, identityFilter, condition) {
         if (target.row_count < 1 || target.row_count > 400000 || target.row_start < info.body.rowIndex ||
             target.row_start + target.row_count > info.body.rowIndex + info.body.rowCount) {
             throw new Error('현재 행 범위를 다시 선택하세요.');
         }
-        var columns = filter ? table.selectedColumns(info, [filter.column_id]) : [];
+        var filterIds = Array.from(new Set([filter, condition].filter(Boolean).map(function (f) { return f.column_id; })));
+        var columns = table.selectedColumns(info, filterIds);
         var rows = [], seen = new Set();
         for (var offset = 0; offset < target.row_count; offset += batchSize) {
             check();
@@ -46,13 +47,23 @@
                     throw new Error('원본 행 식별값이 없거나 중복되었습니다. 추가·복사한 행을 확인하세요.');
                 }
                 seen.add(row.identity);
-                var value = filter ? row.values[0] : '';
-                var own = ownChanges && ownChanges.get(row.identity);
-                if (own) {
-                    if (value !== own.after) throw new Error('작성 중 조건 열의 값이 바뀌었습니다. 결과를 확인하세요.');
-                    value = own.before;
+                function filterValue(f) {
+                    if (!f) return '';
+                    var value = row.values[filterIds.indexOf(f.column_id)];
+                    var own = ownChanges && ownChanges.get(row.identity);
+                    if (own && own.column_id === f.column_id) {
+                        if (value !== own.after) throw new Error('작성 중 조건 열의 값이 바뀌었습니다. 결과를 확인하세요.');
+                        value = own.before;
+                    }
+                    return value;
                 }
-                if ((!limit || rows.length < limit) && (!identityFilter || identityFilter.has(row.identity)) && matches(value, filter)) rows.push({excel_row: row.excel_row, identity: row.identity, filter_value: value});
+                var value = filterValue(filter), conditionValue = filterValue(condition);
+                if ((!limit || rows.length < limit) && (!identityFilter || identityFilter.has(row.identity)) &&
+                    matches(value, filter) && matches(conditionValue, condition)) {
+                    var selected = {excel_row: row.excel_row, identity: row.identity, filter_value: value};
+                    if (condition) selected.condition_value = conditionValue;
+                    rows.push(selected);
+                }
             });
             progress('행 조건 확인', offset + part.length, target.row_count);
             if (limit && rows.length >= limit) break;
@@ -83,14 +94,15 @@
         }
         return rows;
     }
-    async function read(workspace, target, ids, progress, check, outputId, limit, identities) {
+    async function read(workspace, target, ids, progress, check, outputId, limit, identities, condition) {
         window.workspaceSheet.requireExcel('1.9');
         progress = progress || function () {}; check = check || function () {};
         return Excel.run(async function (context) {
             var info = await table.layout(context, workspace);
             var filter = workspace.row_filter ? Object.assign({}, workspace.row_filter) : null;
+            condition = condition ? Object.assign({}, condition) : null;
             var identityFilter = identities ? new Set(identities) : null;
-            var selected = await scope(context, info, target, filter, progress, check, null, limit, identityFilter);
+            var selected = await scope(context, info, target, filter, progress, check, null, limit, identityFilter, condition);
             if (identityFilter && selected.length !== identityFilter.size) throw new Error("선택한 묶음의 행이 삭제되었거나 범위에서 빠졌습니다. 현재 값을 다시 불러오세요.");
             if (!selected.length) throw new Error('조건에 맞는 행이 없습니다. 작업 범위를 바꿔 주세요.');
             if (selected.length * ids.length > 2000000) throw new Error('한 번에 최대 200만 셀을 읽습니다. 대상 행이나 열을 줄여 주세요.');
@@ -98,13 +110,13 @@
             if ((await table.layout(context, workspace)).stamp !== info.stamp) throw new Error('읽는 동안 표 구성이 바뀌었습니다.');
             check();
             return {workspace: workspace, target: {row_start: target.row_start, row_count: target.row_count},
-                identity_filter: identities || null, row_filter: filter, scope_rows: selected, columns: table.selectedColumns(info, ids), rows: rows,
+                identity_filter: identities || null, row_filter: filter, condition: condition, scope_rows: selected, columns: table.selectedColumns(info, ids), rows: rows,
                 stamp: info.stamp, row_start: target.row_start, output_column_id: outputId || null,
                 output_columns: info.columns.filter(function (c) { return c.column_id !== info.identity.column_id; })};
         });
     }
     async function verify(context, info, snapshot, expected, ownChanges, progress) {
-        var selected = await scope(context, info, snapshot.target, snapshot.row_filter, progress, function () {}, ownChanges, null, snapshot.identity_filter ? new Set(snapshot.identity_filter) : null);
+        var selected = await scope(context, info, snapshot.target, snapshot.row_filter, progress, function () {}, ownChanges, null, snapshot.identity_filter ? new Set(snapshot.identity_filter) : null, snapshot.condition);
         if (JSON.stringify(selected) !== JSON.stringify(snapshot.scope_rows)) throw new Error('조건에 맞는 행이나 행 순서가 바뀌었습니다. 미리보기를 다시 만드세요.');
         var rows = await readRows(context, info, selected, snapshot.columns.map(function (c) { return String(c.column_id); }),
             snapshot.output_column_id, progress, function () {});
@@ -194,7 +206,9 @@
                             if (String(column.column_id) === output.column_id) expected[k].values[j] = values[k][0];
                         });
                         if (snapshot.row_filter && snapshot.row_filter.column_id === output.column_id) {
-                            ownChanges.set(expected[k].identity, {before: snapshot.scope_rows[k].filter_value, after: values[k][0]});
+                            ownChanges.set(expected[k].identity, {column_id: output.column_id, before: snapshot.scope_rows[k].filter_value, after: values[k][0]});
+                        } else if (snapshot.condition && snapshot.condition.column_id === output.column_id) {
+                            ownChanges.set(expected[k].identity, {column_id: output.column_id, before: snapshot.scope_rows[k].condition_value, after: values[k][0]});
                         }
                     }
                     progress('결과 작성', run.offset + run.selected, values.length);
