@@ -68,15 +68,23 @@
                 abort = new AbortController();
                 options.setBusy(true);
 
+                var readWorkspace = workspace, readTarget = target;
+                if (operation.condition) {
+                    readWorkspace = Object.assign({}, workspace, {row_filter: operation.condition});
+                    readTarget = await Excel.run(async function (context) {
+                        var info = await window.workspaceTable.layout(context, workspace);
+                        return {row_start: info.body.rowIndex, row_count: info.body.rowCount};
+                    });
+                }
                 job = await options.jobs.create(
-                    workspace,
-                    target,
+                    readWorkspace,
+                    readTarget,
                     operation
                 );
                 check();
                 var ids = operation.column_ids.concat(operation.kind === "group" ? [operation.value_column_id] : []);
                 var destination = ui.destination ? ui.destination() : null;
-                var snapshot = await sheet.read(workspace, target, ids, progress, check, destination);
+                var snapshot = await sheet.read(readWorkspace, readTarget, ids, progress, check, destination);
                 var values = [], changed = 0, headers = [];
                 var size = operation.kind === "group" ? snapshot.rows.length : 10000;
                 // ponytail: 미리보기는 창 메모리에 보관. 200만 결과 셀을 넘으면 범위를 줄인다.
@@ -119,7 +127,9 @@
                     names: headers,
                     changed: changed
                 };
-                ui.preview(preview); options.status("변경 내용과 결과 위치를 확인하세요. 기존 열을 선택하면 해당 열의 대상 셀 값이 바뀝니다.");
+                ui.preview(preview); options.status(operation.condition
+                    ? "변경 내용을 확인하고 적용하세요. 조건을 바꾸려면 채팅으로 요청하세요."
+                    : "변경 내용과 결과 위치를 확인하세요. 기존 열을 선택하면 해당 열의 대상 셀 값이 바뀝니다.");
             } catch (error) {
                 if (job) {
                     try {
@@ -311,6 +321,7 @@
             reconcile: function (work, next, fallback) { workspace = work; target = next; invalidate(); return ui.reconcile(work.columns, fallback, work.task_type); },
             show: function (work, next, preferred, resetMode) { workspace = work; target = next; invalidate(); ui.show(work.columns, preferred || [], work.task_type, resetMode); },
             configure: function (operation) { invalidate(); ui.configure(operation); },
+            preview: build,
             recommendExtraction: recommendExtraction,
             sampleRows: sampleRows,
             targets: ui.targets,

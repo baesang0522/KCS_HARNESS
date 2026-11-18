@@ -3,6 +3,7 @@ from langchain_core.tools import tool
 from services.errors import SHARED_MESSAGES
 from services.operations.schemas import Mapping, Operation, Rule, extraction_column_id
 from services.similarity import SimilaritySelection
+from services.group_review import GroupReviewRequest
 from services.recommendation.service import resolve_advice_columns, resolve_columns
 
 
@@ -18,7 +19,8 @@ def build_request_tools(task_context: dict):
             column["column_id"]
             for column in workspace["columns"]
         }
-        if not set(operation.input_column_ids) <= known_ids:
+        referenced = operation.input_column_ids + ([operation.destination_column_id] if operation.destination_column_id else [])
+        if not set(referenced) <= known_ids:
             raise ValueError("현재 작업시트에 없는 열입니다.")
 
         return {
@@ -77,12 +79,16 @@ def build_request_tools(task_context: dict):
         A열의 마지막 단어가 B열에 있으면 추출하는 요청은 formula이며 두 입력 열 ID를 지정한다.
         현재 작업 시트가 있어도 사용자가 업무 전환을 명시하면 사용한다.
         같은 업무 안의 전처리, 치환, 분리 요청에는 사용하지 않는다."""
+        answer = "작업할 범위를 선택하고 설정을 확인해 주세요."
         if task_type == "formula" and workspace:
             if not input_column_ids:
                 raise ValueError("수식에 사용할 입력 열을 실제 열 ID로 지정하세요. 모호하면 ask_user로 확인하세요.")
             resolve_columns(workspace, input_column_ids)
             if len(input_column_ids) > 20:
                 raise ValueError("수식 입력은 최대 20열입니다.")
+            names = [next(column.get("header", column["column_id"]) for column in workspace["columns"]
+                          if str(column["column_id"]) == column_id) for column_id in input_column_ids]
+            answer = "작업표의 ‘" + " · ".join(names) + "’ 열을 찾아 현재 데이터 전체 행으로 수식을 준비합니다. Excel에서 열을 따로 선택할 필요는 없습니다. 적용 전에 결과를 확인해 주세요."
         elif input_column_ids is not None:
             raise ValueError("작업 표의 수식 요청에만 입력 열 ID를 지정하세요.")
         return {
@@ -90,13 +96,39 @@ def build_request_tools(task_context: dict):
             "task_type": task_type,
             "formula_column_ids": input_column_ids,
             "operation": None,
-            "answer": "작업할 범위를 선택하고 설정을 확인해 주세요.",
+            "answer": answer,
         }
 
+    def marking_review(column_id, match_text=None, output_name=None, assigned_value=None):
+        ids = resolve_columns(workspace, [column_id]) if column_id is not None else None
+        request = GroupReviewRequest(match_text=match_text, output_name=output_name, assigned_value=assigned_value)
+        return {"intent": "group_review", "analysis_column_ids": ids, "group_review_request": request.model_dump(),
+                "answer": "대상 행을 검토하는 화면을 준비했습니다. 현재 값을 불러와 필요한 후보를 선택한 뒤 확정·반영하세요. 아직 셀은 변경하지 않았습니다."}
+
     @tool
-    def set_value(value: str, column_id: str | None = None) -> dict:
-        """현재 작업 조건에 맞는 행에 사용자가 명시한 값을 지정한다. 빈 문자열은 비우기다. 적용은 사용자가 확인한다."""
-        return card(kind="set", column_ids=[target(column_id)], assigned_value=value)
+    def set_value(value: str, column_id: str | None = None,
+                  match_text: str | None = None, output_name: str | None = None) -> dict:
+        """판단이 필요한 후보에 값을 적거나 지우려는 요청을 대상 행 검토로 연결한다.
+        명확한 단일 조건으로 기존 열을 바꾸는 요청은 update_matching_rows를 사용한다.
+        column_id는 조건을 판단할 실제 입력 열이며 새 결과 열 이름이 아니다.
+        match_text는 사용자가 말한 기준값, output_name은 요청한 새 열 이름이다.
+        비슷한/같은 후보 요청은 기준값을 그대로 전달한다. 대상 행은 사용자가 선택한다."""
+        return marking_review(column_id, match_text, output_name, value)
+
+    @tool
+    def update_matching_rows(condition_column_id: str,
+                             operator: Literal["equals", "not_equals", "contains", "blank", "not_blank"],
+                             value: str, destination_column_id: str, assigned_value: str) -> dict:
+        """명확한 단일 조건에 맞는 행의 기존 열 값만 변경하는 미리보기를 준비한다.
+        조건 열과 반영할 기존 열의 실제 ID를 각각 전달한다. 같은 열도 가능하다.
+        문자열 포함은 contains, 전체 값 일치는 equals이며 공백·대소문자를 구분한다.
+        맞지 않는 행은 유지한다. 비슷한 회사 판단, 새 열 생성, 복합 조건에는 사용하지 않는다.
+        """
+        result = card(kind="set", column_ids=[condition_column_id],
+                      condition=dict(column_id=condition_column_id, operator=operator, value=value),
+                      destination_column_id=destination_column_id, assigned_value=assigned_value)
+        result["answer"] = "조건에 맞는 행을 찾아 변경 내용을 준비할게요. 미리보기를 확인하고 적용하면 기존 열에 반영됩니다."
+        return result
 
     @tool
     def remove_words(
@@ -233,6 +265,15 @@ def build_request_tools(task_context: dict):
         }
 
     @tool
+    def open_group_review(column_id: str | None = None, match_text: str | None = None,
+                          output_name: str | None = None, assigned_value: str | None = None) -> dict:
+        """공급자·기업·모델·임의 열의 후보를 사람이 비교하고 묶기·분리·확정하는 카드를 연다.
+        같은 회사인지·모델인지 판단이 필요한 요청에 사용한다. 기준값·새 열 이름·표시값을 보존한다.
+        명확한 단일 조건으로 기존 열만 바꾸는 요청은 update_matching_rows를 사용한다.
+        값 읽기, 유사도 계산, 확정, 셀 반영은 사용자가 각각 선택한다. 자동 실행하지 않는다."""
+        return marking_review(column_id, match_text, output_name, assigned_value)
+
+    @tool
     def recommend_preprocessing(
             column_ids: list[str] | None = None,
     ) -> dict:
@@ -252,6 +293,7 @@ def build_request_tools(task_context: dict):
     if workspace:
         tools.extend([
             set_value,
+            update_matching_rows,
             remove_words,
             preprocess,
             replace_text,
@@ -260,6 +302,7 @@ def build_request_tools(task_context: dict):
             group_values,
             find_model_candidates,
             inspect_similarity,
+            open_group_review,
             recommend_preprocessing,
         ])
 

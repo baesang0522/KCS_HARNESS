@@ -208,7 +208,7 @@
     async function applyFormulaPreview(preview, selection, progress) {
         await validateFormulaPreview(preview, selection);
         var actions = preview.plan.actions;
-        var completed = 0, attempted = false, activeRange = "";
+        var completed = 0, frozen = 0, attempted = false, activeRange = "", expectedFormulas = [];
         try {
             return await Excel.run(async function (context) {
                 var sheet = context.workbook.worksheets.getItem(selection.worksheet_id);
@@ -222,35 +222,80 @@
                 // 뒤 결과가 앞 결과를 참조할 수 있으므로 결과 열 순서대로 완료한다.
                 for (var index = 0; index < targets.length; index++) {
                     var target = targets[index], action = actions[index];
-                    var anchor = sheet.getRange(action.anchor_cell);
+                    var anchor = sheet.getRange(action.anchor_cell), expectedFormula = null;
                     for (var offset = 0; offset < target.rowCount; offset += batchSize) {
                         var count = Math.min(batchSize, target.rowCount - offset);
                         var part = sheet.getRangeByIndexes(target.rowIndex + offset, target.columnIndex, count, 1);
                         activeRange = action.target_range + " 중 " + (target.rowIndex + offset + 1) +
                             "~" + (target.rowIndex + offset + count) + "행";
                         var inspection = inspectFormulaTarget(part);
+                        if (offset > 0) {
+                            part.load("formulasR1C1");
+                            anchor.load("formulasR1C1");
+                        }
                         await context.sync();
                         activeRange = part.address;
-                        if (!inspection.constants.isNullObject || !inspection.formulas.isNullObject) {
+                        if (offset > 0 && anchor.formulasR1C1[0][0] !== expectedFormula) {
+                            throw new Error("작성 중 기준 수식이 바뀌었습니다. 결과를 확인하세요.");
+                        }
+                        // 표가 먼저 채운 수식은 상대·절대 참조까지 같은 경우에만 재작성 없이 검증한다.
+                        var alreadyFilled = offset > 0 && part.formulasR1C1.every(function (row) {
+                            return row[0] === expectedFormula;
+                        });
+                        if (!inspection.constants.isNullObject || (!inspection.formulas.isNullObject && !alreadyFilled)) {
                             throw new Error("작성할 범위에 기존 값이나 수식이 있습니다.");
                         }
-                        if (progress) progress("수식 작성", completed, total);
-                        attempted = true;
-                        part.numberFormat = Array.from({length: count}, function () { return ["General"]; });
-                        if (offset === 0) {
-                            anchor.formulas = [[action.formula]];
-                            if (count > 1) anchor.autoFill(part, "FillCopy");
-                        } else {
-                            // Excel의 복사를 사용해 상대·절대·혼합 참조를 그대로 유지한다.
-                            part.copyFrom(anchor, "Formulas");
+                        if (!alreadyFilled) {
+                            if (progress) progress("수식 작성", completed, total);
+                            attempted = true;
+                            part.numberFormat = Array.from({length: count}, function () { return ["General"]; });
+                            if (offset === 0) {
+                                anchor.formulas = [[action.formula]];
+                                if (count > 1) anchor.autoFill(part, "FillCopy");
+                                anchor.load("formulasR1C1");
+                            } else {
+                                // Excel의 복사를 사용해 상대·절대·혼합 참조를 그대로 유지한다.
+                                part.copyFrom(anchor, "Formulas");
+                            }
                         }
                         part.calculate();
                         part.load("valueTypes");
                         await context.sync();
+                        if (offset === 0) {
+                            expectedFormula = anchor.formulasR1C1[0][0];
+                            expectedFormulas[index] = expectedFormula;
+                            if (typeof expectedFormula !== "string" || !expectedFormula.startsWith("=")) {
+                                throw new Error("작성한 기준 수식을 확인하지 못했습니다.");
+                            }
+                        }
                         var errors = part.valueTypes.filter(function (row) { return row[0] === "Error"; }).length;
                         if (errors) throw new Error("계산 결과에 Excel 오류가 " + errors + "개 있습니다.");
                         completed += count;
                         if (progress) progress("수식 계산 확인", completed, total);
+                    }
+                }
+                // 모든 결과 계산을 마친 뒤 고정해야 뒤 수식이 앞 결과를 참조할 수 있다.
+                for (var index = 0; index < targets.length; index++) {
+                    var target = targets[index];
+                    for (var offset = 0; offset < target.rowCount; offset += batchSize) {
+                        var count = Math.min(batchSize, target.rowCount - offset);
+                        var part = sheet.getRangeByIndexes(target.rowIndex + offset, target.columnIndex, count, 1);
+                        part.load("address,formulasR1C1,valueTypes");
+                        await context.sync();
+                        activeRange = part.address;
+                        if (part.formulasR1C1.some(function (row) { return row[0] !== expectedFormulas[index]; })) {
+                            throw new Error("결과를 저장하기 전에 수식이나 셀 값이 바뀌었습니다. 결과를 확인하세요.");
+                        }
+                        if (part.valueTypes.some(function (row) { return row[0] === "Error"; })) {
+                            throw new Error("계산 결과에 Excel 오류가 있어 값으로 저장하지 않았습니다.");
+                        }
+                        // Excel의 값 붙여넣기로 자료형과 '='로 시작하는 문자열도 그대로 보존한다.
+                        part.copyFrom(part, "Values");
+                        var remaining = part.getSpecialCellsOrNullObject("Formulas");
+                        await context.sync();
+                        if (!remaining.isNullObject) throw new Error("결과 범위에 수식이 남아 있어 값 저장을 완료하지 못했습니다.");
+                        frozen += count;
+                        if (progress) progress("결과값 저장", frozen, total);
                     }
                 }
                 return {
@@ -262,8 +307,8 @@
                 };
             });
         } catch (error) {
-            error.message = (attempted ? "일부 수식이 작성되었을 수 있습니다. " : "수식을 작성하지 않았습니다. ") +
-                "계산 확인 완료 " + completed + "셀 · 확인할 범위: " + activeRange + ". " + error.message;
+            error.message = (attempted ? "일부 결과값 또는 수식이 남아 있을 수 있습니다. " : "셀을 변경하지 않았습니다. ") +
+                "계산 확인 완료 " + completed + "셀 · 값 저장 완료 " + frozen + "셀 · 확인할 범위: " + activeRange + ". " + error.message;
             throw error;
         }
     }

@@ -23,8 +23,8 @@ function translate(formula, dr, dc) {
         return fixedCol+letters(c+(fixedCol ? 0 : dc))+fixedRow+(+row+(fixedRow ? 0 : dr));
     });
 }
-function createHost({rows=90000, sourceColumns=2, tableColumns, data}={}) {
-    const pending = [], writes = [], loads = [], occupied = new Map();
+function createHost({rows=90000, sourceColumns=2, tableColumns, data, autoFillTable=false, calculateValue}={}) {
+    const pending = [], writes = [], loads = [], occupied = new Map(), frozen = new Map(), valueCopies = [];
     const host = {writes, loads, occupied, rows, syncs: 0, beforeSync: null, errorRow: -1};
     const intersects = (a,b) => a.r < b.r+b.n && a.r+a.n > b.r && a.c < b.c+b.m && a.c+a.m > b.c;
     const context = {sync: async () => {
@@ -32,7 +32,7 @@ function createHost({rows=90000, sourceColumns=2, tableColumns, data}={}) {
         if (host.beforeSync) host.beforeSync(host);
         for (const action of pending.splice(0)) action();
     }};
-    function formulaAt(r,c) {
+    function calculatedFormulaAt(r,c) {
         for (let i=writes.length-1;i>=0;i--) {
             const w=writes[i];
             if (r>=w.r && r<w.r+w.n && c===w.c) return translate(w.formula,r-w.r,0);
@@ -40,21 +40,35 @@ function createHost({rows=90000, sourceColumns=2, tableColumns, data}={}) {
         const x=occupied.get(r+','+c);
         return x && x.formula || '';
     }
-    host.formulaAt = formulaAt;
+    function formulaAt(r,c) { return frozen.get(c)?.has(r) ? '' : calculatedFormulaAt(r,c); }
+    function valueAt(r,c) {
+        if(frozen.get(c)?.has(r))return frozen.get(c).get(r);
+        if(occupied.has(r+','+c))return occupied.get(r+','+c).value ?? '';
+        return calculateValue ? calculateValue(r,c,formulaAt(r,c),valueAt) : '#literal';
+    }
+    host.formulaAt = formulaAt; host.calculatedFormulaAt = calculatedFormulaAt;
+    host.valueAt = valueAt; host.valueCopies = valueCopies;
     function range(r,c,n,m) {
         const x={r,c,n,m,rowIndex:r,columnIndex:c,rowCount:n,columnCount:m,
             address:'Sheet1!'+letters(c)+(r+1)+(n===1&&m===1?'':':'+letters(c+m-1)+(r+n)),
             worksheet:null,
             load(properties) {
                 loads.push({properties,r,c,n,m});
-                if (/\b(text|values|formulas|valueTypes)\b/.test(properties)) assert(n*m<=20000,'unbounded cell read');
+                if (/\b(text|values|formulas|formulasR1C1|valueTypes)\b/.test(properties)) assert(n*m<=20000,'unbounded cell read');
                 pending.push(() => {
                     for (const prop of properties.split(',')) {
-                        if (['text','values','formulas','valueTypes'].includes(prop)) {
+                        if (['text','values','formulas','formulasR1C1','valueTypes'].includes(prop)) {
                             x[prop]=Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=> {
                                 if (prop==='valueTypes') return r+i===host.errorRow?'Error':'String';
                                 const existing=occupied.get((r+i)+','+(c+j));
                                 if (prop==='formulas') return formulaAt(r+i,c+j);
+                                if (prop==='formulasR1C1') {
+                                    const formula=existing ? existing.formula || existing.value || '' : formulaAt(r+i,c+j) || valueAt(r+i,c+j);
+                                    // Contract double for the A1 references used by these tests; Excel performs conversion in production.
+                                    return typeof formula==='string' && formula.startsWith('=') ? formula.replace(/(\$?)([A-Z]+)(\$?)(\d+)/g,
+                                        (_,fc,col,fr,row)=> (fr?'R'+row:'R['+(+row-1-r-i)+']') +
+                                            (fc?'C'+(bounds(col+row)[1]+1):'C['+(bounds(col+row)[1]-c-j)+']')) : formula;
+                                }
                                 if (data) return data(r+i,c+j);
                                 return existing ? existing.value||'' : '#literal';
                             }));
@@ -70,7 +84,8 @@ function createHost({rows=90000, sourceColumns=2, tableColumns, data}={}) {
                         return rr>=r && rr<r+n && cc>=c && cc<c+m &&
                             (kind==='Formulas'?!!cell.formula:cell.value!==undefined && cell.value!=='');
                     });
-                    result.isNullObject=!(explicit || kind==='Formulas' && writes.some(w=>intersects(x,{...w,m:1})));
+                    const fullyFrozen = Array.from({length:n},(_,i)=>frozen.get(c)?.has(r+i)).every(Boolean);
+                    result.isNullObject=!(explicit || kind==='Formulas' && !fullyFrozen && writes.some(w=>intersects(x,{...w,m:1})));
                 }); return result;
             },
             getCell(i,j){return range(r+i,c+j,1,1);},
@@ -81,12 +96,27 @@ function createHost({rows=90000, sourceColumns=2, tableColumns, data}={}) {
                 pending.push(()=>writes.push({r:d.r,c:d.c,n:d.n,formula:translate(formulaAt(r,c),d.r-r,d.c-c)}));
             },
             copyFrom(source,type) {
-                assert.equal(type,'Formulas'); assert(n<=1000);
+                assert(n<=1000);
+                if(type==='Values') {
+                    assert.equal(source,x,'value paste must stay within its own range');
+                    pending.push(()=>{
+                        if(host.failValueCopy && valueCopies.length===host.failValueCopy-1)throw new Error('value paste failed');
+                        const values=Array.from({length:n},(_,i)=>valueAt(r+i,c));
+                        if(!frozen.has(c))frozen.set(c,new Map());
+                        values.forEach((v,i)=>frozen.get(c).set(r+i,v));
+                        valueCopies.push({r,c,n});
+                    });return;
+                }
+                assert.equal(type,'Formulas');
                 pending.push(()=>writes.push({r,c,n,formula:translate(formulaAt(source.r,source.c),r-source.r,c-source.c)}));
             },
             calculate(){assert(n<=1000);},
         };
-        Object.defineProperty(x,'formulas',{set(value){assert.equal(value.length,1);pending.push(()=>writes.push({r,c,n:1,formula:value[0][0]}));},get(){return [[formulaAt(r,c)]];}, configurable:true});
+        Object.defineProperty(x,'formulas',{set(value){assert.equal(value.length,1);pending.push(()=>{
+            writes.push({r,c,n:1,formula:value[0][0]});
+            if(autoFillTable && tableColumns && c<tableColumns.length && r===1)
+                writes.push({r,c,n:rows,formula:value[0][0],autoFilled:true});
+        });},get(){return [[formulaAt(r,c)]];}, configurable:true});
         x.worksheet=sheet;
         return x;
     }

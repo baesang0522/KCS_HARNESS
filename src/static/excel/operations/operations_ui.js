@@ -2,7 +2,21 @@
 (function () {
     window.createOperationsUI = function () {
         function el(id) { return document.getElementById("op-" + id); }
-        var columns = [], currentTaskType = null, hasPreview = false, mapping = window.createMappingEditor();
+        var columns = [], currentTaskType = null, hasPreview = false, conditional = null, mapping = window.createMappingEditor();
+        function conditionSummary() {
+            document.getElementById("work-management").hidden = !!conditional;
+            el("condition").hidden = !conditional;
+            el("edit").textContent = conditional ? "현재 값 다시 확인" : "설정 다시 보기";
+            if (!conditional) return;
+            function name(id) { return columns.find(function (c) { return String(c.column_id) === id; }).header; }
+            var filter = conditional.condition;
+            var labels = {equals: "같음", not_equals: "다름", contains: "포함", blank: "빈칸", not_blank: "빈칸 아님"};
+            document.getElementById("work-title").textContent = "조건에 맞는 값 변경";
+            el("condition").textContent = "작업표 전체에서 ‘" + name(filter.column_id) + "’ · " + labels[filter.operator] +
+                (filter.operator.includes("blank") ? "" : " · " + JSON.stringify(filter.value)) +
+                " → ‘" + name(conditional.destination_column_id) + "’에 " + JSON.stringify(conditional.assigned_value) +
+                " 입력. 나머지 행은 유지합니다. 문자열은 대소문자와 공백을 구분합니다.";
+        }
         function extractionColumn() {
             var models = columns.filter(function (column) { return column.role === "model_spec"; });
             return models.length === 1 ? String(models[0].column_id) : "";
@@ -30,7 +44,9 @@
         function targets() {
             return el("kind").value === "group" ? Array.from(new Set(keys().concat(el("value-column").value).filter(Boolean))) : [el("column").value];
         }
-        function clear() { el("extraction-preview").hidden = true; el("settings").hidden = false; el("preview").hidden = false; el("finalize").hidden = false; hasPreview = false; el("result").hidden = true; el("final-review").hidden = true; el("apply").disabled = true; }
+        function clear() { el("extraction-preview").hidden = true; el("settings").hidden = false; el("preview").hidden = false; el("finalize").hidden = false; hasPreview = false; el("result").hidden = true; el("final-review").hidden = true; el("apply").disabled = true;
+            el("settings").hidden = el("finalize").hidden = !!conditional;
+        }
         function rules() {
             return Array.from(el("rules").querySelectorAll("input:checked")).map(function (input) {
                 var words = input.value === "remove_words" ? el("words").value.split("\n").map(function (v) { return v.trim(); }).filter(Boolean) : [];
@@ -42,7 +58,7 @@
             reconcile: function (available, fallback, taskType) {
                 currentTaskType = taskType;
                 var ids = new Set(available.map(function (column) { return String(column.column_id); }));
-                var lostTarget = targets().some(function (id) { return !ids.has(id); });
+                var lostTarget = targets().concat(conditional ? [conditional.destination_column_id] : []).some(function (id) { return !ids.has(id); });
                 if (lostTarget) {
                     this.show(available, fallback, taskType, true);
                 } else {
@@ -52,10 +68,11 @@
                         fill(el(name), selected.filter(function (id) { return ids.has(id); }));
                     });
                 }
+                conditionSummary();
                 return lostTarget;
             },
             show: function (available, preferred, taskType, resetMode) {
-                columns = available; currentTaskType = taskType; clear(); mapping.reset();
+                conditional = null; columns = available; currentTaskType = taskType; conditionSummary(); clear(); mapping.reset();
                 el("extraction-suggestions").textContent = "";
                 if (resetMode) {
                     el("kind").value = "preprocess"; el("part").value = "all"; el("group-mode").value = "manual"; el("extraction-mode").value = "";
@@ -69,6 +86,7 @@
                 if (resetMode) el("output-mode").value = "new"; kind();
             },
             operation: function () {
+                if (conditional) return JSON.parse(JSON.stringify(conditional));
                 var type = el("kind").value;
                 var ids = type === "group" ? keys() : targets();
                 var selected = type === "preprocess" ? rules() : [];
@@ -104,9 +122,18 @@
                 if (operation.kind === "extract" && (!extractionColumn() || operation.column_ids.length !== 1 || operation.column_ids[0] !== extractionColumn())) {
                     throw new Error(window.errorMessages.MODEL_SPEC_REQUIRED);
                 }
-                if (!operation.column_ids.concat(operation.value_column_id || []).every(function (id) { return columns.some(function (c) { return String(c.column_id) === id; }); })) {
+                if (!operation.column_ids.concat(operation.value_column_id || [], operation.destination_column_id || []).every(function (id) { return columns.some(function (c) { return String(c.column_id) === id; }); })) {
                     throw new Error("현재 작업에 없는 열입니다. 범위를 다시 확인하세요.");
                 }
+                conditional = null;
+                if (operation.condition) {
+                    if (operation.kind !== "set" || !operation.destination_column_id || operation.column_ids.length !== 1 ||
+                        operation.column_ids[0] !== operation.condition.column_id) throw new Error("조건과 반영할 열을 다시 확인하세요.");
+                    conditional = JSON.parse(JSON.stringify(operation));
+                    el("output-mode").value = "existing";
+                    fill(el("existing-column"), [operation.destination_column_id]);
+                }
+                conditionSummary();
                 clear(); el("kind").value = operation.kind;el("group-mode").value = operation.group_mode || "manual"; kind();
                 fill(el("column"), operation.column_ids); fill(el("keys"), operation.column_ids);
                 if (operation.value_column_id) fill(el("value-column"), [operation.value_column_id]);
@@ -198,10 +225,13 @@
                         el("summary").textContent += " · 여러 열로 분리하는 결과는 새 열 저장을 선택하세요.";
                     } else if (data.names.length > 1) el("summary").textContent += " · 상태 정보는 미리보기에서 확인하고 첫 번째 결과값만 반영합니다.";
                 }
-                if (data.snapshot.row_filter) el("summary").textContent += " · 작업 조건에 맞는 행만 처리합니다.";
+                if (conditional) el("summary").textContent = "조건에 맞는 " + count + "행 중 " + data.changed.toLocaleString() + "행 변경 예정";
+                else if (data.snapshot.row_filter) el("summary").textContent += " · 작업 조건에 맞는 행만 처리합니다.";
             },
-            destination: function () { return el("output-mode").value === "existing" ? el("existing-column").value : null; },
+            destination: function () { if (conditional) return conditional.destination_column_id; return el("output-mode").value === "existing" ? el("existing-column").value : null; },
             output: function () {
+                if (conditional) return {mode: "existing", column_id: conditional.destination_column_id,
+                    name: columns.find(function (c) { return String(c.column_id) === conditional.destination_column_id; }).header.slice(0, 200)};
                 if (el("output-mode").value === "existing") return {mode: "existing", column_id: el("existing-column").value,
                     name: columns.find(function (c) { return String(c.column_id) === el("existing-column").value; }).header.slice(0, 200)};
                 var name = el("name").value.trim();
@@ -244,7 +274,8 @@
                 el("cancel").hidden = !processing; el("cancel").disabled = !processing;
             },
             bind: function (handlers) {
-                ["preview", "apply", "cancel", "finalize", "confirm-final", "cancel-final", "load-values", "edit"].forEach(function (name) { el(name).addEventListener("click", handlers[name]); });
+                ["preview", "apply", "cancel", "finalize", "confirm-final", "cancel-final", "load-values"].forEach(function (name) { el(name).addEventListener("click", handlers[name]); });
+                el("edit").addEventListener("click", function () { return conditional ? handlers.preview() : handlers.edit(); });
                 mapping.bind(function () { clear(); handlers.change(); }, handlers.status);
                 el("recommend-extraction").addEventListener("click", handlers.recommend);
                 el("extraction-suggestions").addEventListener("click", function (event) {

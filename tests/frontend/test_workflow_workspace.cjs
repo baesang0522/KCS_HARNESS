@@ -4,7 +4,7 @@ const vm=require('node:vm');
 const fs=require('node:fs');
 const path=require('node:path');
 const {createHost}=require('../helpers/excel_mock.cjs');
-async function setup() {
+async function setup({rows=90000,cachedRows=90000}={}) {
     const columns=[['declared',1,'declared_name'],['trade',2,'trade_name'],['model',3,'model_spec'],
         ['grouped',5,'result'],['replaced',6,'result'],['cleaned',25,'result']].map(([column_id,column_index,role])=>({column_id,column_index,role,header:column_id,description:''}));
     const saved={workspace_id:'workspace',worksheet_id:'sheet',table_id:'table',task_type:'model_normalization',
@@ -15,12 +15,12 @@ async function setup() {
     const ui=new Proxy({bind:x=>{handlers=x;},status:x=>h.status.push(x)},{get:(o,k)=>o[k]||(()=>{})});
     const operations={targets:()=>selected.slice(),show:(w,t,ids)=>{selected=Array.from(ids);},
         reconcile:()=>false,configure:x=>{h.configured=x;},sampleRows:async()=>[],invalidate(){},reset(){},busy(){}};
-    const target=w=>({worksheet_id:'sheet',sheet_name:'Sheet1',row_start:1,row_count:90000,columns:w.columns});
+    const target=w=>({worksheet_id:'sheet',sheet_name:'Sheet1',row_start:1,row_count:cachedRows,columns:w.columns});
     const window={createWorkspaceUI:()=>ui,createOperationJobs:()=>({}),createOperations:()=>operations,
         createSimilarityController:()=>({reset(){},busy(){}}),
         workspaceStore:{current:async()=>saved,save:async()=>{}},
         workspaceSheet:{requireExcel(){},readWorkspaceTarget:async w=>h.selection||target(w)},
-        workspaceTable:{layout:async()=>({sheet:{name:'Sheet1'},body:{rowIndex:1,rowCount:90000,columnIndex:0,columnCount:30},
+        workspaceTable:{layout:async()=>({sheet:{name:'Sheet1'},body:{rowIndex:1,rowCount:rows,columnIndex:0,columnCount:30},
             columns:h.columns,identity:{column_id:'identity'}})}};
     window.errorMessages = JSON.parse(fs.readFileSync(path.join(__dirname, '../../src/services/error_messages.json'), 'utf8'));
     const sandbox={window,console,Excel:{run:async fn=>fn({})}};
@@ -89,4 +89,18 @@ test('workspace restoration notifies reference documents with identity and no ce
     assert.equal(h.reference.table_id, 'table');
     assert.equal('columns' in h.reference, false);
     assert.equal(JSON.stringify(h.controller.referenceTarget()), JSON.stringify(h.reference));
+});
+
+
+test('automatic formula scope uses all current rows, ignoring old range and active Excel cell',async()=>{
+    const h=await setup({rows:3092,cachedRows:1});
+    h.selection={row_start:150,row_count:1,columns:[h.columns[4]]};
+    const selection=await h.controller.formulaTarget({workspace_id:'workspace',column_ids:['model']});
+    assert.equal(selection.row_start,1);assert.equal(selection.row_count,3092);
+    assert.deepEqual(Array.from(selection.input_columns,c=>c.column_id),['model']);
+    const excel=createHost({rows:3092,sourceColumns:30,data:(r,c)=>`r${r}c${c}`});
+    excel.selected=excel.range(150,6,1,1);excel.load('formula/formula_sheet.js');
+    const payload=await excel.window.formulaSheet.readFormulaContext(selection);
+    assert.equal(payload.address,'Sheet1!D2:D3093');assert.equal(payload.row_count,3092);
+    assert.equal(payload.samples[0].cells[0],'r1c3');assert.equal(payload.samples.length,20);
 });

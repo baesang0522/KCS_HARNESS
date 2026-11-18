@@ -30,7 +30,7 @@
             targetRow.hidden = true;
             sourceChange.disabled = false;
             targetChange.disabled = true;
-            applyButton.textContent = "승인 후 수식 적용";
+            applyButton.textContent = "확인 후 결과값 저장";
             applyButton.disabled = true;
             multiple = false;
         }
@@ -47,7 +47,7 @@
                     "결과: " + action.target_range + "\n" +
                     "수식: " + action.formula;
             }).join("\n\n") + "\n" +
-                "적용: " + target.row_count + "행";
+                "적용: " + target.row_count + "행 · 계산 후 결과값만 저장합니다. 원본이 바뀌어도 자동 재계산되지 않습니다.";
 
             window.markdownRenderer.render(
                 summaryText,
@@ -72,7 +72,7 @@
                 sourceChange.disabled = true;
                 targetChange.disabled = true;
                 applyButton.textContent = "적용 완료";
-                status.textContent = result.address + " · " + result.row_count + "행에 수식을 적용했습니다.";
+                status.textContent = result.address + " · " + result.row_count + "행에 계산 결과를 값으로 저장했습니다.";
             },
             setBusy: function (busy, hasPreview, applied) {
                 sourceChange.disabled = busy || applied;

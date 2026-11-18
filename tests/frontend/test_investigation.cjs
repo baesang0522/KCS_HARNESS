@@ -90,11 +90,11 @@ test('large alternating selections use bounded batches instead of one Excel roun
     assert(h.syncs<250,`too many round trips: ${h.syncs}`);
 });
 
-test('actual workspace UI saves an arbitrary condition, updates an existing column and restores the condition',async()=>{
+test('workspace keeps a saved condition without the removed filter card, and can explicitly clear it',async()=>{
     const {createDOM}=require('../helpers/taskpane_dom.cjs');
     const h=createDOM(),host=createInvestigationHost();
     const f=host.workspace(['id','사용자 값','검토표시'],[[1,'old','OK'],[2,'keep','NO'],[3,'old','OK']]);
-    const saved={...f.work,workspace_id:'work',target:f.target};let stored=saved,busy=false,controller,job,revealed=0;
+    const saved={...f.work,workspace_id:'work',target:f.target,row_filter:{column_id:f.work.columns[1].column_id,operator:'equals',value:'OK'}};let stored=saved,busy=false,controller,job,revealed=0;
     h.sandbox.Excel=host.Excel;h.sandbox.Office={context:{requirements:{isSetSupported:()=>true}}};
     h.window.workspaceStore={current:async()=>stored,save:async work=>{stored=structuredClone(work);}};
     h.window.sourceColumns={list:async()=>[]};
@@ -114,10 +114,8 @@ test('actual workspace UI saves an arbitrary condition, updates an existing colu
         setBusy:v=>{busy=v;controller?.setBusy(v);},complete:noop,enterConversation:noop});
     const node=id=>h.document.getElementById(id);
     await node('work-restore').emit('click');
-    node('work-filter-column').value=f.work.columns[1].column_id;
-    node('work-filter-operator').value='equals';node('work-filter-value').value='OK';
-    await node('work-filter-save').emit('click');
-    assert.equal(stored.row_filter.value,'OK');
+    assert.equal(node('work-scope-settings'),null);
+    assert.match(node('work-operation-scope').textContent,/OK/);
     node('op-kind').value='set';node('op-column').value=f.work.columns[0].column_id;
     node('op-assigned-value').value='confirmed';node('op-output-mode').value='existing';node('op-existing-column').value=f.work.columns[0].column_id;
     await node('op-preview').emit('click');
@@ -127,7 +125,9 @@ test('actual workspace UI saves an arbitrary condition, updates an existing colu
     assert.deepEqual(f.sheet.cells.slice(1).map(r=>r[1]),['confirmed','keep','confirmed']);
     assert.equal(stored.columns.length,2);assert.equal(stored.target.row_count,3);
     await node('work-restore').emit('click');
-    assert.equal(node('work-filter-value').value,'OK');
+    assert.match(node('work-operation-scope').textContent,/OK/);
+    await node('work-clear-filter').emit('click');assert.equal(stored.row_filter,null);
+    assert.equal(node('work-clear-filter').hidden,true);
     await controller.openSourceColumns();
     assert.equal(revealed,1);assert.equal(node('work-panel').hidden,false);
     assert.equal(node('work-import').hidden,false);assert.equal(node('work-import-add').disabled,true);
@@ -294,7 +294,7 @@ for (const failSecond of [false, true]) test(`multiple imports preserve row iden
         isBusy:()=>busy,setBusy:v=>{busy=v;controller?.setBusy(v);},showWorkspace:noop,complete:noop,enterConversation:noop});
     const node=id=>h.document.getElementById(id);
     await node('work-restore').emit('click');await controller.openSourceColumns();
-    assert.equal(node('work-scope-settings').hidden,true);assert.equal(node('work-advice-settings').hidden,true);
+    assert.equal(node('work-scope-settings'),null);assert.equal(node('work-advice-settings'),null);
     assert.equal(node('op-settings').hidden,false);
     for(const check of node('work-import-columns').querySelectorAll('input')){check.checked=true;await check.emit('change');}
     node('work-import-confirm').checked=true;await node('work-import-confirm').emit('change');
@@ -316,8 +316,8 @@ for (const failSecond of [false, true]) test(`multiple imports preserve row iden
         assert(node('op-column').querySelectorAll('option').some(o=>o.textContent===header));
     }
     assert.equal(stored.row_filter.value,'AB1');assert.match(node('work-operation-scope').textContent,/AB1/);
-    assert.equal(node('work-scope-settings').hidden,true);assert.equal(node('work-advice-settings').hidden,true);
+    assert.equal(node('work-scope-settings'),null);assert.equal(node('work-advice-settings'),null);
     assert.equal(node('work-import-add').disabled,true);
     await controller.open();
-    assert.equal(node('work-scope-settings').hidden,false);assert.equal(node('work-advice-settings').hidden,false);
+    assert.equal(node('work-scope-settings'),null);assert.equal(node('work-advice-settings'),null);
 });

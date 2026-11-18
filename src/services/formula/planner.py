@@ -2,6 +2,7 @@
 import asyncio
 import json
 import re
+from pydantic import ValidationError
 
 from services.formula.schemas import CreateFormulaJobRequest, FormulaPlan, range_bounds
 
@@ -43,7 +44,9 @@ def validate_output_scope(plan: FormulaPlan, source: CreateFormulaJobRequest) ->
 def parse_formula_plan(raw: str) -> FormulaPlan:
     try:
         return FormulaPlan.model_validate_json(raw)
-    except Exception as original:
+    except ValidationError as original:
+        if not any(error["type"] == "json_invalid" for error in original.errors()):
+            raise
         # Repair only an unescaped quote inside the known formula field.
         # Other malformed JSON remains a planning failure.
         match = FORMULA_JSON_FIELD.search(raw)

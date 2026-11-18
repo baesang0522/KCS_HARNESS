@@ -34,6 +34,8 @@
   <script defer src="similarity/similarity.js"></script>
   <script defer src="workspace/workspace_store.js"></script>
   <script defer src="formula/workspace_formula.js"></script>
+  <script defer src="group_review/group_review_model.js"></script>
+  <script defer src="group_review/group_review.js"></script>
   <script defer src="workspace/workspace.js"></script>
   <script defer src="formula/formula_ui.js"></script>
   <script defer src="formula/formula.js"></script>
@@ -129,10 +131,12 @@
           </div>
         </div>
         <div id="work-current" hidden>
+          <div id="work-management">
           <p id="work-current-summary"></p>
           <div class="work-actions">
             <button type="button" id="work-refresh">열 목록 새로고침</button>
             <button type="button" data-open-cleaning-help>정제 도움</button>
+            <button type="button" id="work-groups">묶음 검토</button>
             <button type="button" id="work-new">새 원본으로 시작</button>
           </div>
           <section id="work-import" hidden>
@@ -148,20 +152,13 @@
             <label>역할 <select id="work-role-value"><option value="reference">일반 열</option><option value="country_code">국가코드</option><option value="party_code">공급자부호</option><option value="company_name">공급자명</option><option value="declared_name">신고품명</option><option value="trade_name">거래품명</option><option value="model_spec">모델규격명</option></select></label>
             <button type="button" id="work-role-save">역할 저장</button>
           </details>
-          <fieldset id="work-scope-settings"><legend>후속 작업 대상</legend>
-            <label>조건 열 <select id="work-filter-column"></select></label>
-            <label>조건 <select id="work-filter-operator"><option value="equals">같음</option><option value="not_equals">다름</option><option value="contains">포함</option><option value="blank">빈칸</option><option value="not_blank">빈칸 아님</option></select></label>
-            <label>비교할 값 <input id="work-filter-value" type="text" maxlength="32767"></label>
-            <button type="button" id="work-filter-save">이 조건으로 작업</button>
-            <p id="work-filter-summary" role="status">전체 행</p>
-            <p>문자열은 대소문자와 공백을 구분합니다. Excel의 화면 필터는 작업 조건을 바꾸지 않습니다.</p>
-          </fieldset>
-          <label id="work-advice-settings">AI 의견 주제 <select id="work-advice-subject"><option value="company">공급자·기업</option><option value="model">모델규격 · 빈도 상위 100개</option></select></label>
+          </div>
           <section id="operations" aria-label="데이터 처리">
             <div id="op-settings">
               <label>작업 기능 <select id="op-kind"><option value="set">값 지정</option><option value="preprocess">전처리</option><option value="split">문자열 분리</option><option value="group">같은 기준의 행에 대표값 적용</option><option value="replace">문자열 치환</option><option value="map">자동 매핑</option><option value="extract">모델명 후보 찾기</option></select></label>
               <label id="op-single">처리할 열 <select id="op-column"></select></label>
               <p id="work-operation-scope">현재 조건: 전체 행</p>
+              <button type="button" id="work-clear-filter" hidden>전체 행으로 돌아가기</button>
               <label>결과 저장 <select id="op-output-mode"><option value="new">새 열 만들기</option><option value="existing">기존 열에 반영</option></select></label>
               <label>반영할 기존 열 <select id="op-existing-column"></select></label>
               <div id="op-set" hidden><label>적용할 값 <input id="op-assigned-value" type="text" maxlength="32767"></label><p>빈 값으로 지정하면 대상 셀을 비웁니다. 적용 전 변경 내용을 확인하세요.</p></div>
@@ -258,6 +255,7 @@
                 <div id="op-mappings"></div>
               </div>
             </div>
+            <p id="op-condition" hidden></p>
             <button type="button" id="op-preview">변경 내용 확인</button>
             <button type="button" id="op-cancel" hidden>처리 취소</button>
             <section id="op-result" hidden>
@@ -302,6 +300,50 @@
         </div>
         <p id="work-status" role="status" aria-live="polite"></p>
       </section>
+      <section class="normalization-panel" id="gr-panel" aria-labelledby="gr-title" hidden>
+        <h2 id="gr-title" tabindex="-1">묶음 검토 · 기업 / 모델 / 직접 만든 열</h2>
+        <button type="button" data-close-task>카드 닫기</button>
+        <p>필요한 기능만 골라 진행하세요. 묶음 저장·확정은 셀을 바꾸지 않습니다.</p>
+        <label>저장된 묶음 기준 <select id="gr-saved"></select></label>
+        <label>묶을 열 <select id="gr-column"></select></label>
+        <details><summary>판단에 참고할 열 선택</summary><div id="gr-references"></div></details>
+        <label>후보를 찾을 범위 <select id="gr-scope"><option value="all">작업표 전체 · 대상 확대</option><option value="current">현재 작업 조건에 맞는 행</option></select></label>
+        <button type="button" id="gr-load">현재 값 불러오기 / 변경 확인</button>
+        <div id="gr-work" hidden>
+          <p id="gr-count"></p>
+          <label>값·참고 정보 검색 <input type="text" id="gr-search" maxlength="200"></label>
+          <div id="gr-values" class="gr-list"></div>
+          <p id="gr-selection" role="status"></p>
+          <button type="button" id="gr-clear">선택 해제 · 새 묶음</button>
+          <details id="gr-comparison"><summary>선택한 기준값과 후보 비교</summary>
+            <label>찾을 기준값 <input type="text" id="gr-query" maxlength="200" placeholder="예: JIANGSU SHAGANG INTL TRADE"></label>
+            <p id="gr-base">값 목록의 ‘비교 기준’을 선택하세요.</p>
+            <label><input type="checkbox" id="gr-normalize"> 비교할 때만 공백·대소문자 정리</label>
+            <label><input type="checkbox" id="gr-same"> 참고 열 값이 모두 같은 후보만</label>
+            <label>비교 방식 <select id="gr-method"><option value="levenshtein">철자 차이</option><option value="sequence">공통 문자열</option></select></label>
+            <button type="button" id="gr-compare">유사 후보 찾기</button>
+            <div id="gr-candidates" class="gr-list"></div>
+            <button type="button" id="gr-reset-rejected">‘다른 대상’ 판단 지우고 다시 검토</button>
+          </details>
+          <label>대표명 <input type="text" id="gr-name" maxlength="200"></label>
+          <button type="button" id="gr-save">선택한 값으로 묶음 저장</button>
+          <p>수정 중인 묶음에서 체크를 풀고 저장하면 해당 값이 빠집니다. 묶음 해제도 기존 셀 값은 되돌리지 않습니다.</p>
+          <div id="gr-groups"></div>
+          <button type="button" id="gr-output-open">선택한 확정 묶음의 반영 설정</button>
+          <section id="gr-output" hidden>
+            <label>반영 내용 <select id="gr-output-kind"><option value="name">묶음 대표명</option><option value="mark">조사 대상 표시값</option></select></label>
+            <p>표시값을 비우면 선택한 행의 대상 셀을 비웁니다.</p>
+            <label>표시할 값 <input type="text" id="gr-mark" value="Y" maxlength="32767"></label>
+            <label>저장할 열 <select id="gr-destination"></select></label>
+            <label>새 열 이름 <input type="text" id="gr-output-name" value="검토 묶음" maxlength="200"></label>
+            <button type="button" id="gr-preview">변경 내용 확인</button>
+            <p id="gr-preview-text" role="status"></p>
+            <button type="button" id="gr-apply" disabled>확인한 내용 반영</button>
+            <button type="button" id="gr-filter" disabled>방금 표시한 값으로 후속 작업 범위 설정</button>
+          </section>
+        </div>
+        <p id="gr-status" role="status" aria-live="polite"></p>
+      </section>
       <section class="normalization-panel" id="formula-panel" hidden>
         <h2>수식 작업 확인</h2><button type="button" data-close-task>작업 카드 닫기</button>
         <p id="formula-request"></p>
@@ -311,7 +353,7 @@
         </div>
         <pre id="formula-preview"></pre>
         <div id="formula-summary" class="model-explanation"></div>
-        <button type="button" id="formula-apply" disabled>승인 후 수식 적용</button>
+        <button type="button" id="formula-apply" disabled>확인 후 결과값 저장</button>
         <p id="formula-status" role="status"></p>
       </section>
     </main>

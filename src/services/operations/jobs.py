@@ -46,6 +46,8 @@ class CreateOperationJob(StrictModel):
     @model_validator(mode="after")
     def validate_scope(self):
         self.operation.validate_ready()
+        if self.operation.condition and self.row_filter != self.operation.condition:
+            raise ValueError("조건부 값 변경의 행 조건이 누락되거나 바뀌었습니다.")
         if self.operation.kind == "extract" and (
             self.model_spec_column_id is None
             or self.operation.column_ids != [self.model_spec_column_id]
@@ -172,6 +174,10 @@ def begin_apply(job: OperationJob, output: OutputPlacement) -> OperationJob:
             "새 미리보기만 적용할 수 있습니다. "
             "이미 시작한 실행은 다시 쓰지 않습니다."
         )
+    if job.source.operation.condition and (
+        output.mode != "existing" or output.column_id != job.source.operation.destination_column_id
+    ):
+        raise ConflictError("요청한 기존 열에만 조건부 변경을 반영할 수 있습니다.")
     job.output = output.model_copy(deep=True)
     job.status = "APPLYING"
     return job
