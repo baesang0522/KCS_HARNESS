@@ -1,7 +1,7 @@
 "use strict";
 (function () {
     var api = window.apiClient;
-    var workspace = null, formula = null, help = null, documents = null;
+    var workspace = null, formula = null, help = null, documents = null, investigation = null;
     var connection = document.getElementById('connection');
     var diagnostic = document.getElementById('diagnostic');
     var ready = false;
@@ -29,9 +29,12 @@
         closeTaskCards: closeTaskCards,
         resetTasks: function () { workspace.reset(); formula.reset(); updateWorkspaceButton(); },
         handleUIAction: handleUIAction,
-        onConversationChanged: function (id) { if (documents) return documents.load(id); },
+        onConversationChanged: async function (id) {
+            await Promise.all([documents && documents.load(id), investigation && investigation.load(id)]);
+        },
         onBusy: function (value) {
             if (documents) documents.updateControls();
+            if (investigation) investigation.updateControls();
             if (help) help.updateControls();
             if (workspace) workspace.setBusy(value);
             if (formula) formula.setBusy(value);
@@ -58,6 +61,7 @@
         closeTaskCards();
         if (!action) return;
 
+        if (action.type === "open_investigation") { await investigation.open(); return; }
         if (action.type === "open_cleaning_help") {
             await help.open(action.column_ids);
             return;
@@ -146,7 +150,14 @@
         closeTaskCards: closeTaskCards, enterConversation: chat.enterConversation,
         sendMessage: chat.sendMessage
     });
+    investigation = window.createInvestigationController({
+        api: api, getWorkspace: workspace.context,
+        isBusy: chat.isBusy, setBusy: chat.setBusy,
+        beginRequest: chat.beginRequest, endRequest: chat.endRequest,
+        checkRequest: chat.checkRequest, reportStop: chat.reportStop
+    });
     documents = window.createDocumentsController({
+        readConditions: investigation.extract, onChanged: investigation.refresh,
         api: api, getWorkspace: workspace.referenceTarget,
         isBusy: chat.isBusy, setBusy: chat.setBusy,
         beginRequest: chat.beginRequest, endRequest: chat.endRequest,

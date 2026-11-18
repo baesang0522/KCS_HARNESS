@@ -118,3 +118,17 @@ test('upload errors stay visible and do not create a ready attachment', async ()
     assert.equal(h.node('documents-toggle').textContent, '참고자료 (0)');
     assert.equal(h.node('document-add').disabled, false);
 });
+
+
+test('reference document condition button passes the document ID without starting Excel work', async () => {
+    let selected;
+    const page = createDOM(); page.load('documents/documents.js');
+    const document = {document_id:'reference',filename:'기준.pdf',page_count:1,unreadable_pages:[],link:null};
+    const controller = page.window.createDocumentsController({
+        api:{requestJson:async()=>({documents:[document]})}, getWorkspace:()=>null,
+        isBusy:()=>false,setBusy(){},readConditions:async id=>{selected=id;}
+    });
+    await controller.load('conversation');
+    const button = page.document.getElementById('documents-list').querySelectorAll('button').find(b=>b.textContent==='조사 조건 읽기');
+    await button.emit('click');assert.equal(selected,'reference');
+});

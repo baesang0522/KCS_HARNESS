@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query, Request
 from services.documents.schemas import DocumentLink, ReferenceDocument
 from services.documents.service import MAX_UPLOAD_BYTES, check_capacity, extract_in_process, find_document
 from services.errors import ConflictError, DocumentError, NotFoundError
+from services.investigation import invalidate_document
 
 router = APIRouter(prefix="/conversations/{conversation_id}/documents", tags=["documents"])
 
@@ -67,6 +68,8 @@ async def read_page(conversation_id: UUID, document_id: UUID, page_number: int, 
 async def link_document(conversation_id: UUID, document_id: UUID, payload: DocumentLink, request: Request):
     async with request.app.state.conversations.edit(str(conversation_id)) as conversation:
         document = find_document(conversation, str(document_id))
+        if document.link != payload:
+            invalidate_document(conversation, str(document_id))
         document.link = payload
         return document.summary()
 
@@ -77,5 +80,6 @@ async def delete_document(conversation_id: UUID, document_id: UUID, request: Req
     # 삭제와 업로드 완료가 경합해도 뒤늦게 자료가 되살아나지 않게 같은 요청을 중지한다.
     repository.cancel_request(str(conversation_id), str(document_id))
     async with repository.edit(str(conversation_id)) as conversation:
+        invalidate_document(conversation, str(document_id))
         conversation.documents.pop(str(document_id), None)
     return {"status": "deleted"}

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from services.chat_state import WorkFlowState
+from services.investigation import InvestigationState
 from services.errors import ConflictError, NotFoundError
 
 
@@ -26,6 +27,7 @@ class StoredTurn:
 @dataclass
 class MemoryConversation:
     documents: dict = field(default_factory=dict)
+    investigation: InvestigationState = field(default_factory=InvestigationState)
     turns: list[StoredTurn] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     workflow: WorkFlowState = field(default_factory=WorkFlowState)

@@ -6,6 +6,7 @@ from agents.request_router import RequestDecision, route_request
 from services.recommendation.service import resolve_advice_columns
 from repositories.conversation_repository import StoredTurn
 from services.errors import MODEL_RESPONSE_ERROR, ConflictError, ModelProcessingError
+from services.investigation import investigation_context
 from services.formula.service import formula_job_context
 from services.execution_history import execution_history_context, same_formula_workspace
 
@@ -22,7 +23,7 @@ def workflow_snapshot(state, formula_jobs: dict) -> dict:
 
 
 def build_task_context(state, formula_jobs: dict, *, operation_jobs: dict,
-                       conversation_id: str, workspace=None) -> dict:
+                       conversation_id: str, workspace=None, investigation=None) -> dict:
     formula_job = formula_jobs.get(state.active_formula_job_id)
 
     if (
@@ -41,6 +42,7 @@ def build_task_context(state, formula_jobs: dict, *, operation_jobs: dict,
         ),
         "phase": ("WORKSPACE_READY" if workspace and not formula_job else state.phase),
         "workspace": workspace,
+        "investigation": investigation,
         "active_formula_job": (
             formula_job_context(formula_job) if formula_job else None
         ),
@@ -76,7 +78,8 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
         action, reasoning = None, []
         try:
             context = build_task_context(state, formula_jobs, operation_jobs=operation_jobs,
-                                         conversation_id=conversation_id, workspace=workspace)
+                                         conversation_id=conversation_id, workspace=workspace,
+                                         investigation=investigation_context(conversation, workspace))
             if advice_requested:
                 decision = RequestDecision(
                     intent="recommendation",
@@ -99,6 +102,8 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
                           "request": decision.group_review_request.model_dump() if decision.group_review_request else None}
             elif decision.intent == "cleaning_help":
                 action = {"type": "open_cleaning_help", "column_ids": decision.analysis_column_ids}
+            elif decision.intent == "investigation":
+                action = {"type": "open_investigation"}
             elif decision.intent == "recommendation":
                 action = {"type": "analyze_data", "column_ids": decision.analysis_column_ids}
         except Exception as error:

@@ -61,13 +61,18 @@ class OpenGroupReviewAction(BaseModel):
     column_ids: list[ColumnId] | None = Field(default=None, min_length=1, max_length=1)
 
 
+class OpenInvestigationAction(BaseModel):
+    type: Literal["open_investigation"]
+
+
 UIAction = Annotated[
     ConfirmSelectionAction
     | ConfigureOperationAction
     | ConfigureSimilarityAction
     | AnalyzeDataAction
     | OpenCleaningHelpAction
-    | OpenGroupReviewAction,
+    | OpenGroupReviewAction
+    | OpenInvestigationAction,
     Field(discriminator="type"),
 ]
 

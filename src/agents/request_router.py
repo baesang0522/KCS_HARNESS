@@ -13,7 +13,7 @@ from services.recommendation.service import resolve_advice_columns, resolve_colu
 
 class RequestDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    intent: Literal["general", "start_task", "clarify", "task_followup", "operation", "similarity", "recommendation", "cleaning_help", "group_review"]
+    intent: Literal["general", "start_task", "clarify", "task_followup", "operation", "similarity", "recommendation", "cleaning_help", "group_review", "investigation"]
     task_type: TaskType | None = None
     operation: Operation | None = None
     similarity: SimilaritySelection | None = None

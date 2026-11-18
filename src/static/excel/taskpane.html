@@ -42,6 +42,7 @@
   <script defer src="chat/chat.js"></script>
   <script defer src="cleaning_help/cleaning_help.js"></script>
   <script defer src="documents/documents.js"></script>
+  <script defer src="documents/investigation.js"></script>
   <script defer src="taskpane.js"></script>
 </head>
 <body>
@@ -60,7 +61,7 @@
       <section class="normalization-panel" id="documents-panel" aria-labelledby="documents-title" hidden>
         <h2 id="documents-title" tabindex="-1">PDF 참고자료</h2>
         <button type="button" id="documents-close">참고자료 접기</button>
-        <p>문서를 읽고 사용할 작업에 연결합니다. 아직 대화 답변이나 Excel 정제에 자동 반영되지는 않습니다.</p>
+        <p>문서를 첨부한 뒤 ‘조사 조건 읽기’로 대상과 근거를 정리할 수 있어요. 저장한 조건은 대화에서 참고하며, 거래 행 선별과 셀 변경은 아직 수행하지 않아요.</p>
         <p>자료는 현재 서버의 대화에만 보관됩니다. 서버 재시작 후에는 다시 첨부하세요.</p>
         <p id="documents-status" role="status" aria-live="polite"></p>
         <div id="documents-list"></div>
@@ -75,6 +76,24 @@
           </div>
           <div id="document-page-body" class="message-body" aria-live="polite"></div>
         </section>
+      </section>
+      <section class="normalization-panel" id="investigation-panel" aria-labelledby="investigation-title" hidden>
+        <h2 id="investigation-title" tabindex="-1">이번 조사 조건</h2>
+        <button type="button" id="investigation-close">조사 조건 접기</button>
+        <p>PDF에 나온 대상을 찾기 위한 조건이에요. 내용을 수정하거나 확인 상태를 바꾼 뒤 저장하세요.</p>
+        <p>조건은 현재 대화에 보관되며 서버를 재시작하면 사라져요. 아직 거래 행을 선별하거나 Excel 값을 바꾸지는 않아요.</p>
+        <label>조사 목표<textarea id="investigation-goal" rows="2" maxlength="2000"></textarea></label>
+        <p id="investigation-workspace"></p>
+        <button type="button" id="investigation-bind">현재 작업표로 연결하고 저장</button>
+        <label>지금 검토할 조건<select id="investigation-active"></select></label>
+        <div id="investigation-warnings"></div>
+        <p id="investigation-status" role="status" aria-live="polite"></p>
+        <div id="investigation-conditions"></div>
+        <div class="document-actions">
+          <button type="button" id="investigation-add">조건 추가</button>
+          <button type="button" id="investigation-save">조사 조건 저장</button>
+          <button type="button" id="investigation-reload">저장값 다시 불러오기</button>
+        </div>
       </section>
       <div id="welcome-content">
       <div class="eyebrow"><span class="dot"></span> EXCEL ASSISTANT <span class="badge">미리보기</span></div>
@@ -364,6 +383,7 @@
           <input type="file" id="document-file" accept="application/pdf,.pdf" hidden>
           <button type="button" id="document-add" disabled>PDF 첨부</button>
           <button type="button" id="documents-toggle" aria-controls="documents-panel">참고자료 (0)</button>
+          <button type="button" id="investigation-toggle" aria-controls="investigation-panel">조사 조건</button>
         </div>
         <div class="composer-top">
           <button type="button" id="message-resize" class="composer-resize"
