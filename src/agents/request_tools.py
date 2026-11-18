@@ -1,7 +1,7 @@
 from typing import Literal
 from langchain_core.tools import tool
 from services.errors import SHARED_MESSAGES
-from services.operations.schemas import Mapping, Operation, Rule, extraction_column_id
+from services.operations.schemas import Mapping, Operation, Rule, RowFilter, ScopeRequest, extraction_column_id
 from services.similarity import SimilaritySelection
 from services.group_review import GroupReviewRequest
 from services.recommendation.service import resolve_advice_columns, resolve_columns
@@ -119,6 +119,29 @@ def build_request_tools(task_context: dict):
         match_text는 사용자가 말한 기준값, output_name은 요청한 새 열 이름이다.
         비슷한/같은 후보 요청은 기준값을 그대로 전달한다. 대상 행은 사용자가 선택한다."""
         return marking_review(column_id, match_text, output_name, value)
+
+    @tool
+    def change_scope(mode: Literal["replace", "include", "exclude", "clear"],
+                     column_id: str | None = None,
+                     operator: Literal["equals", "not_equals", "contains", "blank", "not_blank"] = "equals",
+                     value: str = "") -> dict:
+        """작업 대상 범위만 변경한다. 셀 값이나 결과 열은 쓰지 않는다.
+        현재 대상에 조건 일치 행 추가는 include, 그중 제외는 exclude, 새 조건으로 지정은 replace,
+        전체 행으로 돌아가기는 clear다. 정확한 문자열·빈칸 조건만 받으며 기업 동일성을 추측하지 않는다."""
+        if not workspace:
+            raise ValueError("먼저 작업 시트를 준비하세요.")
+        if mode == "clear":
+            if column_id is not None or value or operator != "equals":
+                raise ValueError("전체 행으로 돌아갈 때는 조건을 지정하지 마세요.")
+            condition = None
+        else:
+            if column_id is None:
+                raise ValueError("범위를 판단할 조건 열을 지정하세요.")
+            resolve_columns(workspace, [column_id])
+            condition = RowFilter(column_id=column_id, operator=operator, value=value)
+        request = ScopeRequest(mode=mode, condition=condition)
+        return {"intent": "scope", "scope_change": request.model_dump(),
+                "answer": "현재 값을 읽어 작업 범위를 변경할게요. 셀 값은 바꾸지 않아요."}
 
     @tool
     def update_matching_rows(condition_column_id: str,
@@ -302,6 +325,7 @@ def build_request_tools(task_context: dict):
         tools.extend([
             # 묶음 검토 보류(2026-11-18): 재사용 여부 검토 후 불필요하면 삭제. 기존 저장 정보는 보존.
             # set_value,
+            change_scope,
             update_matching_rows,
             remove_words,
             preprocess,

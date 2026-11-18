@@ -2,7 +2,9 @@
 (function () {
     // 작업표 상태는 workspace 컨트롤러 소유이며, 호출 시 현재 상태를 읽는다.
     window.createWorkspaceFormula = function (options) {
+        var dependencyRecord = null;
         return {
+            dependencies: function () { return dependencyRecord; },
             formulaTarget: async function (scope, fromSelection) {
                 var workspace = options.getWorkspace();
                 var lastFormula = options.getLastFormula();
@@ -59,9 +61,11 @@
                 });
             },
             prepareFormulaOutput: async function (preview, selection) {
+                dependencyRecord = null;
                 var workspace = options.getWorkspace();
                 if (!workspace || workspace.worksheet_id !== selection.worksheet_id) return;
                 if (workspace.row_filter) throw new Error("조건이 설정되어 수식 적용을 중단했습니다. 대상 범위를 다시 확인하세요.");
+                if (selection.workspace_id && options.captureDependencies) dependencyRecord = await options.captureDependencies(selection);
                 await Excel.run(async function (context) {
                     var info = await window.workspaceTable.layout(context, workspace);
                     var ranges = preview.plan.actions.map(function (action) {

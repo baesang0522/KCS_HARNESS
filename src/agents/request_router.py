@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validat
 
 from services.errors import SHARED_MESSAGES
 from agents.request_graph import run_request_graph
-from services.operations.schemas import Operation, extraction_column_id
+from services.operations.schemas import Operation, ScopeRequest, extraction_column_id
 from services.chat_state import TaskType
 from services.similarity import SimilaritySelection
 from services.group_review import GroupReviewRequest
@@ -13,17 +13,20 @@ from services.recommendation.service import resolve_advice_columns, resolve_colu
 
 class RequestDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    intent: Literal["general", "start_task", "clarify", "task_followup", "operation", "similarity", "recommendation", "cleaning_help", "group_review", "investigation"]
+    intent: Literal["general", "start_task", "clarify", "task_followup", "operation", "similarity", "recommendation", "cleaning_help", "group_review", "investigation", "scope"]
     task_type: TaskType | None = None
     operation: Operation | None = None
     similarity: SimilaritySelection | None = None
     group_review_request: GroupReviewRequest | None = None
+    scope_change: ScopeRequest | None = None
     formula_column_ids: list[str] | None = Field(default=None, min_length=1, max_length=20)
     answer: str = Field(min_length=1, max_length=8000)
     analysis_column_ids: list[str] | None = Field(default=None, max_length=200)
 
     @model_validator(mode="after")
     def validate_decision(self, info: ValidationInfo):
+        if (self.intent == "scope") != (self.scope_change is not None):
+            raise ValueError("작업 범위 요청에는 범위 변경 조건을 지정하세요.")
         if self.group_review_request is not None and self.intent != "group_review":
             raise ValueError("묶음 검토 요청에만 기준값과 표시 설정을 지정하세요.")
         if not self.answer.strip():
@@ -88,6 +91,12 @@ async def route_request(runtime, messages, *, task_context: dict):
             raise ValueError("현재 작업 시트에 없는 열을 요청했습니다.")
         if decision.operation.kind == "extract" and decision.operation.column_ids != [extraction_column_id(workspace)]:
             raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])
+
+    if decision.scope_change:
+        if not workspace:
+            raise ValueError(SHARED_MESSAGES["WORKSPACE_SETUP_REQUIRED"])
+        if decision.scope_change.condition:
+            resolve_columns(workspace, [decision.scope_change.condition.column_id])
 
     if decision.similarity:
         decision.similarity.check_workspace(workspace)

@@ -17,17 +17,17 @@
         return {sheet: sheet, table: table, body: body, columns: columns, identity: identity,
             stamp: JSON.stringify([body.rowIndex, body.columnIndex, body.rowCount, columns])};
     }
-    async function chunk(context, info, start, count, columns) {
+    async function chunk(context, info, start, count, columns, raw) {
         var ranges = columns.map(function (column) {
             var range = info.sheet.getRangeByIndexes(start, column.column_index, count, 1);
-            range.load("text"); return range;
+            range.load(raw ? "values" : "text"); return range;
         });
         var ids = info.sheet.getRangeByIndexes(start, info.identity.column_index, count, 1);
         ids.load("values");
         await context.sync();
         return ids.values.map(function (row, index) {
             return {excel_row: start + index + 1, identity: row[0],
-                values: ranges.map(function (range) { return range.text[index][0]; })};
+                values: ranges.map(function (range) { return (raw ? range.values : range.text)[index][0]; })};
         });
     }
     function selectedColumns(info, ids) {

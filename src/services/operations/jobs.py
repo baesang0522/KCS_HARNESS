@@ -12,7 +12,7 @@ from services.operations.schemas import (
     OperationRequest,
     Row,
     StrictModel,
-    TaskType, RowFilter,
+    TaskType, RowScope,
 )
 from services.operations.service import execute
 
@@ -41,7 +41,7 @@ class CreateOperationJob(StrictModel):
     row_count: int = Field(ge=1, le=400000)
     operation: Operation
     model_spec_column_id: ColumnId | None = None
-    row_filter: RowFilter | None = None
+    row_filter: RowScope | None = None
 
     @model_validator(mode="after")
     def validate_scope(self):

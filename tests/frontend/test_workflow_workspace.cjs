@@ -16,7 +16,7 @@ async function setup({rows=90000,cachedRows=90000}={}) {
     const operations={targets:()=>selected.slice(),show:(w,t,ids)=>{selected=Array.from(ids);},
         reconcile:()=>false,configure:x=>{h.configured=x;},sampleRows:async()=>[],invalidate(){},reset(){},busy(){}};
     const target=w=>({worksheet_id:'sheet',sheet_name:'Sheet1',row_start:1,row_count:cachedRows,columns:w.columns});
-    const window={createWorkspaceUI:()=>ui,createOperationJobs:()=>({}),createOperations:()=>operations,
+    const window={resultDependencies:{reconcile:async()=>false,required:()=>[],register(){}},createWorkspaceUI:()=>ui,createOperationJobs:()=>({}),createOperations:()=>operations,
         createSimilarityController:()=>({reset(){},busy(){}}),
         workspaceStore:{current:async()=>saved,save:async()=>{}},
         workspaceSheet:{requireExcel(){},readWorkspaceTarget:async w=>h.selection||target(w)},

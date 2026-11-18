@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 from services.similarity import SimilaritySelection
 from services.group_review import GroupReviewRequest
 from pydantic import BaseModel, Field, field_validator
-from services.operations.schemas import ColumnId, Operation, WorkspaceContext
+from services.operations.schemas import ColumnId, Operation, RowScope, ScopeRequest, WorkspaceContext
 
 
 class ChatRequest(BaseModel):
@@ -61,6 +61,13 @@ class OpenGroupReviewAction(BaseModel):
     column_ids: list[ColumnId] | None = Field(default=None, min_length=1, max_length=1)
 
 
+class ChangeScopeAction(BaseModel):
+    type: Literal["change_scope"]
+    workspace_id: UUID
+    request: ScopeRequest
+    expected_filter: RowScope | None = None
+
+
 class OpenInvestigationAction(BaseModel):
     type: Literal["open_investigation"]
 
@@ -72,7 +79,8 @@ UIAction = Annotated[
     | AnalyzeDataAction
     | OpenCleaningHelpAction
     | OpenGroupReviewAction
-    | OpenInvestigationAction,
+    | OpenInvestigationAction
+    | ChangeScopeAction,
     Field(discriminator="type"),
 ]
 

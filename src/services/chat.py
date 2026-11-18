@@ -93,6 +93,9 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
                 action = {"type": "confirm_selection", "task_type": decision.task_type}
                 if decision.task_type == "formula" and workspace:
                     action.update(workspace_id=str(workspace["workspace_id"]), column_ids=decision.formula_column_ids)
+            elif decision.intent == "scope":
+                action = {"type": "change_scope", "workspace_id": str(workspace["workspace_id"]),
+                          "request": decision.scope_change.model_dump(), "expected_filter": workspace.get("row_filter")}
             elif decision.intent == "operation":
                 action = {"type": "configure_operation", "operation": decision.operation.model_dump()}
             elif decision.intent == "similarity":
@@ -122,7 +125,7 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
             if decision.task_type != "formula":
                 state.active_formula_job_id = None
 
-        elif workspace and decision.intent in {"operation", "similarity", "cleaning_help", "recommendation", "group_review"}:
+        elif workspace and decision.intent in {"operation", "similarity", "cleaning_help", "recommendation", "group_review", "scope"}:
             state.task_type, state.pending_intent, state.phase = workspace["task_type"], None, "WORKSPACE_READY"
             state.active_formula_job_id = None
 

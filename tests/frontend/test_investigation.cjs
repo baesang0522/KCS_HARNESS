@@ -108,7 +108,7 @@ test('direct scope selection persists without cell writes or groups and filters 
         return job;
     }};
     ['workspace/workspace_sheet.js','workspace/table_reader.js','operations/operations_sheet.js','operations/operations_ui.js',
-        'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js','workspace/workspace.js'].forEach(h.load);
+        'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js','workspace/result_dependencies.js','workspace/workspace.js'].forEach(h.load);
     controller=h.window.createWorkspaceController({api,getConversationId:()=> 'conversation',isBusy:()=>busy,
         showWorkspace:()=>{revealed++;},
         setBusy:v=>{busy=v;controller?.setBusy(v);},complete:noop,enterConversation:noop});
@@ -318,7 +318,7 @@ for (const failSecond of [false, true]) test(`multiple imports preserve row iden
     h.window.createMappingEditor=()=>({reset(){},get:()=>[],set(){},catalog(){},bind(){}});
     h.window.createSimilarityController=()=>({reset(){},show(){},busy(){}});
     ['workspace/workspace_sheet.js','workspace/table_reader.js','operations/operations_sheet.js','operations/operations_ui.js',
-        'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js','workspace/workspace.js'].forEach(h.load);
+        'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js','workspace/result_dependencies.js','workspace/workspace.js'].forEach(h.load);
     controller=h.window.createWorkspaceController({api:{newRequestId:()=> 'job'},getConversationId:()=> 'conversation',
         isBusy:()=>busy,setBusy:v=>{busy=v;controller?.setBusy(v);},showWorkspace:noop,complete:noop,enterConversation:noop});
     const node=id=>h.document.getElementById(id);

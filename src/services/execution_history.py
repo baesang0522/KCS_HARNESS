@@ -48,6 +48,12 @@ def execution_history_context(operation_jobs: dict, formula_jobs: dict, *, conve
                 for target in job.result.targets
             ]} if job.status == 'APPLIED' and job.result else None,
         })
+    review_required = set(workspace.get('review_required_column_ids', []))
+    for record in records:
+        record['needs_review'] = any(column['column_id'] in review_required for column in record['result_columns'])
+        for column in record['result_columns']:
+            if column['column_id'] in review_required:
+                column['can_continue'] = False
     records.sort(key=lambda record: record['created_at'], reverse=True)
     # shortcut: 최근 10건만 제공한다. 더 오래된 결과는 사용자가 대상 열을 명시해야 한다.
     return {'records': records[:EXECUTION_HISTORY_LIMIT],

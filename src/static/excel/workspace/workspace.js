@@ -15,6 +15,7 @@
         var ui = window.createWorkspaceUI(), type = "investigation";
         var source = null, workspace = null, target = null, creationName = null, ready = false;
         var lastResults = [], finalized = null, lastFormula = null, groupReview = null;
+        var dependencies = window.resultDependencies;
         var jobs = window.createOperationJobs(
             options.api,
             options.getConversationId
@@ -22,7 +23,8 @@
         var formula = window.createWorkspaceFormula({
             getWorkspace: function () { return workspace; },
             getLastFormula: function () { return lastFormula; },
-            refresh: refresh, newRequestId: options.api.newRequestId
+            refresh: refresh, newRequestId: options.api.newRequestId,
+            captureDependencies: function (selection) { return dependencies.formula(workspace, selection); }
         });
         var operations = window.createOperations({
             api: options.api,
@@ -30,15 +32,29 @@
             isBusy: options.isBusy,
             setBusy: options.setBusy, status: ui.status, complete: options.complete, refresh: refresh,
             changed: function () { lastFormula = null; finalized = null; },
-            result: async function (result, job) {
+            prepareResult: function (snapshot, output) { return dependencies.fromSnapshot(snapshot, output.mode === "existing" ? [output.column_id] : []); },
+            result: async function (result, job, snapshot, record) {
                 workspace.columns = workspace.columns.filter(function (c) { return !result.columns.some(function (r) { return String(r.column_id) === String(c.column_id); }); }).concat(result.columns);
                 lastResults = result.columns.map(function (c) { return String(c.column_id); });
                 var keptRange = job && job.source.operation.condition ? {row_start: target.row_start, row_count: target.row_count} : {};
                 target = Object.assign({}, result, {worksheet_id: workspace.worksheet_id, sheet_name: workspace.sheet_name, row_count: result.range_row_count || result.row_count}, keptRange);
+                if (record) {
+                    record.output_ids = lastResults;
+                    dependencies.register(workspace, record);
+                    await dependencies.reconcile(workspace);
+                }
                 finalized = null; lastFormula = null; display(lastResults, true);
                 try { await save(); } catch (error) { throw new Error("결과 작성은 완료됐지만 작업 정보 저장에 실패했습니다. " + error.message); }
             },
-            finalized: async function (ids, count) { finalized = {column_ids: ids, row_count: count, at: new Date().toISOString()}; await save(); }
+            reviewed: async function (snapshot, columnId) {
+                dependencies.register(workspace, await dependencies.fromSnapshot(snapshot, [columnId]));
+                await dependencies.reconcile(workspace); ui.review(workspace); await save();
+            },
+            finalized: async function (ids, count) {
+                await refresh();
+                if (dependencies.required(workspace).some(function (id) { return ids.includes(id); })) throw new Error("입력이나 범위가 바뀐 결과입니다. 재처리한 뒤 다시 확정하세요.");
+                finalized = {column_ids: ids, row_count: count, at: new Date().toISOString()}; await save();
+            }
         });
         var similarity = window.createSimilarityController({
             api: options.api, isBusy: options.isBusy, setBusy: options.setBusy,
@@ -132,6 +148,11 @@
                 if (lostTarget) ui.status("삭제된 열을 작업 대상에서 제외했습니다. 남아 있는 열로 이어서 작업할 수 있습니다.");
                 await save();
             }
+            if (await dependencies.reconcile(workspace)) {
+                if (finalized && finalized.column_ids.some(function (id) { return dependencies.required(workspace).includes(id); })) finalized = null;
+                await save();
+            }
+            ui.review(workspace);
             return lostTarget;
         }
         function display(preferred, resetMode) {
@@ -142,7 +163,7 @@
                 ids = workspace.columns.filter(function (c) { return c.role === role; }).map(function (c) { return String(c.column_id); });
             }
             if (!ids.length) ids = workspace.columns.slice(0, 1).map(function (c) { return String(c.column_id); });
-            ui.current(workspace, target); operations.show(workspace, target, ids, resetMode);
+            ui.current(workspace, target); ui.review(workspace); operations.show(workspace, target, ids, resetMode);
         }
         function change() {
             if (!source) return;
@@ -335,6 +356,46 @@
                 options.setBusy(wasBusy);
             }
         }
+        async function changeScope(request, expected) {
+            if (!workspace) throw new Error("먼저 작업 시트를 준비하세요.");
+            var sheet = window.operationsSheet;
+            if (expected && (expected.workspace_id !== workspace.workspace_id || sheet.filterKey(expected.expected_filter) !== sheet.filterKey(workspace.row_filter))) {
+                throw new Error("작업표나 범위가 바뀌었습니다. 범위 변경을 다시 요청하세요.");
+            }
+            await refresh();
+            if (!["replace", "include", "exclude", "clear"].includes(request.mode)) throw new Error("지원하지 않는 범위 변경입니다.");
+            var filter = request.condition;
+            if (request.mode !== "clear") {
+                if (!filter || !workspace.columns.some(function (c) { return String(c.column_id) === filter.column_id; })) throw new Error("조건 열을 다시 선택하세요.");
+                if (!["equals", "not_equals", "contains", "blank", "not_blank"].includes(filter.operator)) throw new Error("조건을 다시 선택하세요.");
+                if (typeof filter.value !== "string" || filter.value.length > 32767) throw new Error("비교할 값을 확인하세요.");
+                if (!["blank", "not_blank"].includes(filter.operator) && !filter.value.trim()) throw new Error("비교할 값을 입력하세요. 빈 셀은 ‘빈칸’ 조건을 선택하세요.");
+            } else if (filter) throw new Error("전체 행으로 돌아갈 때는 조건을 지정하지 마세요.");
+            var previous = workspace.row_filter || null, previousTarget = target;
+            var next = request.mode === "clear" ? null : filter, nextTarget = target;
+            if (["include", "exclude"].includes(request.mode)) {
+                var current = await sheet.read(workspace, target, [], function () {}, function () {}, null, null, null, null, true);
+                next = previous && previous.steps && !current.range_ids ? JSON.parse(JSON.stringify(previous)) : {base: previous, steps: [], base_ids: current.range_ids};
+                // 정렬 후에도 기존 선택 행을 유지하고, 추가 조건은 전체 작업표에서 찾는다.
+                next.steps.push({mode: request.mode, condition: filter});
+            }
+            if (["include", "exclude", "clear"].includes(request.mode)) {
+                var whole = await Excel.run(async function (context) {
+                    var info = await window.workspaceTable.layout(context, workspace);
+                    return {row_start: info.body.rowIndex, row_count: info.body.rowCount};
+                });
+                nextTarget = Object.assign({}, target, whole);
+            }
+            var selected = await sheet.read(Object.assign({}, workspace, {row_filter: next}), nextTarget, [], function () {}, function () {}, null, null, null, null, true);
+            operations.invalidate(); lastFormula = finalized = null;
+            workspace.row_filter = next; target = nextTarget;
+            try { await save(); } catch (error) { workspace.row_filter = previous; target = previousTarget; workspace.target = previousTarget; throw error; }
+            await refresh();
+            display(operations.targets());
+            var message = "작업 범위: " + sheet.describeFilter(next, workspace.columns) + " · " + selected.rows.length.toLocaleString() + "행. 셀 값은 변경하지 않았습니다.";
+            ui.status(message);
+            return message;
+        }
         async function manage(action) {
             if (options.isBusy() || !workspace) return;
             options.setBusy(true);
@@ -353,17 +414,7 @@
                     return;
                 }
                 if (action === "scope-apply" || action === "clear-filter") {
-                    if (action === "scope-apply") {
-                        if (!workspace.columns.some(function (c) { return String(c.column_id) === filter.column_id; })) throw new Error("조건 열을 다시 선택하세요.");
-                        if (!["equals", "not_equals", "contains", "blank", "not_blank"].includes(filter.operator)) throw new Error("조건을 다시 선택하세요.");
-                        if (!["blank", "not_blank"].includes(filter.operator) && !filter.value.trim()) throw new Error("비교할 값을 입력하세요. 빈 셀은 ‘빈칸’ 조건을 선택하세요.");
-                        if (filter.value.length > 32767) throw new Error("비교할 값이 너무 깁니다.");
-                    }
-                    var previousFilter = workspace.row_filter;
-                    workspace.row_filter = action === "clear-filter" ? null : filter;
-                    try { await save(); } catch (error) { workspace.row_filter = previousFilter; throw error; }
-                    display(operations.targets());
-                    ui.status(action === "clear-filter" ? "작업 조건을 해제했습니다. 다음 작업부터 전체 행을 사용합니다." : "작업 범위를 적용했습니다. 다음 작업부터 이 조건을 사용합니다. 셀 값은 변경하지 않았습니다.");
+                    await changeScope({mode: action === "clear-filter" ? "clear" : "replace", condition: action === "clear-filter" ? null : filter});
                     return;
                 } else if (action === "role") {
                     var column = workspace.columns.find(function (c) { return String(c.column_id) === role.column_id; });
@@ -453,6 +504,7 @@
         });
         return {
             open: open,
+            changeScope: changeScope,
             openScope: function () { return manage("scope"); },
             openSourceColumns: function () { return manage("sources"); },
             dismiss: function () { operations.invalidate(); similarity.reset(); ui.hide(); if (groupReview) groupReview.dismiss(); },
@@ -464,6 +516,7 @@
                 await refresh();
                 var sampleRows = await operations.sampleRows();
                 return {workspace_id: workspace.workspace_id,
+                    review_required_column_ids: dependencies.required(workspace),
                     row_filter: workspace.row_filter || null, advice_subject: workspace.advice_subject || (workspace.task_type === "model_normalization" ? "model" : "company"),
                     task_type: workspace.task_type, worksheet_id: workspace.worksheet_id,
                     table_id: String(workspace.table_id), sheet_name: workspace.sheet_name, row_count: target.row_count,
@@ -511,6 +564,14 @@
                         c.role = "result"; c.description = "수식으로 계산 후 값으로 고정한 결과";
                     }
                 });
+                var record = formula.dependencies();
+                if (record && ids.length) {
+                    record.output_ids = ids;
+                    record.full = record.full && result.targets.every(function (range) { return range.row_start === selection.row_start && range.row_count === selection.row_count; });
+                    record.coverage = null;
+                    dependencies.register(workspace, record);
+                    await dependencies.reconcile(workspace);
+                }
                 lastResults = ids; finalized = null;
                 if (ids.length) {
                     target = Object.assign({}, target, {row_start: result.targets[0].row_start, row_count: result.targets[0].row_count}); display(ids, true);

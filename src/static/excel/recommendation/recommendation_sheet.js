@@ -24,7 +24,8 @@
             var columns = selectedColumns(info, ids);
             var groups = new Map(), matchedCount = 0, seen = new Set();
             var filter = workspace.row_filter || null;
-            var filterColumns = filter ? selectedColumns(info, [filter.column_id]) : [];
+            var filterIds = window.operationsSheet.filterColumns(filter);
+            var filterColumns = selectedColumns(info, filterIds), accepts = window.operationsSheet.compileFilter(filter);
             for (var offset = 0; offset < target.row_count; offset += batchSize) {
                 cancelled();
                 var count = Math.min(batchSize, target.row_count - offset);
@@ -32,7 +33,7 @@
                 part.forEach(function (row) {
                     if (!Number.isSafeInteger(row.identity) || row.identity < 1 || seen.has(row.identity)) throw new Error("원본 행 식별값이 없거나 중복되었습니다.");
                     seen.add(row.identity);
-                    if (filter && !window.operationsSheet.matches(row.values[3], filter)) return;
+                    if (!accepts(function (id) { return row.values[3 + filterIds.indexOf(id)]; }, row.identity)) return;
                     row.values = row.values.slice(0, 3); matchedCount++;
                     var key = JSON.stringify(row.values.map(function (value) { return value.toUpperCase(); }));
                     var group = groups.get(key);
@@ -53,7 +54,7 @@
                 cancelled();
                 var group = selected[index];
                 var row = (await chunk(context, info, group.excel_row - 1, 1, columns.concat(filterColumns)))[0];
-                if (row.identity !== group.identity || (filter && !window.operationsSheet.matches(row.values[ids.length], filter))) {
+                if (row.identity !== group.identity || !accepts(function (id) { return row.values[ids.length + filterIds.indexOf(id)]; }, row.identity)) {
                     throw new Error("집계 중 대표 행이나 조건이 바뀌었습니다. 다시 요청하세요.");
                 }
                 var values = row.values.slice(0, ids.length).map(function (value) { return value.toUpperCase(); });
