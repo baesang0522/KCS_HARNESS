@@ -1,173 +1,139 @@
 "use strict";
 (function () {
     window.createInvestigationController = function (options) {
-        var cid = null, state = null, version = 0, readVersion = 0, editVersion = 0, dirty = false;
-        var fields = [];
-        function el(id) { return document.getElementById('investigation-' + id); }
+        var cid = null, state = null, version = 0, binding = null, readySheets = new Set();
+        var sheet = options.sheet || window.investigationSheet;
         function endpoint() { return '/conversations/' + encodeURIComponent(cid) + '/investigation'; }
-        function status(text) { el('status').textContent = text; }
-        function open() { el('panel').hidden = false; el('title').focus(); }
-        function node(tag, text) {
-            var item = document.createElement(tag);
-            if (text !== undefined) item.textContent = text;
-            return item;
-        }
-        function markDirty() { editVersion++; dirty = true; status('수정한 내용은 아직 저장되지 않았어요.'); }
-        function button(parent, text, action) {
-            var item = node('button', text); item.type = 'button';
-            item.addEventListener('click', action); parent.appendChild(item); return item;
-        }
-        function field(parent, label, tag, value, max) {
-            var wrapper = node('label', label), input = node(tag);
-            input.value = value; if (max) input.maxLength = max;
-            if (tag === 'textarea') input.rows = 3;
-            input.addEventListener('input', markDirty);
-            input.addEventListener('change', markDirty);
-            wrapper.appendChild(input); parent.appendChild(wrapper); return input;
-        }
-        function updateControls() {
-            el('panel').querySelectorAll('button,input,textarea,select').forEach(function (control) {
-                control.disabled = options.isBusy() || !cid || !state;
-            });
-            el('close').disabled = false;
-            el('reload').disabled = options.isBusy() || !cid;
-        }
-        function activeOptions(value) {
-            var select = el('active'); select.replaceChildren();
-            var empty = node('option', '선택하지 않음'); empty.value = ''; select.appendChild(empty);
-            fields.forEach(function (row) {
-                if (!row.condition.condition_id) return;
-                var item = node('option', row.title.value); item.value = row.condition.condition_id;
-                select.appendChild(item);
-            });
-            select.value = value || '';
-        }
-        function addCondition(condition) {
-            var article = node('article'); article.className = 'investigation-condition';
-            var row = {condition: condition, article: article};
-            row.title = field(article, '조건 이름', 'input', condition.title, 120);
-            row.description = field(article, '찾을 대상과 조건', 'textarea', condition.description, 2000);
-            row.status = field(article, '확인 상태', 'select', '', null);
-            [['candidate', '검토 전 후보'], ['confirmed', '사용자 확인'], ['needs_review', '재확인 필요']].forEach(function (entry) {
-                var option = node('option', entry[1]); option.value = entry[0]; row.status.appendChild(option);
-            });
-            row.status.value = condition.status;
-            if (condition.edited) article.appendChild(node('p', '사용자가 작성·수정한 조건'));
-            if (condition.uncertainty) article.appendChild(node('p', '확인할 부분: ' + condition.uncertainty));
-            if (condition.review_reason) article.appendChild(node('p', condition.review_reason));
-            var links = node('fieldset'); links.appendChild(node('legend', '연결할 데이터 열 · 선택 사항'));
-            row.columns = (state.columns || []).map(function (column) {
-                var label = node('label'), input = node('input'); input.type = 'checkbox';
-                input.checked = (condition.column_ids || []).includes(column.column_id);
-                input.addEventListener('change', markDirty);
-                label.appendChild(input); label.appendChild(node('span', column.header)); links.appendChild(label);
-                return {id: column.column_id, input: input};
-            });
-            if (!row.columns.length) links.appendChild(node('p', '작업표를 연결하면 열을 선택할 수 있어요.'));
-            article.appendChild(links);
-            var evidence = node('details'); evidence.appendChild(node('summary', '문서 근거'));
-            (condition.evidence || []).forEach(function (item) {
-                evidence.appendChild(node('p', item.filename + ' · ' + item.page_number + '쪽'));
-                evidence.appendChild(node('blockquote', item.quote));
-            });
-            if (!(condition.evidence || []).length) evidence.appendChild(node('p', '사용자가 추가한 조건이에요.'));
-            article.appendChild(evidence);
-            button(article, '조건 제거', function () {
-                fields = fields.filter(function (value) { return value !== row; });
-                article.hidden = true; activeOptions(el('active').value); markDirty();
-            });
-            fields.push(row); el('conditions').appendChild(article);
+        function status(text) { document.getElementById('documents-status').textContent = text; }
+        function show() {
+            document.getElementById('documents-panel').hidden = false;
+            document.getElementById('documents-toggle').textContent = '추출내용 접기';
+            document.getElementById('documents-toggle').setAttribute('aria-expanded', 'true');
         }
         function render() {
-            fields = []; el('conditions').replaceChildren(); el('warnings').replaceChildren();
-            el('goal').value = state ? state.goal : '';
-            el('workspace').textContent = state && state.workspace ? '연결 작업표: ' + state.workspace.sheet_name : '아직 작업표에 연결하지 않았어요.';
-            if (state) {
-                state.conditions.forEach(addCondition);
-                Object.keys(state.document_notes).forEach(function (id) {
-                    state.document_notes[id].forEach(function (note) { el('warnings').appendChild(node('p', note)); });
-                });
-            }
-            activeOptions(state && state.active_condition_id); dirty = false; updateControls();
+            var target = document.getElementById('investigation-workspace');
+            target.textContent = state && state.workspace ? '작업표: ' + state.workspace.sheet_name : '작업표를 준비하면 자동으로 연결돼요.';
+            if (options.onChanged) options.onChanged();
         }
-        async function refresh(force) {
-            if (!cid) return;
-            if (dirty && !force) { status('자료가 변경됐어요. 저장 전 내용을 확인하고, 필요하면 저장값을 다시 불러오세요.'); return; }
-            var expected = version, reading = ++readVersion, edits = editVersion;
+        async function refresh() {
+            var expected = version, result = await options.api.requestJson(endpoint());
+            if (expected !== version) throw new Error('대화가 바뀌었어요.');
+            state = result; render(); return state;
+        }
+        async function load(id) {
+            version++; cid = id; state = null; binding = null; readySheets = new Set();
+            var expected = version;
             try {
-                var result = await options.api.requestJson(endpoint());
-                if (expected !== version || reading !== readVersion) return;
-                if (edits !== editVersion) { status("수정 중인 내용을 유지했어요. 저장하거나 다시 불러오세요."); return; }
-                state = result; render(); status('조사 조건 ' + state.conditions.length + '개를 불러왔어요.'); return true;
+                await refresh();
+                for (var did of Object.keys(state.reviews || {})) {
+                    var ready = await sheet.isReady(id, did, state.reviews[did]);
+                    if (expected !== version) return;
+                    if (ready) readySheets.add(did);
+                }
+                render();
             } catch (error) { if (expected === version) status(error.message); }
         }
-        async function load(conversationId) {
-            version++; cid = conversationId; state = null; dirty = false; render();
-            el('panel').hidden = true; status(''); await refresh(true);
+        function sameTarget(a, b) {
+            return a && b && ['workspace_id', 'worksheet_id', 'table_id'].every(function (key) { return String(a[key]) === String(b[key]); });
         }
-        function payload() {
-            return {revision: state.revision, goal: el('goal').value,
-                active_condition_id: el('active').value || null,
-                conditions: fields.map(function (row) {
-                    return {condition_id: row.condition.condition_id || null, title: row.title.value,
-                        description: row.description.value, status: row.status.value,
-                        column_ids: row.columns.filter(function (c) { return c.input.checked; }).map(function (c) { return c.id; })};
-                })};
+        function validateWorkspace(target) {
+            if (!state) throw new Error('조사 정보를 아직 읽지 못했어요. 화면을 새로 불러와 주세요.');
+            if (state.workspace && !sameTarget(state.workspace, target)) throw new Error('이 대화는 이미 작업표 하나로 조사 중이에요. 새 조사는 새 대화에서 시작하세요.');
         }
-        async function save(bind) {
-            if (!state || options.isBusy()) return;
-            var expected = version, url = endpoint(), data = payload();
-            ++readVersion;
-            options.setBusy(true); updateControls();
-            try {
-                data.workspace = await options.getWorkspace(); data.bind_workspace = bind;
-                if (expected !== version) return;
-                var result = await options.api.requestJson(url, {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
-                if (expected !== version) return;
-                state = result; render(); status('조사 조건을 저장했어요. 다음 대화에서도 이 조건을 참고해요. Excel 셀은 바꾸지 않았어요.');
-            } catch (error) { if (expected === version) status(error.message); }
-            finally { options.setBusy(false); updateControls(); }
+        async function bind(target) {
+            if (!cid || !target) return;
+            validateWorkspace(target);
+            if (state && state.workspace && sameTarget(state.workspace, target) && state.workspace.sheet_name === target.sheet_name) return;
+            if (binding) return binding;
+            var expected = version, url = endpoint();
+            binding = (async function () {
+                var result = await options.api.requestJson(url + '/workspace', {
+                    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(target)});
+                if (expected !== version) throw new Error('대화가 바뀌었어요.');
+                state = result; render();
+            })();
+            try { await binding; } finally { if (expected === version) binding = null; }
         }
-        async function extract(documentId) {
+        async function prepare() {
+            await refresh();
+            await bind(options.getWorkspace());
+        }
+        async function extract(documentId, filename) {
             if (options.isBusy() || !cid) return;
-            open();
-            if (dirty) { status('수정 중인 조사 조건을 먼저 저장해 주세요.'); return; }
-            var requestedVersion = version;
-            if (!await refresh(true) || requestedVersion !== version || options.isBusy()) return;
-            if (Object.prototype.hasOwnProperty.call(state.document_notes, documentId)) {
-                status('이미 읽은 문서예요. 저장한 수정·삭제 내용을 유지했어요.'); return;
-            }
-            var expected = version, url = endpoint(), conversationId = cid;
-            var run = options.beginRequest(), requestId = options.api.newRequestId();
-            run.request = {conversation_id: conversationId, request_id: requestId};
-            options.setBusy(true); updateControls(); status('PDF에서 조사 조건과 근거를 읽고 있어요…');
+            var expected = version, run = options.beginRequest(), url = endpoint();
+            options.setBusy(true); show();
             try {
-                var result = await options.api.requestJson(url + '/extractions/' + requestId, {
-                    method: 'POST', headers: {'Content-Type': 'application/json'}, signal: run.controller.signal,
-                    body: JSON.stringify({document_id: documentId, revision: state.revision})
-                });
+                await prepare(); options.checkRequest(run);
+                if (expected !== version) return;
+                if (!Object.prototype.hasOwnProperty.call(state.document_notes, documentId)) {
+                    var requestId = options.api.newRequestId();
+                    run.request = {conversation_id: cid, request_id: requestId};
+                    status(filename + ' · AI가 회사·품목과 근거를 정리하고 있어요…');
+                    var result = await options.api.requestJson(url + '/extractions/' + requestId, {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({document_id: documentId, revision: state.revision}), signal: run.controller.signal});
+                    options.checkRequest(run);
+                    if (expected !== version) return;
+                    state = result; render();
+                }
                 options.checkRequest(run);
-                if (expected !== version) return;
-                state = result; render(); status('조건 후보를 읽었어요. 내용을 수정하거나 확인 상태를 바꾸고 저장하세요. 거래 행은 아직 선별하지 않았어요.');
+                // Excel 작성 중에는 중지 버튼 대신 완료/실패를 기다린다. 사용자 수정 시트는 재작성하지 않는다.
+                options.endRequest(run); options.setBusy(true);
+                await sheet.ensure(cid, documentId, filename, state.reviews[documentId] || []);
+                if (expected === version) {
+                    readySheets.add(documentId);
+                    status(filename + ' · 검토 시트를 만들었어요. Excel 시트 탭에서 확인·수정한 뒤 ‘수정 내용 반영’을 눌러 주세요.');
+                }
+                return true;
             } catch (error) {
-                if (expected !== version) return;
-                if (run.cancelled || error.name === 'AbortError') {
-                    await options.reportStop(run); status('조사 조건 읽기를 중지했어요. 저장값을 다시 불러와 상태를 확인할 수 있어요.');
-                } else status(error.message);
-            } finally { options.endRequest(run); options.setBusy(false); updateControls(); }
+                if (expected === version) {
+                    if (run.cancelled || error.name === 'AbortError') { await options.reportStop(run); status('추출을 중지했어요. 첨부한 PDF는 유지돼요.'); }
+                    else status(error.message);
+                }
+                return false;
+            } finally { options.endRequest(run); options.setBusy(false); render(); }
         }
-        el('goal').addEventListener('input', markDirty); el('active').addEventListener('change', markDirty);
-        el('save').addEventListener('click', function () { return save(false); });
-        el('bind').addEventListener('click', function () { return save(true); });
-        el('reload').addEventListener('click', function () { if (!options.isBusy()) return refresh(true); });
-        el('add').addEventListener('click', function () {
-            if (!state || options.isBusy()) return;
-            addCondition({title: '', description: '', status: 'candidate', column_ids: [], evidence: []}); markDirty();
-        });
-        el('toggle').addEventListener('click', function () { if (el('panel').hidden) { open(); return refresh(); } el('panel').hidden = true; });
-        el('close').addEventListener('click', function () { el('panel').hidden = true; el('toggle').focus(); });
-        render();
-        return {load: load, refresh: refresh, extract: extract, updateControls: updateControls,
-            open: async function () { open(); await refresh(); }};
+        async function apply(documentId) {
+            if (options.isBusy() || !cid) return;
+            var expected = version, conversationId = cid, url = endpoint();
+            options.setBusy(true); show();
+            try {
+                await prepare();
+                var draft = await sheet.read(conversationId, documentId);
+                if (!draft) throw new Error('먼저 검토 시트를 열어 주세요.');
+                if (expected !== version) return;
+                // 저장 응답 유실/시트 메타데이터 저장 실패 후에도 같은 수정값을 안전하게 재반영한다.
+                var current = state.reviews[documentId] || [];
+                var confirmed = state.conditions.filter(function (c) { return c.source_document_id === documentId; }).every(function (c) { return c.status === 'confirmed'; });
+                if (sheet.canonical(current) !== sheet.canonical(draft.rows) || !confirmed) {
+                    var saved = await options.api.requestJson(url + '/reviews/' + encodeURIComponent(documentId), {
+                        method: 'PUT', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({revision: state.revision, expected_rows: draft.baseline, rows: draft.rows})});
+                    if (expected !== version) return;
+                    state = saved;
+                }
+                try { await sheet.markSaved(conversationId, documentId, state.reviews[documentId] || []); }
+                catch (error) { throw new Error('서버에는 반영했지만 시트 기록 저장에 실패했어요. 같은 버튼으로 다시 반영해 주세요. ' + error.message); }
+                if (expected === version) { render(); status('수정 내용을 반영했어요. 이후 대화에서는 이 값을 사용해요. 거래 행 추출은 아직 실행하지 않았어요.'); }
+            } catch (error) { if (expected === version) status(error.message); }
+            finally { options.setBusy(false); }
+        }
+        async function ensureSynced() {
+            if (!cid) return;
+            await prepare();
+            for (var did of Object.keys(state.reviews || {})) {
+                var draft = await sheet.read(cid, did);
+                if (draft && sheet.canonical(draft.rows) !== sheet.canonical(state.reviews[did])) {
+                    show(); throw new Error('검토 시트에 반영하지 않은 수정이 있어요. ‘수정 내용 반영’을 먼저 눌러 주세요.');
+                }
+            }
+        }
+        function info(did) {
+            return state ? {ready: Object.prototype.hasOwnProperty.call(state.document_notes, did) && readySheets.has(did),
+                count: (state.reviews[did] || []).length, warnings: state.document_notes[did] || []} : {ready: false, count: 0, warnings: []};
+        }
+        return {load: load, refresh: refresh, prepare: prepare, bind: bind, validateWorkspace: validateWorkspace,
+            extract: extract, apply: apply, info: info, ensureSynced: ensureSynced,
+            open: async function () { show(); await refresh(); }};
     };
 })();

@@ -51,6 +51,9 @@ async def upload_document(conversation_id: UUID, document_id: UUID, request: Req
                 if did in conversation.documents:
                     raise ConflictError("이미 처리한 첨부 요청입니다.")
                 check_capacity(conversation, document)
+                workspace = conversation.investigation.workspace
+                if workspace:
+                    document.link = DocumentLink(task_type=workspace.task_type, workspace=workspace)
                 conversation.documents[did] = document
             return document.summary()
 

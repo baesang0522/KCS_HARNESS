@@ -5,7 +5,7 @@ const {createDOM} = require('../helpers/taskpane_dom.cjs');
 async function setup() {
     const h = createDOM();
     h.node = id => h.document.getElementById(id);
-    h.context = null; h.requests = []; h.storage = new Map(); h.serial = 0;
+    h.extracted=[]; h.context = null; h.requests = []; h.storage = new Map(); h.serial = 0;
     h.reply = async (url, options) => {
         if (url === '/conversations') return {conversation_id: 'conv-' + ++h.serial};
         if (url.endsWith('/cancel')) { h.cancelled = true; return {status: 'cancelled'}; }
@@ -32,6 +32,7 @@ async function setup() {
         onConversationChanged: id => h.documents.load(id),
         onBusy: () => { if (h.documents) h.documents.updateControls(); }});
     h.documents = h.window.createDocumentsController({api: h.api, getWorkspace: () => h.context,
+        beforeUpload:async()=>{h.prepared=true;},readConditions:async(id,name)=>{h.extracted.push({id,name});return true;},
         isBusy: h.chat.isBusy, setBusy: h.chat.setBusy, beginRequest: h.chat.beginRequest,
         endRequest: h.chat.endRequest, checkRequest: h.chat.checkRequest, reportStop: h.chat.reportStop});
     await h.chat.initialize();
@@ -40,38 +41,27 @@ async function setup() {
     return h;
 }
 
-test('PDF uploads without a workspace, previews by page, binds pending task then only matching workspace', async () => {
-    const h = await setup(); await h.upload();
-    assert.equal(h.node('documents-panel').hidden, false);
-    assert.match(h.node('documents-list').textContent, /텍스트 없음: 2쪽/);
-    assert.equal(h.node('documents-list').querySelector('select').value, '');
-    await h.button('추출 내용 보기').emit('click');
-    assert.match(h.node('document-page-body').textContent, /ABC/);
-    h.node('documents-list').querySelector('select').value = 'counterparty_cleanup';
-    await h.button('연결').emit('click');
-    assert.match(h.node('documents-list').textContent, /작업표 준비 대기/);
-    await h.documents.attachPending({task_type: 'model_normalization', workspace_id: 'other'});
-    assert.equal(h.requests.filter(r => r.options.method === 'PUT').length, 1);
-    const workspace = {task_type: 'counterparty_cleanup', workspace_id: 'work', worksheet_id: 's', table_id: 't', sheet_name: '해외'};
-    await h.documents.attachPending(workspace);
-    assert.match(h.node('documents-list').textContent, /연결: 해외/);
-    await h.documents.attachPending({...workspace, workspace_id: 'different'});
-    assert.equal(h.requests.filter(r => r.options.method === 'PUT').length, 2);
-    await h.button('제거').emit('click');
-    assert.equal(h.node('documents-toggle').textContent, '참고자료 (0)');
-    assert.equal(h.node('document-preview').hidden, true);
-    assert.equal(h.requests.some(r => r.url === '/chat'), false);
+test('upload automatically extracts without redundant source, sheet-open or removal controls',async()=>{
+    const h=await setup();await h.upload();
+    assert.equal(h.prepared,true);assert.equal(h.extracted.length,1);
+    assert.equal(h.node('documents-list').querySelector('select'),null);
+    assert.match(h.node('documents-list').textContent,/텍스트 없음: 2쪽/);
+    assert.equal(h.button('원문 보기'),undefined);assert.equal(h.button('검토 시트 열기'),undefined);
+    assert.equal(h.node('document-preview'),null);
+    await h.node('documents-toggle').emit('click');assert.equal(h.node('documents-panel').hidden,true);
+    assert.match(h.node('documents-toggle').textContent,/추출내용 보기/);
+    await h.node('documents-toggle').emit('click');assert.equal(h.node('documents-panel').hidden,false);
+    assert.equal(h.button('제거'),undefined);assert.equal(h.button('삭제'),undefined);
+    assert.equal(h.node('documents-list').children.length,1);
+    assert.equal(h.requests.some(r=>r.options.method==='DELETE'),false);assert.equal(h.requests.some(r=>r.url==='/chat'),false);
 });
 
-test('current workspace is suggested and connected; PDF names are text, not HTML', async () => {
-    const h = await setup();
-    h.context = {task_type: 'model_normalization', workspace_id: 'work', sheet_name: '모델'};
-    await h.upload('<img src=x onerror=alert(1)>.pdf');
-    assert.equal(h.node('documents-list').querySelector('select').value, 'model_normalization');
-    assert.equal(h.node('documents-list').querySelectorAll('img').length, 0);
-    await h.button('연결').emit('click');
-    const call = h.requests.find(r => r.options.method === 'PUT');
-    assert.equal(JSON.parse(call.options.body).workspace.workspace_id, 'work');
+test('file drop uses the same sequential upload and extraction flow; invalid types do not upload',async()=>{
+    const h=await setup();let prevented=false;
+    await h.node('composer').emit('drop',{preventDefault(){prevented=true;},dataTransfer:{files:[{name:'한글.pdf'},{name:'영문.PDF'}]}});
+    assert.equal(prevented,true);assert.deepEqual(h.extracted.map(e=>e.name),['한글.pdf','영문.PDF']);
+    await h.upload('photo.png');assert.equal(h.extracted.length,2);assert.match(h.node('documents-status').textContent,/PDF 파일만/);
+    await h.upload('<img src=x>.pdf');assert.equal(h.node('documents-list').querySelectorAll('img').length,0);
 });
 
 test('existing stop button cancels PDF request and ignores a late upload response', async () => {
@@ -89,22 +79,20 @@ test('existing stop button cancels PDF request and ignores a late upload respons
     await h.node('composer').emit('submit');
     release(); await upload;
     assert.equal(h.cancelled, true);
-    assert.equal(h.node('documents-toggle').textContent, '참고자료 (0)');
+    assert.equal(h.node('documents-list').children.length, 0);
     assert.match(h.node('documents-status').textContent, /중지/);
     assert.equal(h.chat.isBusy(), false);
 });
 
-test('changing conversations clears attachments and a late preview cannot reappear', async () => {
+test('changing conversations ignores a late attachment list response', async () => {
     const h = await setup(); await h.upload();
     const original = h.reply; let release;
-    h.reply = (url, options) => url.includes('/pages/') ? new Promise(resolve => { release = resolve; }) : original(url, options);
-    const preview = h.button('추출 내용 보기').emit('click');
-    h.storage.clear();
+    h.reply = (url, options) => url.endsWith('/documents') ? new Promise(resolve => { release = resolve; }) : original(url, options);
+    const refresh = h.documents.refresh();
+    h.reply = original; h.storage.clear();
     await h.node('new-chat').emit('click');
-    release({readable: true, text: '이전 대화 비밀 내용'}); await preview;
-    assert.equal(h.node('document-preview').hidden, true);
-    assert.equal(h.node('documents-toggle').textContent, '참고자료 (0)');
-    assert.equal(h.node('document-page-body').textContent.includes('비밀'), false);
+    release({documents:[{document_id:'old',filename:'이전 대화 파일.pdf',page_count:1,unreadable_pages:[]}]}); await refresh;
+    assert.equal(h.node('documents-list').children.length, 0);
 });
 
 test('upload errors stay visible and do not create a ready attachment', async () => {
@@ -115,12 +103,12 @@ test('upload errors stay visible and do not create a ready attachment', async ()
     };
     await h.upload();
     assert.match(h.node('documents-status').textContent, /암호/);
-    assert.equal(h.node('documents-toggle').textContent, '참고자료 (0)');
+    assert.equal(h.node('documents-list').children.length, 0);
     assert.equal(h.node('document-add').disabled, false);
 });
 
 
-test('reference document condition button passes the document ID without starting Excel work', async () => {
+test('retry button passes the document ID and filename to extraction', async () => {
     let selected;
     const page = createDOM(); page.load('documents/documents.js');
     const document = {document_id:'reference',filename:'기준.pdf',page_count:1,unreadable_pages:[],link:null};
@@ -129,6 +117,17 @@ test('reference document condition button passes the document ID without startin
         isBusy:()=>false,setBusy(){},readConditions:async id=>{selected=id;}
     });
     await controller.load('conversation');
-    const button = page.document.getElementById('documents-list').querySelectorAll('button').find(b=>b.textContent==='조사 조건 읽기');
+    const button = page.document.getElementById('documents-list').querySelectorAll('button').find(b=>b.textContent==='추출 다시 시도');
     await button.emit('click');assert.equal(selected,'reference');
+});
+
+
+test('stopping the first upload stops the remaining dropped-file queue',async()=>{
+    const h=await setup(),original=h.reply;let release,entered;
+    const started=new Promise(resolve=>entered=resolve);
+    h.reply=async(url,opts)=>{if(opts.method==='POST'&&url.includes('/documents/')){entered();return new Promise(resolve=>release=()=>resolve({document_id:'late',filename:'a.pdf',page_count:1,unreadable_pages:[]}));}return original(url,opts);};
+    const pending=h.node('composer').emit('drop',{dataTransfer:{files:[{name:'a.pdf'},{name:'b.pdf'}]}});
+    await started;await h.node('composer').emit('submit');release();await pending;
+    assert.equal(h.requests.filter(r=>r.options.method==='POST'&&r.url.includes('/documents/')).length,1);
+    assert.equal(h.extracted.length,0);
 });

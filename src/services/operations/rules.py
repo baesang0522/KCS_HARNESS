@@ -1,5 +1,6 @@
 """LLM 없이 실행하는 결정론적 문자열 연산."""
 import re
+import unicodedata
 
 from services.operations.schemas import Rule
 
@@ -20,6 +21,10 @@ def preprocess(value: str, rules: list[Rule]) -> str:
                 value = value.upper()
             case "lowercase":
                 value = value.lower()
+            case "remove_hangul":
+                value = re.sub(r"[\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7a3\ud7b0-\ud7ff\uffa0-\uffdc]", "", value)
+            case "remove_brackets":
+                value = "".join(char for char in value if unicodedata.category(char) not in {"Ps", "Pe"} and char not in "<>＜＞")
             case "remove_words":
                 # 정규식 입력은 받지 않는다. 대소문자를 구분해 온전한 단어/구절만 제거한다.
                 for word in rule.words:

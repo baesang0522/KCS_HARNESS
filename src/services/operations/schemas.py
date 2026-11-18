@@ -44,7 +44,7 @@ def extraction_column_id(workspace: dict | None) -> str:
 
 class Rule(StrictModel):
     operation: Literal["trim", "collapse_whitespace", "normalize_fullwidth_ascii",
-                       "uppercase", "lowercase", "remove_words"]
+                       "uppercase", "lowercase", "remove_words", "remove_hangul", "remove_brackets"]
     words: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default_factory=list, max_length=50)
 
     @model_validator(mode="after")

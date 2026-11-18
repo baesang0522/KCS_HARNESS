@@ -12,6 +12,12 @@ class Element {
     }
     get value() { return this.tagName === 'select' ? (this._value || this.children.find(c => c.selected)?.value || this.children[0]?.value || '') : this._value; }
     set value(value) { this._value = String(value); if (this.tagName === 'select') this.children.forEach(c => { c.selected = c.value === this._value; }); }
+    cloneNode(deep) {
+        const result = new Element(this.tagName, {...this.attrs});
+        result._value=this._value;result._text=this._text;result.checked=this.checked;result.disabled=this.disabled;
+        if(deep)this.children.forEach(child=>result.appendChild(child.cloneNode(true)));
+        return result;
+    }
     get parentElement() { return this.parentNode; }
     contains(node) { return this === node || this.children.some(child => child.contains(node)); }
     replaceChildren(...nodes) { this.textContent = ''; nodes.forEach(node => this.appendChild(node)); }

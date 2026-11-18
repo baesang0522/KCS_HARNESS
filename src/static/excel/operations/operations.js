@@ -162,7 +162,7 @@
             });
             var labels = {trim: "앞뒤 공백 제거", collapse_whitespace: "연속 공백 정리",
                 normalize_fullwidth_ascii: "전각 ASCII 변환", uppercase: "대문자 통일",
-                lowercase: "소문자 통일", remove_words: "지정 문자열 제거"};
+                lowercase: "소문자 통일", remove_hangul: "한글 제거", remove_brackets: "괄호 기호 제거", remove_words: "지정 문자열 제거"};
             var action = "";
             if (operation.kind === "preprocess") {
                 action = operation.rules.map(function (rule) {

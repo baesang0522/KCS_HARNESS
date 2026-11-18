@@ -1,7 +1,7 @@
 "use strict";
 (function () {
     var api = window.apiClient;
-    var workspace = null, formula = null, help = null, documents = null, investigation = null;
+    var workspace = null, formula = null, help = null, documents = null, investigation = null, reviewPreprocess = null;
     var connection = document.getElementById('connection');
     var diagnostic = document.getElementById('diagnostic');
     var ready = false;
@@ -29,12 +29,14 @@
         closeTaskCards: closeTaskCards,
         resetTasks: function () { workspace.reset(); formula.reset(); updateWorkspaceButton(); },
         handleUIAction: handleUIAction,
+        beforeSend: function () { return investigation && investigation.ensureSynced(); },
         onConversationChanged: async function (id) {
+            if (reviewPreprocess) reviewPreprocess.reset();
             await Promise.all([documents && documents.load(id), investigation && investigation.load(id)]);
         },
         onBusy: function (value) {
             if (documents) documents.updateControls();
-            if (investigation) investigation.updateControls();
+            if (reviewPreprocess) reviewPreprocess.updateControls();
             if (help) help.updateControls();
             if (workspace) workspace.setBusy(value);
             if (formula) formula.setBusy(value);
@@ -116,9 +118,10 @@
         isBusy: chat.isBusy,
         setBusy: chat.setBusy,
         getConversationId: chat.getConversationId,
-        onWorkspaceReady: function (target) {
+        beforeWorkspaceChange: function (target) { if (investigation) investigation.validateWorkspace(target); },
+        onWorkspaceReady: async function (target) {
             updateWorkspaceButton();
-            if (documents) return documents.attachPending(target);
+            if (investigation) await investigation.bind(target);
         }
     });
     formula = window.createFormulaController({
@@ -151,13 +154,19 @@
         sendMessage: chat.sendMessage
     });
     investigation = window.createInvestigationController({
-        api: api, getWorkspace: workspace.context,
+        api: api, getWorkspace: workspace.referenceTarget,
+        onChanged: function () { if (documents) documents.render(); },
         isBusy: chat.isBusy, setBusy: chat.setBusy,
         beginRequest: chat.beginRequest, endRequest: chat.endRequest,
         checkRequest: chat.checkRequest, reportStop: chat.reportStop
     });
+    reviewPreprocess = window.createReviewPreprocess({
+        api: api, getConversationId: chat.getConversationId, isBusy: chat.isBusy, setBusy: chat.setBusy,
+        closeTaskCards: closeTaskCards
+    });
     documents = window.createDocumentsController({
-        readConditions: investigation.extract, onChanged: investigation.refresh,
+        readConditions: investigation.extract, preprocessReview: reviewPreprocess.open,
+        beforeUpload: investigation.prepare, reviewInfo: investigation.info, applyReview: investigation.apply,
         api: api, getWorkspace: workspace.referenceTarget,
         isBusy: chat.isBusy, setBusy: chat.setBusy,
         beginRequest: chat.beginRequest, endRequest: chat.endRequest,

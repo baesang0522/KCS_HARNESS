@@ -30,6 +30,7 @@ async function setup(saved) {
     const close = () => { if (h.help) h.help.dismiss(); h.workspace.dismiss(); };
     h.chat = h.window.createChatController({api: h.api, getWorkspace: () => h.workspace,
         closeTaskCards: close, resetTasks: () => h.workspace.reset(),
+        beforeSend:()=>h.beforeSend && h.beforeSend(),
         handleUIAction: async action => { h.actions.push(action); if (action?.type === 'open_cleaning_help') await h.help.open(action.column_ids); },
         onBusy: () => { if (h.help) h.help.updateControls(); }});
     h.help = h.window.createCleaningHelp({workspace: h.workspace, isBusy: h.chat.isBusy, setBusy: h.chat.setBusy,
@@ -165,7 +166,7 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
     h.window.createWorkspaceController = options => { workspaceOptions = options; return stub; };
     h.window.createFormulaController = options => { formulaOptions = options; return stub; };
     h.window.createFormulaUI = () => ({});
-    h.load('chat/chat.js'); h.load('cleaning_help/cleaning_help.js'); h.load('documents/documents.js'); h.load('documents/investigation.js'); h.load('taskpane.js');
+    h.load('chat/chat.js'); h.load('cleaning_help/cleaning_help.js'); h.load('documents/documents.js'); h.load('documents/investigation.js'); h.load('documents/review_preprocess.js'); h.load('taskpane.js');
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(workspaceOptions.isBusy(), false); assert.equal(workspaceOptions.getConversationId(), 'conversation');
     assert.equal(formulaOptions.validateSource, stub.validateFormulaSource);
@@ -244,4 +245,16 @@ test('explicit conditional chat automatically prepares one preview after releasi
         column_ids:['trade'],condition:{column_id:'trade',operator:'contains',value:'ABC'},destination_column_id:'model',assigned_value:'확인'}}});
     h.node('message').value='조건에 맞는 행을 수정해줘';await h.chat.sendMessage();
     assert.equal(previews,1);assert.equal(h.chat.isBusy(),false);
+});
+
+
+test('unreflected review edits block both new chat requests and a pending retry before sending',async()=>{
+    const h=await setup();h.reply=async()=>{throw Error('network');};
+    h.node('message').value='조건 설명';await h.chat.sendMessage();
+    const calls=h.requests.filter(r=>r.url==='/chat').length;
+    h.beforeSend=async()=>{throw Error('수정 내용 반영을 먼저 눌러 주세요.');};
+    await h.chat.sendMessage();assert.equal(h.requests.filter(r=>r.url==='/chat').length,calls);
+    h.node('message').value='새 질문';await h.chat.sendMessage();
+    assert.equal(h.requests.filter(r=>r.url==='/chat').length,calls);
+    assert.match(h.node('conversation').textContent,/수정 내용 반영/);assert.equal(h.chat.isBusy(),false);
 });
