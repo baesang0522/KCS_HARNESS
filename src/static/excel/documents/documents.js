@@ -1,12 +1,11 @@
 "use strict";
 (function () {
     window.createDocumentsController = function (options) {
-        var api = options.api, cid = null, items = [], previewId = null, pageNumber = 1, version = 0, pageVersion = 0;
+        var api = options.api, cid = null, items = [], version = 0;
         var panel = document.getElementById('documents-panel'), list = document.getElementById('documents-list');
         var status = document.getElementById('documents-status'), input = document.getElementById('document-file');
         var picker = document.getElementById('document-add'), toggle = document.getElementById('documents-toggle');
-        var viewer = document.getElementById('document-preview'), pageInput = document.getElementById('document-page');
-        var body = document.getElementById('document-page-body'), composer = document.getElementById('composer');
+        var composer = document.getElementById('composer');
         function base() { return '/conversations/' + encodeURIComponent(cid) + '/documents'; }
         function endpoint(id) { return base() + '/' + encodeURIComponent(id); }
         function node(tag, text) { var element = document.createElement(tag); if (text !== undefined) element.textContent = text; return element; }
@@ -31,10 +30,9 @@
                 if (item.unreadable_pages.length) row.appendChild(node('p', '텍스트 없음: ' + item.unreadable_pages.join(', ') + '쪽'));
                 info.warnings.forEach(function (warning) { row.appendChild(node('p', warning)); });
                 var actions = node('div'); actions.className = 'document-actions';
-                button(actions, info.ready ? '검토 시트 열기' : '추출 다시 시도', function () { return options.readConditions(item.document_id, item.filename); });
+                if (!info.ready) button(actions, '추출 다시 시도', function () { return options.readConditions(item.document_id, item.filename); });
                 if (info.ready && options.preprocessReview) button(actions, '전처리', function () { return options.preprocessReview(item.document_id, item.filename); });
                 if (info.ready) button(actions, '수정 내용 반영', function () { return options.applyReview(item.document_id); });
-                button(actions, '원문 보기', function () { return showPage(item.document_id, 1); });
                 row.appendChild(actions); list.appendChild(row);
             });
             updateControls();
@@ -45,8 +43,8 @@
             items = result.documents; render();
         }
         async function load(id) {
-            version++; cid = id; items = []; previewId = null; pageVersion++;
-            viewer.hidden = true; body.textContent = ''; status.textContent = ''; show(false); render();
+            version++; cid = id; items = [];
+            status.textContent = ''; show(false); render();
             try { await refresh(); } catch (error) { status.textContent = error.message; show(true); }
         }
         async function upload(file) {
@@ -83,22 +81,6 @@
                 if (await upload(file) === false) return;
             }
         }
-        async function showPage(id, number) {
-            if (options.isBusy()) return;
-            var item = items.find(function (entry) { return entry.document_id === id; }); if (!item) return;
-            number = Math.max(1, Math.min(item.page_count, Math.floor(Number(number) || 1)));
-            var reading = ++pageVersion; previewId = id; pageNumber = number; viewer.hidden = false;
-            pageInput.value = String(number); pageInput.max = String(item.page_count);
-            document.getElementById('document-preview-title').textContent = item.filename + ' · 원문 (읽기 전용)';
-            document.getElementById('document-page-count').textContent = '/ ' + item.page_count + '쪽';
-            body.textContent = '내용을 불러오는 중…';
-            try {
-                var result = await api.requestJson(endpoint(id) + '/pages/' + number);
-                if (reading !== pageVersion) return;
-                if (result.readable) window.markdownRenderer.render(body, result.text);
-                else body.textContent = '읽을 수 있는 텍스트가 없는 페이지예요. 원본을 확인해 주세요.';
-            } catch (error) { if (reading === pageVersion) body.textContent = error.message; }
-        }
         picker.addEventListener('click', function () { if (!options.isBusy() && cid) input.click(); });
         input.addEventListener('change', function () { return uploadFiles(input.files); });
         composer.addEventListener('dragover', function (event) {
@@ -117,9 +99,6 @@
         });
         toggle.addEventListener('click', function () { show(panel.hidden); });
         document.getElementById('documents-close').addEventListener('click', function () { show(false); toggle.focus(); });
-        document.getElementById('document-prev').addEventListener('click', function () { return showPage(previewId, pageNumber - 1); });
-        document.getElementById('document-next').addEventListener('click', function () { return showPage(previewId, pageNumber + 1); });
-        pageInput.addEventListener('change', function () { return showPage(previewId, pageInput.value); });
         render();
         return {load: load, refresh: refresh, render: render, updateControls: updateControls};
     };

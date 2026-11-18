@@ -10,6 +10,9 @@ test('supplier review sheet has only four visible columns, literal text and no r
     assert.equal(sheet.cells[4][0],'01');assert.equal(sheet.formats[4][0],'@');
     assert.deepEqual(plain((await h.review.read('chat','doc')).rows),[row()]);
     assert.deepEqual(source.cells,[['회사'],['보존']]);assert.equal(h.writes.some(w=>w.sheet===source.id),false);
+    assert.equal(await h.review.isReady('chat','doc',[row()]),true);
+    assert.equal(await h.review.isReady('chat','missing',[row()]),false);
+    assert.equal(await h.review.isReady('chat','doc',[{target:{kind:'item'}}]),false);
     const writes=h.writes.length;sheet.cells[4][2]='사용자 변경';
     await h.review.ensure('chat','doc','해외.pdf',[row()]);assert.equal(h.writes.length,writes);assert.equal(sheet.cells[4][2],'사용자 변경');
 });

@@ -1,7 +1,7 @@
 "use strict";
 (function () {
     window.createInvestigationController = function (options) {
-        var cid = null, state = null, version = 0, binding = null;
+        var cid = null, state = null, version = 0, binding = null, readySheets = new Set();
         var sheet = options.sheet || window.investigationSheet;
         function endpoint() { return '/conversations/' + encodeURIComponent(cid) + '/investigation'; }
         function status(text) { document.getElementById('documents-status').textContent = text; }
@@ -21,8 +21,17 @@
             state = result; render(); return state;
         }
         async function load(id) {
-            version++; cid = id; state = null; binding = null;
-            try { await refresh(); } catch (error) { status(error.message); }
+            version++; cid = id; state = null; binding = null; readySheets = new Set();
+            var expected = version;
+            try {
+                await refresh();
+                for (var did of Object.keys(state.reviews || {})) {
+                    var ready = await sheet.isReady(id, did, state.reviews[did]);
+                    if (expected !== version) return;
+                    if (ready) readySheets.add(did);
+                }
+                render();
+            } catch (error) { if (expected === version) status(error.message); }
         }
         function sameTarget(a, b) {
             return a && b && ['workspace_id', 'worksheet_id', 'table_id'].every(function (key) { return String(a[key]) === String(b[key]); });
@@ -71,7 +80,10 @@
                 // Excel 작성 중에는 중지 버튼 대신 완료/실패를 기다린다. 사용자 수정 시트는 재작성하지 않는다.
                 options.endRequest(run); options.setBusy(true);
                 await sheet.ensure(cid, documentId, filename, state.reviews[documentId] || []);
-                if (expected === version) status('검토 시트에서 수정·추가·행 삭제 후 ‘수정 내용 반영’을 눌러 주세요.');
+                if (expected === version) {
+                    readySheets.add(documentId);
+                    status(filename + ' · 검토 시트를 만들었어요. Excel 시트 탭에서 확인·수정한 뒤 ‘수정 내용 반영’을 눌러 주세요.');
+                }
                 return true;
             } catch (error) {
                 if (expected === version) {
@@ -117,7 +129,7 @@
             }
         }
         function info(did) {
-            return state ? {ready: Object.prototype.hasOwnProperty.call(state.document_notes, did),
+            return state ? {ready: Object.prototype.hasOwnProperty.call(state.document_notes, did) && readySheets.has(did),
                 count: (state.reviews[did] || []).length, warnings: state.document_notes[did] || []} : {ready: false, count: 0, warnings: []};
         }
         return {load: load, refresh: refresh, prepare: prepare, bind: bind, validateWorkspace: validateWorkspace,

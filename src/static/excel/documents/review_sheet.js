@@ -46,6 +46,14 @@
         setting.load('value'); await context.sync();
         return setting.isNullObject ? null : setting.value;
     }
+    async function isReady(cid, did, rows) {
+        requireExcel();
+        return Excel.run(async function (context) {
+            var meta = await metadata(context, cid, did);
+            if (!meta || !meta.entries.length) return false;
+            return rows.every(function (row) { return meta.entries.some(function (entry) { return entry.kind === row.target.kind; }); });
+        });
+    }
     async function ensure(cid, did, filename, rows) {
         requireExcel();
         return Excel.run(async function (context) {
@@ -166,6 +174,6 @@
             context.workbook.settings.add(key(cid, did), meta); await context.sync();
         });
     }
-    window.investigationSheet = {ensure: ensure, read: read, markSaved: markSaved, canonical: canonical, parse: parse, values: values,
+    window.investigationSheet = {ensure: ensure, isReady: isReady, read: read, markSaved: markSaved, canonical: canonical, parse: parse, values: values,
         preprocessTargets: preprocessTargets, readPreprocess: readPreprocess, writePreprocess: writePreprocess};
 })();

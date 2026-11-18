@@ -63,7 +63,7 @@
       <section class="normalization-panel" id="documents-panel" aria-labelledby="documents-title" hidden>
         <h2 id="documents-title" tabindex="-1">PDF 추출내용</h2>
         <button type="button" id="documents-close">접기</button>
-        <p>검토 시트에서 내용을 수정하고 ‘수정 내용 반영’을 누르세요. 원문은 근거 확인용이에요.</p>
+        <p>Excel 시트 탭에서 검토 시트를 확인·수정하고 ‘수정 내용 반영’을 누르세요.</p>
         <p id="investigation-workspace"></p>
         <p>서버 재시작 시 자료를 다시 첨부해야 해요. Excel 검토 시트는 남아요.</p>
         <p id="documents-status" role="status" aria-live="polite"></p>
@@ -80,17 +80,6 @@
           <button type="button" id="review-clean-apply" disabled>검토 시트에 적용</button>
           <p id="review-clean-status" role="status" aria-live="polite"></p>
           <div id="review-clean-examples"></div>
-        </section>
-        <section id="document-preview" aria-labelledby="document-preview-title" hidden>
-          <h3 id="document-preview-title"></h3>
-          <div class="document-page-controls">
-            <button type="button" id="document-prev" aria-label="이전 PDF 페이지">이전</button>
-            <label for="document-page" class="sr-only">PDF 페이지</label>
-            <input type="number" id="document-page" min="1" value="1">
-            <span id="document-page-count"></span>
-            <button type="button" id="document-next" aria-label="다음 PDF 페이지">다음</button>
-          </div>
-          <div id="document-page-body" class="message-body" aria-live="polite"></div>
         </section>
       </section>
 

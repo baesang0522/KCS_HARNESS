@@ -41,12 +41,13 @@ async function setup() {
     return h;
 }
 
-test('upload automatically extracts; one panel previews source without misleading removal controls',async()=>{
+test('upload automatically extracts without redundant source, sheet-open or removal controls',async()=>{
     const h=await setup();await h.upload();
     assert.equal(h.prepared,true);assert.equal(h.extracted.length,1);
     assert.equal(h.node('documents-list').querySelector('select'),null);
     assert.match(h.node('documents-list').textContent,/텍스트 없음: 2쪽/);
-    await h.button('원문 보기').emit('click');assert.match(h.node('document-page-body').textContent,/ABC/);
+    assert.equal(h.button('원문 보기'),undefined);assert.equal(h.button('검토 시트 열기'),undefined);
+    assert.equal(h.node('document-preview'),null);
     await h.node('documents-toggle').emit('click');assert.equal(h.node('documents-panel').hidden,true);
     assert.match(h.node('documents-toggle').textContent,/추출내용 보기/);
     await h.node('documents-toggle').emit('click');assert.equal(h.node('documents-panel').hidden,false);
@@ -83,17 +84,15 @@ test('existing stop button cancels PDF request and ignores a late upload respons
     assert.equal(h.chat.isBusy(), false);
 });
 
-test('changing conversations clears attachments and a late preview cannot reappear', async () => {
+test('changing conversations ignores a late attachment list response', async () => {
     const h = await setup(); await h.upload();
     const original = h.reply; let release;
-    h.reply = (url, options) => url.includes('/pages/') ? new Promise(resolve => { release = resolve; }) : original(url, options);
-    const preview = h.button('원문 보기').emit('click');
-    h.storage.clear();
+    h.reply = (url, options) => url.endsWith('/documents') ? new Promise(resolve => { release = resolve; }) : original(url, options);
+    const refresh = h.documents.refresh();
+    h.reply = original; h.storage.clear();
     await h.node('new-chat').emit('click');
-    release({readable: true, text: '이전 대화 비밀 내용'}); await preview;
-    assert.equal(h.node('document-preview').hidden, true);
+    release({documents:[{document_id:'old',filename:'이전 대화 파일.pdf',page_count:1,unreadable_pages:[]}]}); await refresh;
     assert.equal(h.node('documents-list').children.length, 0);
-    assert.equal(h.node('document-page-body').textContent.includes('비밀'), false);
 });
 
 test('upload errors stay visible and do not create a ready attachment', async () => {

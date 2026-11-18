@@ -6,7 +6,7 @@ async function setup() {
     const h=createDOM();h.node=id=>h.document.getElementById(id);h.state={revision:0,conditions:[],document_notes:{},reviews:{},workspace:null};
     h.workspace=null;h.requests=[];h.busy=false;h.serial=0;h.drafts={};h.writes=0;
     h.load('documents/review_sheet.js');
-    h.sheet={canonical:h.window.investigationSheet.canonical,
+    h.sheet={isReady:async(cid,did)=>!!h.drafts[did],canonical:h.window.investigationSheet.canonical,
         ensure:async(cid,did,name,rows)=>{h.opened={cid,did,name};if(!h.drafts[did]){h.writes++;h.drafts[did]={baseline:structuredClone(rows),rows:structuredClone(rows)};}},
         read:async(cid,did)=>structuredClone(h.drafts[did]||null),
         markSaved:async(cid,did,rows)=>{h.drafts[did].baseline=structuredClone(rows);}};
@@ -75,7 +75,9 @@ test('refresh or binding failure stops before invoking the model',async()=>{
 });
 test('Excel write failure retains extracted data and retry does not invoke model again',async()=>{
     const h=await setup(),ensure=h.sheet.ensure;h.sheet.ensure=async()=>{throw Error('Excel 연결 필요');};
-    await h.controller.extract('doc','파일.pdf');assert.equal(h.controller.info('doc').ready,true);
+    await h.controller.extract('doc','파일.pdf');assert.equal(h.controller.info('doc').ready,false);
+    await h.controller.load('conversation');assert.equal(h.controller.info('doc').ready,false);
     h.sheet.ensure=ensure;await h.controller.extract('doc','파일.pdf');assert.equal(h.writes,1);
+    await h.controller.load('conversation');assert.equal(h.controller.info('doc').ready,true);
     assert.equal(h.requests.filter(r=>r.url.includes('/extractions/')).length,1);
 });
