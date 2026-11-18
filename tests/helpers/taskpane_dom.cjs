@@ -75,8 +75,8 @@ function createDOM(html = fs.readFileSync(path.join(root, 'taskpane.html'), 'utf
     document.getElementById('server-error-messages').textContent = JSON.stringify(messages);
     const values = new Map();
     const localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value)};
-    const window = {errorMessages: messages, setTimeout: () => 1, clearTimeout() {}, markdownRenderer: {render: (node, text) => { node.textContent = text; }}};
-    const sandbox = vm.createContext({window, document, localStorage, navigator: {userAgent: 'test'}, AbortController, DOMException, console});
+    const window = {crypto: require('node:crypto').webcrypto, errorMessages: messages, setTimeout: () => 1, clearTimeout() {}, markdownRenderer: {render: (node, text) => { node.textContent = text; }}};
+    const sandbox = vm.createContext({window, document, localStorage, navigator: {userAgent: 'test'}, TextEncoder, Uint8Array, AbortController, DOMException, console});
     return {window, document, localStorage, sandbox,
         load: file => vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, {filename: file})};
 }

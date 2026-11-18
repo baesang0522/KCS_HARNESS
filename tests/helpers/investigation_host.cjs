@@ -61,8 +61,8 @@ function createInvestigationHost() {
             getItemOrNullObject(id){return sheets.find(s=>s.id===id||s.name===id)||{isNullObject:true,load(){}};}},
         settings:{add:(key,value)=>settings.set(key,structuredClone(value)),getItemOrNullObject:key=>({value:settings.get(key),isNullObject:!settings.has(key),load(){}})} }};
     host.Excel={run:fn=>fn(context)};
-    host.window={workspaceSheet:{requireExcel(){}},errorMessages:{ADVICE_GROUP_COLUMNS_REQUIRED:'빈도 집계 열 필요'}};
-    const sandbox=vm.createContext({window:host.window,Excel:host.Excel,console,Map,Set});
+    host.window={crypto:require('node:crypto').webcrypto,workspaceSheet:{requireExcel(){}},errorMessages:{ADVICE_GROUP_COLUMNS_REQUIRED:'빈도 집계 열 필요'}};
+    const sandbox=vm.createContext({window:host.window,Excel:host.Excel,console,Map,Set,TextEncoder,Uint8Array});
     host.load=file=>vm.runInContext(fs.readFileSync(path.join(__dirname,'../../src/static/excel',file),'utf8'),sandbox);
     host.addSheet=addSheet;host.sheets=sheets;host.settings=settings;host.context=context;
     host.moveColumn=(sheet,from,to)=>{const table=sheet.tables.items[0];table.columns.items.splice(to,0,table.columns.items.splice(from,1)[0]);sheet.cells.forEach(row=>row.splice(to,0,row.splice(from,1)[0]));};

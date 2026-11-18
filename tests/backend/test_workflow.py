@@ -43,6 +43,18 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('ui_action', response.json())
         self.assertEqual(self.app.state.operation_jobs, {})
 
+    def test_scope_change_chat_carries_prior_scope_without_creating_a_write_job(self):
+        self.workspace['row_filter'] = dict(column_id='model', operator='equals', value='Y')
+        self.decision = {'intent':'scope'}
+        response = self.client.post('/chat', json={'conversation_id':self.cid,'request_id':str(uuid4()),
+            'message':'현재 대상에 모델규격명이 B인 행도 추가해줘','workspace':self.workspace})
+        self.assertEqual(response.status_code,200,response.text)
+        action = response.json()['ui_action']
+        self.assertEqual(action['type'],'change_scope')
+        self.assertEqual(action['expected_filter'],self.workspace['row_filter'])
+        self.assertEqual(action['request'],dict(mode='include',condition=dict(column_id='model',operator='equals',value='B')))
+        self.assertEqual(self.app.state.operation_jobs,{})
+
     def test_stale_review_decision_is_explained_without_ui_action(self):
         from unittest.mock import AsyncMock, patch
         from agents.request_router import RequestDecision
@@ -121,6 +133,8 @@ class WorkflowTests(unittest.TestCase):
             self.context = json.loads(payload['conversation'][1]['content'])['task_context']
             if payload['conversation'][-1]['role'] == 'tool':
                 name, args = 'ask_user', {'question': '수식에 사용할 열을 알려주세요.'}
+            elif self.decision['intent'] == 'scope':
+                name, args = 'change_scope', dict(mode='include',column_id='model',value='B')
             elif self.decision['intent'] == 'group_review':
                 name, args = 'open_group_review', {'column_id': 'model'}
             elif self.decision['intent'] == 'conditional_mark':

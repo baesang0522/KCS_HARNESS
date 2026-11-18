@@ -23,7 +23,7 @@
         async function sampleRows() {
             if (!workspace || !target) return [];
             if (!ui.targets().length) return [];
-            var snapshot = await sheet.read(workspace, target, ui.targets(), function () {}, function () {}, null, 10);
+            var snapshot = await sheet.read(workspace, target, ui.targets(), function () {}, function () {}, null, 10, null, null, true);
             return snapshot.rows;
         }
         async function loadValues() {
@@ -110,6 +110,11 @@
                 values.forEach(function (row) { while (row.length < headers.length) row.push(""); });
                 if (destination) changed = values.filter(function (row, i) { return row[0] !== snapshot.rows[i].destination; }).length;
                 if (!changed && !["group", "extract"].includes(operation.kind)) {
+                    if (destination && options.reviewed) {
+                        var current = await sheet.read(readWorkspace, readTarget, ids, progress, check, destination, null, null, operation.condition);
+                        if (current.stamp !== snapshot.stamp || JSON.stringify(current.rows) !== JSON.stringify(snapshot.rows) || JSON.stringify(current.scope_rows) !== JSON.stringify(snapshot.scope_rows)) throw new Error("확인 중 값이 바뀌었습니다. 다시 요청하세요.");
+                        await options.reviewed(snapshot, destination);
+                    }
                     await options.jobs.status(job, "NO_CHANGE");
                     complete(
                         snapshot.rows.length.toLocaleString() +
@@ -234,6 +239,7 @@
                     });
 
                 if (output.mode === "existing") names = [data.snapshot.output_columns.find(function (c) { return String(c.column_id) === output.column_id; }).header];
+                var dependencyRecord = options.prepareResult ? await options.prepareResult(data.snapshot, output) : null;
                 invalidate(true);
                 applyRequested = true;
                 await options.jobs.beginApply(data.job, output);
@@ -254,7 +260,7 @@
                 result.columns.forEach(function (column, index) {
                     if (output.mode !== "existing") column.description = resultDescription(data, index);
                 });
-                await options.result(result, data.job);
+                await options.result(result, data.job, data.snapshot, dependencyRecord);
 
                 complete(
                     result.row_count.toLocaleString() +

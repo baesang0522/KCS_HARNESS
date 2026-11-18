@@ -64,6 +64,10 @@
         closeTaskCards();
         if (!action) return;
 
+        if (action.type === "change_scope") {
+            completeTask(await workspace.changeScope(action.request, action));
+            return;
+        }
         if (action.type === "open_investigation") { await investigation.open(); return; }
         if (action.type === "open_cleaning_help") {
             await help.open(action.column_ids);

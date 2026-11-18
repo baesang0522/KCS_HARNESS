@@ -156,9 +156,10 @@ test('retry keeps request ID; new question changes it; stale saved conversation 
 });
 
 test('page bootstrap wires chat and formula callbacks before initialization', async () => {
-    const h = createDOM(); let workspaceOptions, formulaOptions, imports=0, scopes=0, reviewRequest;
+    const h = createDOM(); let workspaceOptions, formulaOptions, imports=0, scopes=0, reviewRequest, scopeRequest;
     const stub = {dismiss() {}, reset() { this.referenceTarget=()=>null; }, setBusy() {}, context: async () => null, referenceTarget: () => null,
         openSourceColumns:async()=>{imports++;}, openScope:async()=>{scopes++;},
+        changeScope:async(request,expected)=>{scopeRequest={request,expected};return "범위 변경 완료";},
         openGroups:async(column,request)=>{reviewRequest={column,request};},
         configure:async()=>{throw Error("unscoped set action reached ordinary operation");},
         formulaTarget() {}, validateFormulaSource() {}, prepareFormulaOutput() {}, formulaResultColumns() {}, formulaResult() {}};
@@ -192,6 +193,12 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
     await h.document.getElementById('new-chat').emit('click');
     assert.equal(button.textContent,'작업 준비');
     assert.equal(scopeButton.hidden,true);
+    const scopeAction={type:'change_scope',workspace_id:'work',expected_filter:null,request:{mode:'exclude',condition:{column_id:'country',operator:'equals',value:'CN'}}};
+    h.window.apiClient.requestJson=async url=>url==='/chat'?{answer:'범위 확인',ui_action:scopeAction}:{documents:[]};
+    h.document.getElementById('message').value='중국 제외';await h.document.getElementById('composer').emit('submit');
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.deepEqual(scopeRequest,{request:scopeAction.request,expected:scopeAction});
+    assert.match(h.document.getElementById('conversation').textContent,/범위 변경 완료/);
     for(const action of [
         {type:'open_group_review',column_ids:['company'],request:{match_text:'JIANGSU',output_name:'분석대상',assigned_value:'분석대상'}},
         {type:'configure_operation',operation:{kind:'set',column_ids:['company'],assigned_value:'분석대상'}}

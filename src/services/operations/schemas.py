@@ -63,6 +63,49 @@ class RowFilter(StrictModel):
     value: Text = ""
 
 
+    @property
+    def column_ids(self) -> list[str]:
+        return [self.column_id]
+
+
+class ScopeStep(StrictModel):
+    mode: Literal["include", "exclude"]
+    condition: RowFilter
+
+
+class CombinedRowFilter(StrictModel):
+    base: "RowFilter | CombinedRowFilter | None" = None
+    steps: list[ScopeStep] = Field(min_length=1)
+    base_ids: list[Annotated[int, Field(gt=0)]] | None = None
+
+    @model_validator(mode="after")
+    def validate_ids(self):
+        if self.base_ids is not None and len(self.base_ids) != len(set(self.base_ids)):
+            raise ValueError("작업 범위의 행 식별값이 중복되었습니다.")
+        return self
+
+    @property
+    def column_ids(self) -> list[str]:
+        return list(dict.fromkeys((self.base.column_ids if self.base else []) +
+                                  [step.condition.column_id for step in self.steps]))
+
+
+RowScope = RowFilter | CombinedRowFilter
+
+
+class ScopeRequest(StrictModel):
+    mode: Literal["replace", "include", "exclude", "clear"]
+    condition: RowFilter | None = None
+
+    @model_validator(mode="after")
+    def validate_condition(self):
+        if (self.mode == "clear") != (self.condition is None):
+            raise ValueError("전체 범위 해제 외에는 조건을 지정하세요.")
+        if self.condition and self.condition.operator not in {"blank", "not_blank"} and not self.condition.value.strip():
+            raise ValueError("비교할 값을 입력하세요. 빈 셀은 빈칸 조건을 사용하세요.")
+        return self
+
+
 class Operation(StrictModel):
     kind: Literal["preprocess", "split", "group", "replace", "map", "extract", "set"]
     column_ids: list[ColumnId] = Field(min_length=1, max_length=20)
@@ -216,7 +259,8 @@ class WorkspaceContext(StrictModel):
     sheet_name: str = Field(min_length=1, max_length=256)
     row_count: int = Field(ge=1, le=400000)
     columns: list[WorkspaceColumn] = Field(min_length=1, max_length=200)
-    row_filter: RowFilter | None = None
+    row_filter: RowScope | None = None
+    review_required_column_ids: list[ColumnId] = Field(default_factory=list, max_length=200)
     advice_subject: Literal["model", "company"] = "company"
     target_column_ids: list[ColumnId] = Field(default_factory=list, max_length=20)
     last_result_column_ids: list[ColumnId] = Field(default_factory=list, max_length=100)
@@ -233,12 +277,13 @@ class WorkspaceContext(StrictModel):
         roles = [column.role for column in self.columns]
         if len(set(ids)) != len(ids) or any(roles.count(role) != 1 for role in required):
             raise ValueError("업무에 필요한 서로 다른 세 열을 확인하세요.")
-        if self.row_filter and self.row_filter.column_id not in ids:
+        if self.row_filter and not set(self.row_filter.column_ids) <= set(ids):
             raise ValueError("조건 열이 삭제되었습니다. 작업 범위를 다시 지정하세요.")
         if any(len(row.values) != len(self.target_column_ids) for row in self.sample_rows):
             raise ValueError("표본의 열 수가 현재 대상과 다릅니다.")
         # 이전 화면의 대화 문맥에 삭제한 결과 열이 남아 있어도 다음 요청은 받는다.
         # 실제 연산의 열 검증은 OperationRequest와 Excel 쓰기 단계에서 유지한다.
+        self.review_required_column_ids = [column_id for column_id in self.review_required_column_ids if column_id in ids]
         keep = [index for index, column_id in enumerate(self.target_column_ids) if column_id in ids]
         self.target_column_ids = [self.target_column_ids[index] for index in keep]
         self.last_result_column_ids = [column_id for column_id in self.last_result_column_ids if column_id in ids]

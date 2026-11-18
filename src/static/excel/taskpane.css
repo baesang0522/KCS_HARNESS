@@ -185,3 +185,5 @@ input:focus-visible,select:focus-visible{outline:2px solid #75609d;outline-offse
 /* 좁은 Excel 창에서도 상단 작업 버튼을 가리지 않는다. */
 .topbar{height:auto;min-height:64px;flex-wrap:wrap;gap:6px;padding-top:10px;padding-bottom:10px}
 .workspace-launch + .workspace-launch{margin-left:0}
+
+#work-review-warning { flex-shrink: 0; margin: 0; padding: 8px 20px; overflow-wrap: anywhere; }

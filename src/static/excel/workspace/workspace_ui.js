@@ -49,6 +49,7 @@
 
 
                 columns = null;
+                el("review-warning").hidden = true; el("review-warning").textContent = "";
                 status("");
             },
             source: function (source, profile, change) {
@@ -96,14 +97,11 @@
             current: function (workspace, target) {
                 el("setup").hidden = true; el("current").hidden = false;
                 choices("role-column", workspace.columns, el("role-column").value);
-                var operators = {equals: "같음", not_equals: "다름", contains: "포함", blank: "빈칸", not_blank: "빈칸 아님"};
-                el("operation-scope").textContent = workspace.row_filter ? "현재 조건: " +
-                    (workspace.columns.find(function (c) { return String(c.column_id) === workspace.row_filter.column_id; }) || {header: "삭제된 열"}).header +
-                    " · " + operators[workspace.row_filter.operator] + " · " + workspace.row_filter.value : "현재 조건: 전체 행";
+                el("operation-scope").textContent = "현재 조건: " + window.operationsSheet.describeFilter(workspace.row_filter, workspace.columns);
                 el("clear-filter").hidden = !workspace.row_filter;
                 el("scope-current").textContent = el("operation-scope").textContent;
                 el("scope-clear").hidden = !workspace.row_filter;
-                var filter = workspace.row_filter;
+                var filter = workspace.row_filter && workspace.row_filter.column_id ? workspace.row_filter : null;
                 choices("scope-column", workspace.columns, filter ? filter.column_id : el("scope-column").value, "열을 선택하세요");
                 el("scope-operator").value = filter ? filter.operator : "equals";
                 el("scope-value").value = filter ? filter.value : "";
@@ -121,6 +119,14 @@
                 el("start").disabled = busy || !ready;
                 importBusy = busy; updateImport();
                 if (columns) columns.setBusy(busy);
+            },
+            review: function (workspace) {
+                var ids = window.resultDependencies.required(workspace);
+                var warning = el("review-warning");
+                warning.hidden = !ids.length;
+                warning.textContent = ids.length ? "재검토 필요: " + ids.map(function (id) {
+                    return (workspace.columns.find(function (column) { return String(column.column_id) === id; }) || {header: "삭제된 열"}).header;
+                }).join(", ") + " — 사용한 입력이나 범위가 바뀌었습니다. 결과값은 유지했으며 재처리가 필요합니다." : "";
             },
             status: status,
             bind: function (handlers) {

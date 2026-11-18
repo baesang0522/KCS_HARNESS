@@ -21,7 +21,7 @@ async function fixture(rows, scopeRows = 1) {
         return job;
     }};
     ['workspace/workspace_sheet.js','workspace/table_reader.js','operations/operations_sheet.js','operations/operations_ui.js',
-        'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js','workspace/workspace.js'].forEach(h.load);
+        'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js','workspace/result_dependencies.js','workspace/workspace.js'].forEach(h.load);
     controller=h.window.createWorkspaceController({api,getConversationId:()=> 'conversation',isBusy:()=>busy,
         setBusy:v=>{busy=v;controller?.setBusy(v);},complete:text=>completed.push(text),enterConversation(){}});
     const node=id=>h.document.getElementById(id);
