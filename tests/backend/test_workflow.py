@@ -78,6 +78,20 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.state.operation_jobs,{})
         self.assertEqual(self.planning_inputs,[])
 
+    def test_conditional_scope_reaches_ui_action_without_changing_saved_filter(self):
+        self.workspace.update(task_type='investigation',row_count=3092,
+            columns=[dict(column_id='source',header='상호',role='reference'),dict(column_id='flag',header='판정',role='reference')],
+            target_column_ids=['flag'],last_result_column_ids=['flag'],
+            row_filter=dict(column_id='flag',operator='equals',value='N'))
+        for scope,word in [('current','그중에서'),('all','전체에서')]:
+            self.decision={'intent':'conditional_update','scope':scope}
+            response=self.client.post('/chat',json={'conversation_id':self.cid,'request_id':str(uuid4()),
+                'message':word+' 상호에 JIANGSU SHANGANG이 들어 있으면 판정을 Y로 바꿔줘','workspace':self.workspace})
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(response.json()['ui_action']['operation']['condition_scope'],scope)
+            self.assertEqual(self.context['workspace']['row_filter'],self.workspace['row_filter'])
+            self.assertIn('작업표 전체에서' if scope=='all' else '현재 작업 범위 안에서',response.json()['answer'])
+
     def setUp(self):
         self.repo = MemoryConversationRepository()
         app = FastAPI()
@@ -102,7 +116,7 @@ class WorkflowTests(unittest.TestCase):
             elif self.decision['intent'] == 'conditional_mark':
                 name, args = 'set_value', dict(column_id='model', match_text='JIANGSU SHAGANG INTL TRADE', output_name='분석대상', value='분석대상')
             elif self.decision['intent'] == 'conditional_update':
-                name, args = 'update_matching_rows', dict(condition_column_id='source',operator='contains',value='JIANGSU SHANGANG',destination_column_id='flag',assigned_value='Y')
+                name, args = 'update_matching_rows', dict(condition_column_id='source',operator='contains',value='JIANGSU SHANGANG',destination_column_id='flag',assigned_value='Y',scope=self.decision.get('scope','current'))
             elif self.decision['intent'] == 'operation':
                 op = self.decision['operation']
                 name, args = 'replace_text', dict(column_id=op['column_ids'][0],

@@ -156,9 +156,9 @@ test('retry keeps request ID; new question changes it; stale saved conversation 
 });
 
 test('page bootstrap wires chat and formula callbacks before initialization', async () => {
-    const h = createDOM(); let workspaceOptions, formulaOptions, imports=0, reviewRequest;
+    const h = createDOM(); let workspaceOptions, formulaOptions, imports=0, scopes=0, reviewRequest;
     const stub = {dismiss() {}, reset() { this.referenceTarget=()=>null; }, setBusy() {}, context: async () => null, referenceTarget: () => null,
-        openSourceColumns:async()=>{imports++;},
+        openSourceColumns:async()=>{imports++;}, openScope:async()=>{scopes++;},
         openGroups:async(column,request)=>{reviewRequest={column,request};},
         configure:async()=>{throw Error("unscoped set action reached ordinary operation");},
         formulaTarget() {}, validateFormulaSource() {}, prepareFormulaOutput() {}, formulaResultColumns() {}, formulaResult() {}};
@@ -174,6 +174,7 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
     assert.equal(h.document.querySelector('.send').disabled, false);
     const button=h.document.getElementById('open-workspace');
     assert.equal(button.textContent,'작업 준비');
+    assert.equal(h.document.getElementById('open-scope').hidden,true);
     stub.referenceTarget=()=>({workspace_id:'work',task_type:'investigation'});
     await workspaceOptions.onWorkspaceReady(stub.referenceTarget());
     for(const message of ['변경이 없어 작업을 마쳤습니다.','결과를 작성했습니다.']) {
@@ -182,10 +183,15 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
         await button.emit('click');
     }
     assert.equal(imports,2);
+    const scopeButton=h.document.getElementById('open-scope');assert.equal(scopeButton.hidden,false);
+    await scopeButton.emit('click');assert.equal(scopes,1);
+    workspaceOptions.setBusy(true);await scopeButton.emit('click');assert.equal(scopes,1);
+    workspaceOptions.setBusy(false);
     workspaceOptions.setBusy(true);await button.emit('click');assert.equal(imports,2);
     workspaceOptions.setBusy(false);
     await h.document.getElementById('new-chat').emit('click');
     assert.equal(button.textContent,'작업 준비');
+    assert.equal(scopeButton.hidden,true);
     for(const action of [
         {type:'open_group_review',column_ids:['company'],request:{match_text:'JIANGSU',output_name:'분석대상',assigned_value:'분석대상'}},
         {type:'configure_operation',operation:{kind:'set',column_ids:['company'],assigned_value:'분석대상'}}

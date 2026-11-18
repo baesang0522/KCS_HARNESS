@@ -69,8 +69,8 @@
                 options.setBusy(true);
 
                 var readWorkspace = workspace, readTarget = target;
-                if (operation.condition) {
-                    readWorkspace = Object.assign({}, workspace, {row_filter: operation.condition});
+                if (operation.condition && operation.condition_scope === "all") {
+                    readWorkspace = Object.assign({}, workspace, {row_filter: null});
                     readTarget = await Excel.run(async function (context) {
                         var info = await window.workspaceTable.layout(context, workspace);
                         return {row_start: info.body.rowIndex, row_count: info.body.rowCount};
@@ -84,7 +84,7 @@
                 check();
                 var ids = operation.column_ids.concat(operation.kind === "group" ? [operation.value_column_id] : []);
                 var destination = ui.destination ? ui.destination() : null;
-                var snapshot = await sheet.read(readWorkspace, readTarget, ids, progress, check, destination);
+                var snapshot = await sheet.read(readWorkspace, readTarget, ids, progress, check, destination, null, null, operation.condition);
                 var values = [], changed = 0, headers = [];
                 var size = operation.kind === "group" ? snapshot.rows.length : 10000;
                 // ponytail: 미리보기는 창 메모리에 보관. 200만 결과 셀을 넘으면 범위를 줄인다.

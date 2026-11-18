@@ -3,7 +3,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 from agents.request_tools import build_request_tools
 from services.operations.schemas import Operation, OperationRequest
-from services.operations.jobs import CreateOperationJob, OperationJob, JobPreview, OutputPlacement, preview_job, begin_apply
+from services.operations.jobs import CreateOperationJob, OperationJob, JobPreview, OutputPlacement, preview_job, begin_apply, operation_history_context
 from services.errors import ConflictError
 
 
@@ -35,8 +35,9 @@ class ConditionalUpdateTests(unittest.TestCase):
         for override in [dict(condition=None),dict(destination_column_id=None),dict(column_ids=['memo']),
                          dict(kind='replace',assigned_value=None)]:
             with self.assertRaises(ValidationError): Operation(**self.operation(**override))
-        for condition in [None,dict(column_id='source',operator='equals',value='AB-12')]:
-            with self.assertRaises(ValidationError): CreateOperationJob(**self.source(row_filter=condition))
+        with self.assertRaises(ValidationError):
+            CreateOperationJob(**self.source(operation=self.operation(condition_scope='all')))
+        CreateOperationJob(**self.source(operation=self.operation(condition_scope='all'),row_filter=None))
 
     def test_server_checks_condition_and_destination_before_applying(self):
         job=OperationJob(source=CreateOperationJob(**self.source()))
@@ -61,3 +62,26 @@ class ConditionalUpdateTests(unittest.TestCase):
             OperationRequest(operation=operation,rows=[dict(excel_row=2,values=[yes])])
             with self.assertRaises(ValidationError):
                 OperationRequest(operation=operation,rows=[dict(excel_row=2,values=[no])])
+
+    def test_scope_survives_tool_and_job_with_distinct_inherited_filter(self):
+        workspace=dict(columns=[dict(column_id='source'),dict(column_id='memo')])
+        tool=next(t for t in build_request_tools({'workspace':workspace}) if t.name=='update_matching_rows')
+        args=dict(condition_column_id='source',operator='contains',value='AB-12',destination_column_id='memo',assigned_value='N')
+        self.assertEqual(tool.invoke(args)['operation']['condition_scope'],'current')
+        for scope in ['current','all']:
+            result=tool.invoke(args | {'scope':scope})
+            self.assertEqual(result['operation']['condition_scope'],scope)
+            prior=dict(column_id='memo',operator='equals',value='Y') if scope=='current' else None
+            job=OperationJob(source=CreateOperationJob(**self.source(operation=result['operation'],row_filter=prior)))
+            self.assertEqual(job.source.row_filter.model_dump() if prior else None,prior)
+            # The new condition is still validated even when the prior filter is a different column.
+            with self.assertRaises(ValidationError):
+                preview_job(job,JobPreview(selected_count=1,rows=[dict(excel_row=2,values=['OTHER'])]))
+            preview_job(job,JobPreview(selected_count=1,rows=[dict(excel_row=2,values=['AB-12'])]))
+            history_workspace=job.source.model_dump(include={'workspace_id','worksheet_id','table_id','task_type'})
+            history_workspace['columns']=[dict(column_id='source',header='조건'),dict(column_id='memo',header='판정')]
+            record=operation_history_context({'job':job},conversation_id=str(job.source.conversation_id),workspace=history_workspace)['records'][0]
+            self.assertEqual(record['executed_range']['condition_scope'],scope)
+            self.assertEqual(record['executed_range']['condition'],result['operation']['condition'])
+            self.assertEqual(record['executed_range']['matching_row_count'],1)
+            self.assertEqual(record['executed_range'].get('row_filter'),prior)

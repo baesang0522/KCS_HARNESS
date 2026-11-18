@@ -2,12 +2,19 @@
 (function () {
     window.createWorkspaceUI = function () {
         function el(id) { return document.getElementById("work-" + id); }
-        var columns = null, importChoices = [], importBusy = false;
+        var columns = null, importChoices = [], importBusy = false, mode = "work";
         function importSelection() {
             return importChoices.filter(function (choice) { return choice.input.checked; }).map(function (choice) { return choice.column; });
         }
-        function importMode(active) {
-            el("import").hidden = !active;
+        function setMode(next) {
+            mode = next;
+            el("import").hidden = mode !== "import";
+            el("scope").hidden = mode !== "scope";
+            el("tools").hidden = mode !== "work";
+            if (mode !== "work") el("title").textContent = mode === "import" ? "열 추가" : "작업 범위";
+        }
+        function scopeOperator() {
+            el("scope-value-label").hidden = ["blank", "not_blank"].includes(el("scope-operator").value);
         }
         function updateImport() {
             var selected = importSelection();
@@ -30,14 +37,15 @@
         }
         function status(text) { el("status").textContent = text; }
         return {
-            open: function (type) { el("panel").hidden = false; el("type").value = type; importMode(false); },
+            open: function (type) { el("panel").hidden = false; el("type").value = type; setMode("work"); },
+            mode: setMode,
             hide: function () { el("panel").hidden = true; },
             reset: function () {
                 el("panel").hidden = true;
                 el("mapping").hidden = true;
                 el("current").hidden = true;
                 el("setup").hidden = false;
-                el("import").hidden = true;
+                setMode("work");
 
 
                 columns = null;
@@ -69,8 +77,13 @@
                     el("import-columns").appendChild(label);
                     return {column: column, input: input};
                 });
-                importMode(true); updateImport();
+                setMode("import"); updateImport();
                 if (el("import").scrollIntoView) el("import").scrollIntoView({block: "start"});
+            },
+            scope: function () {
+                var operator = el("scope-operator").value;
+                return {column_id: el("scope-column").value, operator: operator,
+                    value: ["blank", "not_blank"].includes(operator) ? "" : el("scope-value").value};
             },
             importSelection: importSelection,
             importPolicy: function () { return {original_order_confirmed: !!el("import-confirm").checked}; },
@@ -88,14 +101,21 @@
                     (workspace.columns.find(function (c) { return String(c.column_id) === workspace.row_filter.column_id; }) || {header: "삭제된 열"}).header +
                     " · " + operators[workspace.row_filter.operator] + " · " + workspace.row_filter.value : "현재 조건: 전체 행";
                 el("clear-filter").hidden = !workspace.row_filter;
-                el("title").textContent = window.workspaceProfiles[workspace.task_type].name;
+                el("scope-current").textContent = el("operation-scope").textContent;
+                el("scope-clear").hidden = !workspace.row_filter;
+                var filter = workspace.row_filter;
+                choices("scope-column", workspace.columns, filter ? filter.column_id : el("scope-column").value, "열을 선택하세요");
+                el("scope-operator").value = filter ? filter.operator : "equals";
+                el("scope-value").value = filter ? filter.value : "";
+                scopeOperator();
+                el("title").textContent = mode === "import" ? "열 추가" : mode === "scope" ? "작업 범위" : window.workspaceProfiles[workspace.task_type].name;
                 el("current-summary").textContent = workspace.sheet_name + " · " + target.row_count.toLocaleString() + "행 작업 중";
                 el("column-summary").textContent = workspace.columns.map(function (column) {
                     return column.header + " (" + (column.role === "reference" ? "일반" : column.role === "result" ? "결과" : "역할 지정") + ")" +
                         (column.description ? " — " + column.description : "");
                 }).join("\n");
             },
-            setup: function () { el("title").textContent = "작업 데이터 준비"; el("setup").hidden = false; el("mapping").hidden = true; el("current").hidden = true; el("import").hidden = true; },
+            setup: function () { el("title").textContent = "작업 데이터 준비"; el("setup").hidden = false; el("mapping").hidden = true; el("current").hidden = true; setMode("work"); },
             busy: function (busy, ready) {
                 el("panel").querySelectorAll("button,select,input,textarea").forEach(function (control) { control.disabled = busy; });
                 el("start").disabled = busy || !ready;
@@ -104,12 +124,13 @@
             },
             status: status,
             bind: function (handlers) {
+                el("scope-operator").addEventListener("change", scopeOperator);
                 el("import-confirm").addEventListener("change", updateImport);
                 [
                     "select",
                     "start",
                     "restore",
-                    "new", "refresh", "groups", "import-add", "role-save", "clear-filter"
+                    "new", "refresh", "groups", "import-add", "role-save", "clear-filter", "scope-apply", "scope-clear"
                 ].forEach(function (name) {
                     el(name).addEventListener("click", handlers[name]);
                 });

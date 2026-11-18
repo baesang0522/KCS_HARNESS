@@ -46,6 +46,7 @@
     function updateWorkspaceButton() {
         var hasWorkspace = workspace && workspace.referenceTarget();
         var button = document.getElementById("open-workspace");
+        document.getElementById("open-scope").hidden = !hasWorkspace;
         button.textContent = hasWorkspace ? "열 추가" : "작업 준비";
         button.title = hasWorkspace ? "원본 열을 현재 작업표에 추가" : "작업표 만들기 또는 저장된 작업 이어가기";
     }
@@ -105,6 +106,9 @@
         if (chat.isBusy()) return;
         if (workspace.referenceTarget()) await workspace.openSourceColumns();
         else { closeTaskCards(); await workspace.open(); }
+    });
+    document.getElementById("open-scope").addEventListener("click", async function () {
+        if (!chat.isBusy() && workspace.referenceTarget()) await workspace.openScope();
     });
     document.querySelectorAll('[data-close-task]').forEach(function (button) {
         button.addEventListener('click', function () { if (!chat.isBusy()) closeTaskCards(); });
