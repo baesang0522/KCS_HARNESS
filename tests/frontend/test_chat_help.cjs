@@ -161,11 +161,11 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
         openGroups:async(column,request)=>{reviewRequest={column,request};},
         configure:async()=>{throw Error("unscoped set action reached ordinary operation");},
         formulaTarget() {}, validateFormulaSource() {}, prepareFormulaOutput() {}, formulaResultColumns() {}, formulaResult() {}};
-    h.window.apiClient = {requestJson: async url => url.endsWith('/documents') ? {documents: []} : {conversation_id: 'conversation'}, newRequestId: () => 'id'};
+    h.window.apiClient = {requestJson: async url => url.endsWith('/documents') ? {documents: []} : url.endsWith('/investigation') ? {revision:0,goal:'목표',conditions:[],document_notes:{},columns:[]} : {conversation_id: 'conversation'}, newRequestId: () => 'id'};
     h.window.createWorkspaceController = options => { workspaceOptions = options; return stub; };
     h.window.createFormulaController = options => { formulaOptions = options; return stub; };
     h.window.createFormulaUI = () => ({});
-    h.load('chat/chat.js'); h.load('cleaning_help/cleaning_help.js'); h.load('documents/documents.js'); h.load('taskpane.js');
+    h.load('chat/chat.js'); h.load('cleaning_help/cleaning_help.js'); h.load('documents/documents.js'); h.load('documents/investigation.js'); h.load('taskpane.js');
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(workspaceOptions.isBusy(), false); assert.equal(workspaceOptions.getConversationId(), 'conversation');
     assert.equal(formulaOptions.validateSource, stub.validateFormulaSource);
@@ -206,12 +206,12 @@ test('all application scripts load in HTML order and the real controllers initia
     h.sandbox.fetch = async (url, options) => {
         requests.push({url, options});
         return {ok: true, json: async () => url === '/conversations' ? {conversation_id: 'conversation'}
-            : url.endsWith('/documents') ? {documents: []} : {answer: '도움 카드를 열었어.', ui_action: {type: 'open_cleaning_help'}}};
+            : url.endsWith('/documents') ? {documents: []} : url.endsWith('/investigation') ? {revision:0,goal:'목표',conditions:[],document_notes:{},columns:[]} : {answer: '도움 카드를 열었어.', ui_action: {type: 'open_cleaning_help'}}};
     };
     const scripts = h.document.querySelectorAll('script').map(node => node.getAttribute('src')).filter(Boolean);
     scripts.filter(file => !file.startsWith('vendor/')).forEach(file => h.load(file));
     await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(requests.map(r => r.url), ['/conversations', '/conversations/conversation/documents']);
+    assert.deepEqual(requests.map(r => r.url), ['/conversations', '/conversations/conversation/documents', '/conversations/conversation/investigation']);
     assert.equal(h.document.querySelector('.send').disabled, false);
     assert.equal(h.document.getElementById('notice').textContent, '');
     await h.document.getElementById('open-workspace').emit('click');

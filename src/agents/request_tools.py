@@ -44,6 +44,11 @@ def build_request_tools(task_context: dict):
         return ids[0]
 
     @tool
+    def open_investigation() -> dict:
+        """PDF의 조사 조건을 읽고 확인·수정하는 화면을 연다. 행 선별·셀 수정·조건 확정을 수행하지 않는다."""
+        return {"intent": "investigation", "answer": "조사 조건 화면을 열었어요. PDF의 ‘조사 조건 읽기’로 조건과 근거를 확인하거나 저장된 조건을 수정할 수 있어요. 거래 행 선별은 아직 실행하지 않았어요."}
+
+    @tool
     def answer_question(answer: str) -> dict:
         """일반 질문이나 사용법만 설명한다. 작업 설정, 실행 요청에는 사용하지 않는다."""
         answer = answer.strip()
@@ -289,7 +294,7 @@ def build_request_tools(task_context: dict):
             "answer": "대상 열의 전체 데이터를 읽어 조언을 준비하겠습니다.",
         }
 
-    tools = [answer_question, ask_user, start_task, open_cleaning_help]
+    tools = [answer_question, ask_user, start_task, open_cleaning_help, open_investigation]
     if workspace:
         tools.extend([
             set_value,

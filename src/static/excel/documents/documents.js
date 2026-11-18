@@ -68,6 +68,11 @@
                 remove.setAttribute('aria-label', item.filename + ' 제거');
                 remove.addEventListener('click', function () { return removeDocument(item.document_id); });
                 actions.appendChild(link); actions.appendChild(read); actions.appendChild(remove);
+                if (options.readConditions) {
+                    var conditions = node('button', '조사 조건 읽기'); conditions.type = 'button';
+                    conditions.addEventListener('click', function () { return options.readConditions(item.document_id); });
+                    actions.appendChild(conditions);
+                }
                 row.appendChild(actions); list.appendChild(row);
             });
             updateControls();
@@ -121,6 +126,7 @@
                     body: JSON.stringify({task_type: task, workspace: current && current.task_type === task ? current : null})
                 });
                 updateItem(result); render();
+                if (options.onChanged) await options.onChanged();
                 status.textContent = result.link.workspace ? '문서를 작업표의 참고자료로 연결했습니다.'
                     : '사용할 작업을 지정했습니다. 해당 작업표를 준비하면 연결됩니다.';
             } catch (error) { status.textContent = error.message; }
@@ -142,6 +148,7 @@
                     updateItem(result);
                 }
                 if (pending.length) {
+                    if (options.onChanged) await options.onChanged();
                     render(); status.textContent = '대기 중인 참고자료를 ' + workspace.sheet_name + ' 작업표에 연결했습니다.';
                 }
             } catch (error) {
@@ -175,6 +182,7 @@
                 items = items.filter(function (item) { return item.document_id !== id; });
                 if (previewId === id) { previewId = null; ++pageVersion; viewer.hidden = true; }
                 render(); status.textContent = '참고자료를 제거했습니다.';
+                if (options.onChanged) await options.onChanged();
             } catch (error) { status.textContent = error.message; }
             finally { options.setBusy(false); updateControls(); }
         }
