@@ -130,7 +130,7 @@
                     "select",
                     "start",
                     "restore",
-                    "new", "refresh", "groups", "import-add", "role-save", "clear-filter", "scope-apply", "scope-clear"
+                    "new", "refresh", /* "groups", // 묶음 검토 보류: 재사용 여부 검토 후 삭제 */ "import-add", "role-save", "clear-filter", "scope-apply", "scope-clear"
                 ].forEach(function (name) {
                     el(name).addEventListener("click", handlers[name]);
                 });

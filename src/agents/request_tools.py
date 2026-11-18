@@ -300,7 +300,8 @@ def build_request_tools(task_context: dict):
     tools = [answer_question, ask_user, start_task, open_cleaning_help, open_investigation]
     if workspace:
         tools.extend([
-            set_value,
+            # 묶음 검토 보류(2026-11-18): 재사용 여부 검토 후 불필요하면 삭제. 기존 저장 정보는 보존.
+            # set_value,
             update_matching_rows,
             remove_words,
             preprocess,
@@ -310,7 +311,7 @@ def build_request_tools(task_context: dict):
             group_values,
             find_model_candidates,
             inspect_similarity,
-            open_group_review,
+            # open_group_review,
             recommend_preprocessing,
         ])
 

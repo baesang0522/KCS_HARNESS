@@ -25,12 +25,12 @@ from models.codex_adapter import CodexModel
 
 
 class WorkflowTests(unittest.TestCase):
-    def test_group_review_chat_only_opens_review_card(self):
+    def test_paused_group_review_tool_cannot_open_card(self):
         self.decision = {'intent': 'group_review'}
         response = self.client.post('/chat', json={'conversation_id': self.cid, 'request_id': str(uuid4()),
             'message': '모델을 같은 대상끼리 묶으면서 검토하고 싶어', 'workspace': self.workspace})
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()['ui_action'], {'type':'open_group_review','column_ids':['model'],'request':{'match_text':None,'output_name':None,'assigned_value':None}})
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertNotIn('ui_action', response.json())
         self.assertEqual(self.app.state.operation_jobs, {})
         self.assertEqual(self.planning_inputs, [])
 
@@ -39,10 +39,20 @@ class WorkflowTests(unittest.TestCase):
         response = self.client.post('/chat', json={'conversation_id': self.cid, 'request_id': str(uuid4()),
             'message': '해외공급자 상호가 JIANGSU SHAGANG INTL TRADE이거나 이거랑 비슷한 것끼리만 분석대상이라는 새로운 열에 분석대상이라고 적어줄래?',
             'workspace': self.workspace})
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertNotIn('ui_action', response.json())
+        self.assertEqual(self.app.state.operation_jobs, {})
+
+    def test_stale_review_decision_is_explained_without_ui_action(self):
+        from unittest.mock import AsyncMock, patch
+        from agents.request_router import RequestDecision
+        decision = RequestDecision(intent='group_review', answer='검토 화면을 열었습니다.', analysis_column_ids=['model'])
+        with patch('services.chat.route_request', new=AsyncMock(return_value=(decision, []))):
+            response = self.client.post('/chat', json={'conversation_id': self.cid, 'request_id': str(uuid4()),
+                'message': '묶음 검토', 'workspace': self.workspace})
         self.assertEqual(response.status_code, 200, response.text)
-        action = response.json()['ui_action']
-        self.assertEqual(action['type'], 'open_group_review')
-        self.assertEqual(action['request'], dict(match_text='JIANGSU SHAGANG INTL TRADE',output_name='분석대상',assigned_value='분석대상'))
+        self.assertIsNone(response.json()['ui_action'])
+        self.assertIn('현재 사용하지 않습니다', response.json()['answer'])
         self.assertEqual(self.app.state.operation_jobs, {})
 
     def test_found_formula_input_does_not_ask_user_to_select_excel_cells(self):

@@ -70,8 +70,9 @@
             return;
         }
         if (action.type === "open_group_review") {
-            await workspace.openGroups(action.column_ids && action.column_ids[0], action.request);
-            return;
+            // 묶음 검토 보류: 저장된 예전 응답도 다시 열거나 셀을 쓰지 않는다.
+            // await workspace.openGroups(action.column_ids && action.column_ids[0], action.request);
+            throw new Error("묶음 검토는 현재 사용하지 않습니다. 작업 범위는 상단 ‘작업 범위’에서 지정하세요.");
         }
         if (action.type === "configure_similarity") {
             await workspace.configureSimilarity(action.similarity);
@@ -79,8 +80,8 @@
         }
         if (action.type === "configure_operation") {
             if (action.operation.kind === "set" && !action.operation.condition) {
-                await workspace.openGroups(action.operation.column_ids[0], {assigned_value: action.operation.assigned_value});
-                return;
+                // await workspace.openGroups(action.operation.column_ids[0], {assigned_value: action.operation.assigned_value});
+                throw new Error("후보를 선택해 표시하는 기능은 보류 중입니다. 조건을 생략한 전체 행 변경은 실행하지 않습니다.");
             }
             await workspace.configure(action.operation);
             return;

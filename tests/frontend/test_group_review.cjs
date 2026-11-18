@@ -3,7 +3,10 @@ const {createDOM}=require('../helpers/taskpane_dom.cjs');
 const {createInvestigationHost}=require('../helpers/investigation_host.cjs');
 const noop=()=>{};
 async function setup(){
-    const h=createDOM(),host=createInvestigationHost();
+    // 보관된 구현의 회귀 검증만 수행한다. 실제 화면에서는 로드하지 않는다.
+    const html=require('node:fs').readFileSync(require('node:path').join(__dirname,'../../src/static/excel/taskpane.html'),'utf8')
+        .replace(/<!-- GROUP_REVIEW_PAUSED:[^\n]*\n([\s\S]*?)-->/g,'$1');
+    const h=createDOM(html),host=createInvestigationHost();
     const f=host.workspace(['id','상호','국가','모델','판정','메모'],[[1,'ACME','US','AB-1','old',''],[2,'ACM E','US','AB1','keep',''],[3,'ACME','CN','AB-1','manual',''],[4,'BETA','US','CD2','no','']]);
     f.work.workspace_id='work';f.work.group_reviews=[];
     h.sandbox.Excel=host.Excel;h.window.operationsSheet=host.window.operationsSheet;h.window.workspaceTable=host.window.workspaceTable;
