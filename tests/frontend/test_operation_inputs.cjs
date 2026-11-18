@@ -17,3 +17,13 @@ test('operation UI collects unfinished settings for server validation without du
     node('kind').value = 'group'; node('group-mode').value = 'manual'; node('source-row').value = '';
     assert.equal(ui.operation().source_row, 0);
 });
+
+test('common operation card exposes Hangul and bracket removal as independent rules',()=>{
+    const h=createDOM();h.window.createMappingEditor=()=>({get:()=>[]});h.load('operations/operations_ui.js');
+    const ui=h.window.createOperationsUI(),kind=h.document.getElementById('op-kind');kind.value='preprocess';
+    const inputs=h.document.getElementById('op-rules').querySelectorAll('input');
+    const hangul=inputs.find(i=>i.value==='remove_hangul'),brackets=inputs.find(i=>i.value==='remove_brackets');
+    hangul.checked=true;assert.deepEqual(Array.from(ui.operation().rules,r=>r.operation),['remove_hangul']);
+    hangul.checked=false;brackets.checked=true;assert.deepEqual(Array.from(ui.operation().rules,r=>r.operation),['remove_brackets']);
+    hangul.checked=true;assert.deepEqual(Array.from(ui.operation().rules,r=>r.operation),['remove_hangul','remove_brackets']);
+});

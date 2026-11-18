@@ -42,7 +42,9 @@
   <script defer src="chat/chat.js"></script>
   <script defer src="cleaning_help/cleaning_help.js"></script>
   <script defer src="documents/documents.js"></script>
+  <script defer src="documents/review_sheet.js"></script>
   <script defer src="documents/investigation.js"></script>
+  <script defer src="documents/review_preprocess.js"></script>
   <script defer src="taskpane.js"></script>
 </head>
 <body>
@@ -59,12 +61,26 @@
     </header>
     <main>
       <section class="normalization-panel" id="documents-panel" aria-labelledby="documents-title" hidden>
-        <h2 id="documents-title" tabindex="-1">PDF 참고자료</h2>
-        <button type="button" id="documents-close">참고자료 접기</button>
-        <p>문서를 첨부한 뒤 ‘조사 조건 읽기’로 대상과 근거를 정리할 수 있어요. 저장한 조건은 대화에서 참고하며, 거래 행 선별과 셀 변경은 아직 수행하지 않아요.</p>
-        <p>자료는 현재 서버의 대화에만 보관됩니다. 서버 재시작 후에는 다시 첨부하세요.</p>
+        <h2 id="documents-title" tabindex="-1">PDF 추출내용</h2>
+        <button type="button" id="documents-close">접기</button>
+        <p>검토 시트에서 내용을 수정하고 ‘수정 내용 반영’을 누르세요. 원문은 근거 확인용이에요.</p>
+        <p id="investigation-workspace"></p>
+        <p>서버 재시작 시 자료를 다시 첨부해야 해요. Excel 검토 시트는 남아요.</p>
         <p id="documents-status" role="status" aria-live="polite"></p>
         <div id="documents-list"></div>
+        <section id="review-clean-panel" aria-labelledby="review-clean-title" hidden>
+          <h3 id="review-clean-title" tabindex="-1">검토 시트 전처리</h3>
+          <button type="button" id="review-clean-close">전처리 접기</button>
+          <p>선택한 열의 전체 행에 적용해요. 필터로 숨긴 행도 포함하며 새 열은 만들지 않아요.</p>
+          <label>처리할 열 <select id="review-clean-column"></select></label>
+          <fieldset><legend>위에서 아래로 적용 · ↑로 순서 변경</legend><div id="review-clean-rules"></div></fieldset>
+          <label>제거할 단어·구절·기호 (한 줄에 하나)<textarea id="review-clean-words" rows="2" maxlength="10000"></textarea></label>
+          <p>한글 제거와 괄호 기호 제거는 따로 선택해요. 괄호 안 내용은 유지해요. 공백 정리도 별도 규칙이에요.</p>
+          <button type="button" id="review-clean-preview">변경 내용 확인</button>
+          <button type="button" id="review-clean-apply" disabled>검토 시트에 적용</button>
+          <p id="review-clean-status" role="status" aria-live="polite"></p>
+          <div id="review-clean-examples"></div>
+        </section>
         <section id="document-preview" aria-labelledby="document-preview-title" hidden>
           <h3 id="document-preview-title"></h3>
           <div class="document-page-controls">
@@ -77,24 +93,7 @@
           <div id="document-page-body" class="message-body" aria-live="polite"></div>
         </section>
       </section>
-      <section class="normalization-panel" id="investigation-panel" aria-labelledby="investigation-title" hidden>
-        <h2 id="investigation-title" tabindex="-1">이번 조사 조건</h2>
-        <button type="button" id="investigation-close">조사 조건 접기</button>
-        <p>PDF에 나온 대상을 찾기 위한 조건이에요. 내용을 수정하거나 확인 상태를 바꾼 뒤 저장하세요.</p>
-        <p>조건은 현재 대화에 보관되며 서버를 재시작하면 사라져요. 아직 거래 행을 선별하거나 Excel 값을 바꾸지는 않아요.</p>
-        <label>조사 목표<textarea id="investigation-goal" rows="2" maxlength="2000"></textarea></label>
-        <p id="investigation-workspace"></p>
-        <button type="button" id="investigation-bind">현재 작업표로 연결하고 저장</button>
-        <label>지금 검토할 조건<select id="investigation-active"></select></label>
-        <div id="investigation-warnings"></div>
-        <p id="investigation-status" role="status" aria-live="polite"></p>
-        <div id="investigation-conditions"></div>
-        <div class="document-actions">
-          <button type="button" id="investigation-add">조건 추가</button>
-          <button type="button" id="investigation-save">조사 조건 저장</button>
-          <button type="button" id="investigation-reload">저장값 다시 불러오기</button>
-        </div>
-      </section>
+
       <div id="welcome-content">
       <div class="eyebrow"><span class="dot"></span> EXCEL ASSISTANT <span class="badge">미리보기</span></div>
       <section class="welcome">
@@ -184,6 +183,8 @@
               <div id="op-preprocess">
                 <fieldset><legend>위에서 아래로 적용 · ↑로 순서 변경</legend><div id="op-rules">
                   <div><label><input type="checkbox" value="normalize_fullwidth_ascii"> 전각 변환</label><button type="button" data-move aria-label="전각 변환 순서 올리기">↑</button></div>
+                  <div><label><input type="checkbox" value="remove_hangul"> 한글 제거</label><button type="button" data-move aria-label="한글 제거 순서 올리기">↑</button></div>
+                  <div><label><input type="checkbox" value="remove_brackets"> 괄호 기호만 제거 (내용 유지)</label><button type="button" data-move aria-label="괄호 기호 제거 순서 올리기">↑</button></div>
                   <div><label><input type="checkbox" value="trim"> 앞뒤 공백 제거</label><button type="button" data-move aria-label="앞뒤 공백 제거 순서 올리기">↑</button></div>
                   <div><label><input type="checkbox" value="collapse_whitespace"> 연속 공백 정리</label><button type="button" data-move aria-label="연속 공백 정리 순서 올리기">↑</button></div>
                   <div><label><input type="checkbox" value="uppercase"> 대문자 통일</label><button type="button" data-move aria-label="대문자 통일 순서 올리기">↑</button></div>
@@ -191,6 +192,7 @@
                   <div><label><input type="checkbox" value="remove_words"> 단어·기호 제거</label><button type="button" data-move aria-label="단어 제거 순서 올리기">↑</button></div>
                 </div></fieldset>
                 <label>제거할 단어·구절·기호 (한 줄에 하나)<textarea id="op-words" rows="2" maxlength="10000"></textarea></label>
+                <p>한글 제거와 괄호 기호 제거는 별도 규칙입니다. 괄호 안 내용은 유지하며, 공백은 공백 정리 규칙을 선택해야 정리합니다.</p>
                 <p>대소문자를 구분합니다. 단어는 완전히 일치할 때, 기호는 포함된 위치에서 제거합니다.</p>
               </div>
               <div id="op-extract" hidden>
@@ -380,10 +382,9 @@
       <p id="notice" class="notice" role="status" aria-live="polite"></p>
       <form id="composer" class="composer">
         <div class="document-toolbar">
-          <input type="file" id="document-file" accept="application/pdf,.pdf" hidden>
+          <input type="file" id="document-file" accept="application/pdf,.pdf" multiple hidden>
           <button type="button" id="document-add" disabled>PDF 첨부</button>
-          <button type="button" id="documents-toggle" aria-controls="documents-panel">참고자료 (0)</button>
-          <button type="button" id="investigation-toggle" aria-controls="investigation-panel">조사 조건</button>
+          <button type="button" id="documents-toggle" aria-controls="documents-panel" aria-expanded="false">추출내용 보기</button>
         </div>
         <div class="composer-top">
           <button type="button" id="message-resize" class="composer-resize"

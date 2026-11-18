@@ -1,5 +1,11 @@
 "use strict";
 (function () {
+    window.readPreprocessRules = function (container, words) {
+        return Array.from(container.querySelectorAll("input")).filter(function (input) { return input.checked; }).map(function (input) {
+            return {operation: input.value, words: input.value === "remove_words"
+                ? words.split("\n").map(function (v) { return v.trim(); }).filter(Boolean) : []};
+        });
+    };
     window.createOperationsUI = function () {
         function el(id) { return document.getElementById("op-" + id); }
         var columns = [], currentTaskType = null, hasPreview = false, conditional = null, mapping = window.createMappingEditor();
@@ -47,12 +53,7 @@
         function clear() { el("extraction-preview").hidden = true; el("settings").hidden = false; el("preview").hidden = false; el("finalize").hidden = false; hasPreview = false; el("result").hidden = true; el("final-review").hidden = true; el("apply").disabled = true;
             el("settings").hidden = el("finalize").hidden = !!conditional;
         }
-        function rules() {
-            return Array.from(el("rules").querySelectorAll("input:checked")).map(function (input) {
-                var words = input.value === "remove_words" ? el("words").value.split("\n").map(function (v) { return v.trim(); }).filter(Boolean) : [];
-                return {operation: input.value, words: words};
-            });
-        }
+        function rules() { return window.readPreprocessRules(el("rules"), el("words").value); }
         return {
             targets: targets,
             reconcile: function (available, fallback, taskType) {

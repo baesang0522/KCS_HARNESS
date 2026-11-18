@@ -265,6 +265,7 @@
                     await createConversation();
                 }
 
+                if (options.beforeSend) await options.beforeSend();
                 checkChat(run);
                 if (!pendingRequest) {
                     run.request = {

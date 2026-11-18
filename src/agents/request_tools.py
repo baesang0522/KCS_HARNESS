@@ -46,7 +46,7 @@ def build_request_tools(task_context: dict):
     @tool
     def open_investigation() -> dict:
         """PDF의 조사 조건을 읽고 확인·수정하는 화면을 연다. 행 선별·셀 수정·조건 확정을 수행하지 않는다."""
-        return {"intent": "investigation", "answer": "조사 조건 화면을 열었어요. PDF의 ‘조사 조건 읽기’로 조건과 근거를 확인하거나 저장된 조건을 수정할 수 있어요. 거래 행 선별은 아직 실행하지 않았어요."}
+        return {"intent": "investigation", "answer": "PDF 추출내용을 열었어요. 검토 시트에서 값을 수정하고 ‘수정 내용 반영’을 눌러 주세요. PDF를 첨부하면 추출과 검토 시트 작성을 시작해요. 거래 행 선별은 아직 실행하지 않았어요."}
 
     @tool
     def answer_question(answer: str) -> dict:
@@ -152,7 +152,7 @@ def build_request_tools(task_context: dict):
             rules: list[Rule],
             column_id: str | None = None,
     ) -> dict:
-        """공백 정리·전각 변환·대소문자 변환 또는 복수 전처리를 순서대로 설정한다."""
+        """공백·전각·대소문자 변환, 한글 제거, 괄호 기호만 제거 등 독립된 전처리를 요청한 순서대로 설정한다."""
         return card(
             kind="preprocess",
             column_ids=[target(column_id)],

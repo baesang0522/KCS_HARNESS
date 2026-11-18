@@ -21,7 +21,7 @@ from api.investigation import router
 from repositories.conversation_repository import ConversationNotFound, MemoryConversationRepository, StoredTurn
 from services.documents.schemas import ReferenceDocument
 from services.errors import ServiceError
-from services.investigation import investigation_context
+from services.investigation import evidence_sources, investigation_context
 
 
 def make_app():
@@ -52,10 +52,13 @@ class InvestigationConditionTests(unittest.TestCase):
                 text='제외되는 물품. HS 7208.51.1000 또는 7208.51.9000.\nSA516-70(두께 134밀리미터 이상)\nSA302-Grade C')])
         self.output = {'conditions': [dict(title='SA516-70',
             description='HS 7208511000 또는 7208519000이며 SA516-70이고 두께 134mm 이상인 품목',
-            evidence=[dict(page_number=1, quote='HS 7208.51.1000 또는 7208.51.9000.'),
-                      dict(page_number=1, quote='SA516-70(두께 134밀리미터 이상)')]),
+            evidence=[dict(page_number=1, source_id=1),
+                      dict(page_number=1, source_id=2)]),
             dict(title='SA302-Grade C', description='HS 7208511000 또는 7208519000이며 SA302-Grade C인 품목. 두께 조건 명시 없음.',
-                 evidence=[dict(page_number=1, quote='SA302-Grade C')])], 'warnings': []}
+                 evidence=[dict(page_number=1, source_id=3)])], 'warnings': []}
+        for index, condition in enumerate(self.output['conditions']):
+            condition['target'] = dict(kind='item', group=str(index + 1), hs_codes=['7208511000', '7208519000'],
+                specification=condition['title'], requirements='두께 134mm 이상' if index == 0 else '')
         self.calls = []
         async def reply(messages):
             self.calls.append(messages)
@@ -107,9 +110,9 @@ class InvestigationConditionTests(unittest.TestCase):
         self.assertEqual(repeated.json(), saved.json())
         self.assertEqual(len(self.calls), 1)
 
-    def test_invalid_page_quote_and_late_invalid_candidate_save_nothing(self):
+    def test_invalid_page_source_and_late_invalid_candidate_save_nothing(self):
         original = copy.deepcopy(self.output)
-        for evidence in [dict(page_number=2, quote='SA302-Grade C'), dict(page_number=1, quote='없는 회사'), dict(page_number=1, quote=' ')] :
+        for evidence in [dict(page_number=2, source_id=1), dict(page_number=1, source_id=999), dict(page_number=1, source_id=0)] :
             self.output = copy.deepcopy(original)
             self.output['conditions'][1]['evidence'] = [evidence]
             result = self.extract()
@@ -214,6 +217,131 @@ class InvestigationConditionTests(unittest.TestCase):
         self.assertTrue(result.json()['document_notes'][self.did])
         tool = next(item for item in build_request_tools({}) if item.name == 'open_investigation')
         self.assertEqual(tool.invoke({})['intent'], 'investigation')
+
+    def save_rows(self, rows, expected=None):
+        state = self.read()
+        return self.client.put(self.base + '/reviews/' + self.did, json=dict(
+            revision=state['revision'], expected_rows=expected if expected is not None else state['reviews'][self.did], rows=rows))
+
+    def test_review_reorder_edits_delete_and_add_preserve_original_evidence(self):
+        self.extract()
+        original = copy.deepcopy(self.read()['reviews'][self.did])
+        rows = list(reversed(copy.deepcopy(original)))
+        rows[1]['target']['requirements'] = '두께 150mm 이상'
+        rows.append(dict(target=dict(kind='supplier', group='새 그룹', category='관계 수출사', company_name='사용자 회사'), source_pages=[]))
+        result = self.save_rows(rows)
+        self.assertEqual(result.status_code, 200, result.text)
+        conditions = result.json()['conditions']
+        self.assertEqual(conditions[0]['target']['specification'], 'SA302-Grade C')
+        self.assertFalse(conditions[0]['edited'])
+        self.assertTrue(conditions[0]['evidence'])
+        self.assertTrue(conditions[1]['edited'])
+        self.assertEqual(conditions[1]['evidence'], [])
+        self.assertIn('150mm', conditions[1]['description'])
+        self.assertNotIn('134mm', conditions[1]['description'])
+        self.assertEqual([c['status'] for c in conditions], ['confirmed'] * 3)
+        self.assertEqual(self.conversation.investigation.extracted_conditions[self.did][0].target.requirements, '두께 134mm 이상')
+        self.assertEqual(self.extract().json()['reviews'][self.did], result.json()['reviews'][self.did])
+        result = self.save_rows([])
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()['conditions'], [])
+        self.assertEqual(self.extract().json()['reviews'][self.did], [])
+
+    def test_supplier_groups_mixed_names_are_individual_rows_and_other_pdf_survives_apply(self):
+        self.extract()
+        item_id = self.did
+        self.did = str(uuid4())
+        self.conversation.documents[self.did] = ReferenceDocument(document_id=self.did, filename='해외.pdf',
+            pages=[dict(page_number=1, readable=True, text='1. Baoshan Iron & Steel Co., Ltd. 관계 수출사: 한글 Export Co.')])
+        self.output = dict(conditions=[dict(title=name, description=name,
+            target=dict(kind='supplier', group='1', category=category, company_name=name),
+            evidence=[dict(page_number=1, source_id=1)]) for name, category in [
+                ('Baoshan Iron & Steel Co., Ltd.', '제조사'), ('한글 Export Co.', '관계 수출사')]], warnings=[])
+        result = self.extract()
+        self.assertEqual(result.status_code, 200, result.text)
+        rows = result.json()['reviews'][self.did]
+        self.assertEqual([r['target']['group'] for r in rows], ['1', '1'])
+        rows.reverse(); rows[0]['target']['company_name'] = '사용자 수정 Export'
+        result = self.save_rows(rows)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(len(result.json()['reviews'][item_id]), 2)
+        ctx = investigation_context(self.conversation, None)
+        self.assertEqual(ctx['conditions'][-2]['target']['company_name'], '사용자 수정 Export')
+        self.assertEqual(ctx['conditions'][-2]['target']['category'], '관계 수출사')
+
+    def test_bad_review_values_and_conflicts_do_not_partially_replace_conditions(self):
+        self.extract()
+        original = copy.deepcopy(self.read())
+        for edit in ['page', 'blank', 'hs']:
+            rows = copy.deepcopy(original['reviews'][self.did])
+            if edit == 'page': rows[-1]['source_pages'] = [99]
+            elif edit == 'blank': rows[-1]['target']['group'] = '  '
+            else: rows[-1]['target']['hs_codes'] = ['=NOW()']
+            result = self.save_rows(rows)
+            self.assertEqual(result.status_code, 422, result.text)
+            self.assertEqual(self.read(), original)
+        rows = copy.deepcopy(original['reviews'][self.did])
+        rows[0]['target']['requirements'] = '수정 조건'
+        self.assertEqual(self.save_rows(rows).status_code, 200)
+        result = self.save_rows([], expected=original['reviews'][self.did])
+        self.assertEqual(result.status_code, 409, result.text)
+        self.assertEqual(len(self.read()['conditions']), 2)
+        self.client.delete(f'/conversations/{self.cid}/documents/{self.did}')
+        self.assertEqual(self.save_rows([]).status_code, 404)
+
+    def test_auto_binding_pending_and_future_uploads_uses_one_workspace(self):
+        self.extract()
+        workspace = {key: value for key, value in self.workspace.items() if key not in ('columns', 'row_count')}
+        result = self.client.put(self.base + '/workspace', json=workspace)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()['conditions'][0]['status'], 'candidate')
+        self.assertEqual(self.conversation.documents[self.did].link.workspace.workspace_id, self.conversation.investigation.workspace.workspace_id)
+        other = {**workspace, 'workspace_id': str(uuid4())}
+        self.assertEqual(self.client.put(self.base + '/workspace', json=other).status_code, 409)
+        renamed = {**workspace, 'sheet_name': '새 이름'}
+        self.assertEqual(self.client.put(self.base + '/workspace', json=renamed).status_code, 200)
+        with patch('api.documents.extract_in_process', new=AsyncMock(return_value=self.conversation.documents[self.did].pages)):
+            uploaded = self.client.post(f'/conversations/{self.cid}/documents/{uuid4()}?filename=next.pdf', content=b'%PDF-1.7 test')
+        self.assertEqual(uploaded.status_code, 200, uploaded.text)
+        self.assertEqual(uploaded.json()['link']['workspace']['workspace_id'], workspace['workspace_id'])
+
+    def test_model_must_supply_structured_targets_and_schema_failure_is_atomic(self):
+        del self.output['conditions'][1]['target']
+        result = self.extract()
+        self.assertEqual(result.status_code, 502, result.text)
+        self.assertEqual(self.read()['reviews'], {})
+        self.assertEqual(self.conversation.investigation.extracted_conditions, {})
+
+    def test_markdown_line_breaks_are_copied_from_server_sources_not_rewritten_by_model(self):
+        raw = '|중국|안강 스틸(Angang Steel Co., Ltd.)<br>안강 홍콩(Angang\nGroup Hong Kong Co., Ltd.)|'
+        self.conversation.documents[self.did].pages[0].text = raw
+        self.output = dict(conditions=[dict(title='안강 홍콩', description='관계 수출사 Angang Group Hong Kong Co., Ltd.',
+            target=dict(kind='supplier', group='4', category='관계 수출사', company_name='Angang Group Hong Kong Co., Ltd.'),
+            evidence=[dict(page_number=1, source_id=1), dict(page_number=1, source_id=2)])], warnings=[])
+        result = self.extract()
+        self.assertEqual(result.status_code, 200, result.text)
+        evidence = result.json()['conditions'][0]['evidence']
+        self.assertEqual([e['quote'] for e in evidence], raw.splitlines())
+        sent = json.loads(self.calls[0][1].content)
+        self.assertEqual(sent['pages'][0]['sources'][0]['text'], raw.splitlines()[0])
+        self.assertNotIn('quote', sent['response_schema']['$defs']['SourceReference']['properties'])
+        self.assertEqual(result.json()['reviews'][self.did][0]['source_pages'], [1])
+
+    def test_source_ids_are_page_local_and_long_lines_are_not_truncated(self):
+        document = ReferenceDocument(document_id=self.did, filename='긴 표.pdf', pages=[
+            dict(page_number=1, readable=True, text='A' * 2001),
+            dict(page_number=2, readable=False, text='읽지 못한 내용'),
+            dict(page_number=3, readable=True, text='다른 페이지')])
+        pages, sources = evidence_sources(document)
+        self.assertEqual([p['page_number'] for p in pages], [1, 3])
+        self.assertEqual(sources[(1, 1)] + sources[(1, 2)], 'A' * 2001)
+        self.assertEqual(sources[(3, 1)], '다른 페이지')
+        self.assertNotIn((3, 2), sources)
+        self.assertTrue(all(len(text) <= 2000 for text in sources.values()))
+        self.conversation.documents[self.did] = document
+        self.output['conditions'][1]['evidence'] = [dict(page_number=3, source_id=2)]
+        self.assertEqual(self.extract().status_code, 502)
+        self.assertEqual(self.read()['conditions'], [])
 
 
 class InvestigationCancellationTests(unittest.IsolatedAsyncioTestCase):

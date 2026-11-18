@@ -12,10 +12,11 @@
 #document-page-body { overflow:auto; max-height:50vh; font-size:12px; overflow-wrap:anywhere; }
 #documents-status:empty { display:none; }
 
-.investigation-condition { border-top:1px solid #e8e5ef; padding:12px 0; overflow-wrap:anywhere; }
-#investigation-panel label { display:block; margin:8px 0; }
-#investigation-panel textarea, #investigation-panel input:not([type="checkbox"]), #investigation-panel select { box-sizing:border-box; width:100%; }
-#investigation-panel textarea { resize:vertical; }
-#investigation-panel fieldset { margin:10px 0; border:1px solid #ded7e9; }
-#investigation-panel blockquote { margin:8px 0; padding-left:10px; border-left:3px solid #ded7e9; white-space:pre-wrap; }
-#investigation-panel button { margin:4px 0; }
+.document-drop-hint { font-size:11px; color:#655279; align-self:center; }
+.composer[data-file-drag="true"] { outline:2px dashed #7659a7; background:#f4eefb; }
+
+#review-clean-panel { border-top:1px solid #ded7e9; padding-top:10px; }
+#review-clean-panel label { display:block; margin:6px 0; }
+#review-clean-column, #review-clean-words { width:100%; box-sizing:border-box; }
+#review-clean-rules > div { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+#review-clean-examples { max-height:220px; overflow:auto; overflow-wrap:anywhere; white-space:pre-wrap; }

@@ -27,14 +27,21 @@ function createInvestigationHost() {
     }
     function addSheet(name, cells=[]) {
         const sheet={id:'sheet-'+ ++next,name,cells:structuredClone(cells),formats:[],protected:false,visibility:'Visible',load(){},activate(){host.active=sheet;},
-            getRangeByIndexes:(...args)=>range(sheet,...args),getRange:()=>({columnHidden:false}),
+            getRangeByIndexes:(...args)=>range(sheet,...args),getRange:(address)=>{
+                const match=address.match(/^([A-Z]+)([0-9]+)$/);
+                if(!match)return {columnHidden:false,format:{}};
+                const c=[...match[1]].reduce((v,ch)=>v*26+ch.charCodeAt(0)-64,0)-1;
+                return range(sheet,Number(match[2])-1,c,1,1);
+            },freezePanes:{freezeRows(){}},
             getUsedRangeOrNullObject:()=>Object.assign(range(sheet,0,0,sheet.cells.length,Math.max(0,...sheet.cells.map(r=>r.length))),{isNullObject:!sheet.cells.length}),
             protection:{protect(){sheet.protected=true;}},isNullObject:false};
         sheet.tables={items:[],getItem(id){const t=this.items.find(t=>t.id===id);if(!t)throw new Error('table not found');return t;},
             add(area){
                 const table={id:'table-'+ ++next,start:area.rowIndex,left:area.columnIndex,count:area.rowCount-1,load(){},
                     getDataBodyRange:()=>range(sheet,table.start+1,table.left,table.count,table.columns.items.length),
+                    getHeaderRowRange:()=>range(sheet,table.start,table.left,1,table.columns.items.length),
                     getRange:()=>range(sheet,table.start,table.left,table.count+1,table.columns.items.length)};
+                table.rows={getCount:()=>({value:table.count})};
                 const items=[];
                 function col(name,id='column-'+ ++next){return {id,load(){},get index(){return items.indexOf(this);},
                     get name(){return sheet.cells[table.start][table.left+items.indexOf(this)];},

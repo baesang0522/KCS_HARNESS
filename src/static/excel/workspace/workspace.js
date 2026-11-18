@@ -167,6 +167,7 @@
             if (options.isBusy() || !source || !ready) return;
             options.setBusy(true);
             try {
+                if (options.beforeWorkspaceChange) options.beforeWorkspaceChange(null);
                 if (!creationName) creationName = profiles[type].prefix + "_" + options.api.newRequestId().replace(/-/g, "").slice(0, 16);
                 var next = await window.workspaceCopy.create(source, creationName, function (done, total, phase) { ui.status((phase || "작업표 복사") + " · " + done + "/" + total + "행"); });
                 workspace = next; target = next.target; lastResults = []; finalized = null; lastFormula = null;
@@ -203,6 +204,8 @@
             if (!saved || !profiles[saved.task_type]) {
                 throw new Error("저장된 작업 시트를 찾을 수 없습니다.");
             }
+
+            if (options.beforeWorkspaceChange) options.beforeWorkspaceChange(saved);
 
             var previous = {
                 workspace: workspace,
@@ -410,6 +413,7 @@
 
                 try {
                     await save();
+                    if (options.beforeWorkspaceChange) options.beforeWorkspaceChange(null);
                     newSource();
 
 
