@@ -36,7 +36,9 @@
             var run = options.beginRequest();
             options.setBusy(true);
             ui.open();
-            ui.setStatus("선택 범위를 확인하고 있습니다…");
+            ui.setStatus(useWorkspace && inputScope && inputScope.workspace_id
+                ? "요청한 입력 열과 작업표의 현재 데이터 행을 확인하고 있습니다…"
+                : "Excel에서 선택한 범위를 확인하고 있습니다…");
             try {
                 if (!options.isReady()) {
                     throw new Error("엑셀 안에서 추가 기능을 열어주세요.");
@@ -44,6 +46,8 @@
                 selection = await excel.readFormulaContext(options.getTarget ? await options.getTarget(inputScope, !useWorkspace) : null);
                 if (options.validateSource) await options.validateSource(selection);
                 options.checkRequest(run);
+                var names = (selection.input_columns || []).map(function (column) { return column.header; }).join(", ");
+                ui.setStatus((names || selection.address) + " · " + selection.row_count.toLocaleString() + "행으로 수식 계획을 만들고 있습니다…");
                 var payload = Object.assign({}, selection, {
                     conversation_id: options.getConversationId(),
                     formula_job_id: api.newRequestId(),
@@ -153,7 +157,7 @@
                 recorded = true;
                 ui.setApplied(result);
                 if (options.onResult) await options.onResult(result, selection, ids);
-                options.complete(result.address + " · " + result.row_count + "행에 수식을 적용했습니다.");
+                options.complete(result.address + " · " + result.row_count + "행에 계산 결과를 값으로 저장했습니다.");
             } catch (error) {
                 if (approvalRequested && !recorded) {
                     try {
@@ -163,7 +167,7 @@
                         error.message += " · 서버의 적용 상태를 확인하지 못했습니다. 다시 적용하지 마세요.";
                     }
                 }
-                options.complete((applied ? "수식은 작성됐지만 완료 정보 처리에 실패했습니다. 다시 쓰지 마세요. " : "") + error.message);
+                options.complete((applied ? "결과값은 저장됐지만 완료 정보 처리에 실패했습니다. 다시 쓰지 마세요. " : "") + error.message);
             } finally {
                 options.setBusy(false);
             }
@@ -181,7 +185,8 @@
                 useWorkspace = true;
                 ui.reset();
                 ui.open();
-                ui.setStatus("Excel에서 선택한 범위를 가져옵니다…");
+                ui.setStatus(inputScope && inputScope.workspace_id
+                    ? "요청한 열을 작업표에서 찾고 있습니다…" : "Excel에서 선택한 범위를 가져옵니다…");
                 startTimer = window.setTimeout(selectAndPlan, 0);
             },
             reset: function () {

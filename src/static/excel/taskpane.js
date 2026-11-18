@@ -62,11 +62,19 @@
             await help.open(action.column_ids);
             return;
         }
+        if (action.type === "open_group_review") {
+            await workspace.openGroups(action.column_ids && action.column_ids[0], action.request);
+            return;
+        }
         if (action.type === "configure_similarity") {
             await workspace.configureSimilarity(action.similarity);
             return;
         }
         if (action.type === "configure_operation") {
+            if (action.operation.kind === "set" && !action.operation.condition) {
+                await workspace.openGroups(action.operation.column_ids[0], {assigned_value: action.operation.assigned_value});
+                return;
+            }
             await workspace.configure(action.operation);
             return;
         }

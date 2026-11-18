@@ -1,6 +1,7 @@
 from uuid import UUID
 from typing import Annotated, Literal
 from services.similarity import SimilaritySelection
+from services.group_review import GroupReviewRequest
 from pydantic import BaseModel, Field, field_validator
 from services.operations.schemas import ColumnId, Operation, WorkspaceContext
 
@@ -54,12 +55,19 @@ class OpenCleaningHelpAction(BaseModel):
     column_ids: list[ColumnId] | None = Field(default=None, min_length=1, max_length=1)
 
 
+class OpenGroupReviewAction(BaseModel):
+    type: Literal["open_group_review"]
+    request: GroupReviewRequest | None = None
+    column_ids: list[ColumnId] | None = Field(default=None, min_length=1, max_length=1)
+
+
 UIAction = Annotated[
     ConfirmSelectionAction
     | ConfigureOperationAction
     | ConfigureSimilarityAction
     | AnalyzeDataAction
-    | OpenCleaningHelpAction,
+    | OpenCleaningHelpAction
+    | OpenGroupReviewAction,
     Field(discriminator="type"),
 ]
 

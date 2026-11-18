@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from uuid import UUID
+from pydantic import ValidationError
 
 from services.errors import ConflictError, NotFoundError
 from services.formula.planner import generate_formula_plan, validate_output_scope
@@ -145,10 +146,17 @@ async def plan_formula_job(formula_job_id: UUID, formula_jobs: dict, runtime) ->
         formula_job.status = "FAILED"
         formula_job.error = "수식 계획 생성이 중단됐습니다. 다시 시도하세요."
         raise
+    except ValidationError as error:
+        logger.exception("수식 계획 검증 실패: formula_job_id=%s", formula_job_id)
+        formula_job.status = "FAILED"
+        if any("복수 결과 범위의 행은 서로 같아야 합니다." in item["msg"] for item in error.errors()):
+            formula_job.error = "AI가 만든 결과 범위들의 시작·끝 행이 서로 달라 실행을 중단했습니다. 셀은 변경하지 않았습니다. 수식 계획을 다시 요청하세요."
+        else:
+            formula_job.error = "AI가 만든 수식 계획의 형식이나 범위가 올바르지 않아 실행을 중단했습니다. 셀은 변경하지 않았습니다. 수식 계획을 다시 요청하세요."
     except Exception:
         logger.exception("수식 계획 생성 실패: formula_job_id=%s", formula_job_id)
         formula_job.status = "FAILED"
-        formula_job.error = "안전하게 실행할 수식 계획을 만들지 못했습니다. 요청을 구체적으로 다시 작성하세요."
+        formula_job.error = "수식 계획을 생성하지 못했습니다. 셀은 변경하지 않았습니다. 잠시 후 다시 요청하세요."
     return public_formula_job(formula_job)
 
 

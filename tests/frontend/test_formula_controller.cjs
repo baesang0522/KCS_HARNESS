@@ -49,6 +49,7 @@ test('successful apply shows progress and reports completion once',async()=>{
     const h=setup();await h.start();await h.apply();await h.apply();
     assert.equal(h.writes,1);
     assert.equal(h.requests.filter(x=>x.endsWith('/complete')).length,1);
+    assert(h.messages.at(-1).includes('계산 결과를 값으로 저장했습니다'));
     assert(h.status.some(x=>x.includes('1,000/90,000셀')));
 });
 
@@ -78,4 +79,13 @@ test('local save failure after confirmed completion never downgrades server resu
     assert(h.requests.some(x=>x.endsWith('/complete')));
     assert(!h.requests.some(x=>x.endsWith('/unknown')));
     assert(h.messages.at(-1).includes('다시 쓰지 마세요'));
+});
+
+
+test('workspace formula request announces automatic lookup rather than asking for selection',async()=>{
+    const h=setup();await h.start();
+    assert(h.status.some(text=>text.includes('요청한 열을 작업표에서')));
+    assert(h.status.some(text=>text.includes('90,000행으로 수식 계획')));
+    assert(!h.status.some(text=>text.includes('Excel에서 선택한 범위를 가져옵니다')));
+    assert.equal(h.writes,0);
 });

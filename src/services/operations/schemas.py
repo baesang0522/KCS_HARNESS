@@ -57,6 +57,12 @@ class Rule(StrictModel):
         return self
 
 
+class RowFilter(StrictModel):
+    column_id: ColumnId
+    operator: Literal["equals", "not_equals", "contains", "blank", "not_blank"]
+    value: Text = ""
+
+
 class Operation(StrictModel):
     kind: Literal["preprocess", "split", "group", "replace", "map", "extract", "set"]
     column_ids: list[ColumnId] = Field(min_length=1, max_length=20)
@@ -72,6 +78,8 @@ class Operation(StrictModel):
     group_mode: Literal["manual", "first_non_empty"] = "manual"
     extraction_mode: Literal["alphanumeric", "labelled"] | None = None
     assigned_value: Text | None = None
+    condition: RowFilter | None = None
+    destination_column_id: ColumnId | None = None
 
     @property
     def input_column_ids(self) -> list[str]:
@@ -79,6 +87,13 @@ class Operation(StrictModel):
 
     @model_validator(mode="after")
     def validate_operation(self):
+        if self.condition is not None or self.destination_column_id is not None:
+            if self.kind != "set" or self.condition is None or self.destination_column_id is None:
+                raise ValueError("조건부 값 변경에는 조건과 반영할 기존 열을 함께 지정하세요.")
+            if self.column_ids != [self.condition.column_id]:
+                raise ValueError("조건을 확인할 입력 열이 다릅니다.")
+            if self.condition.operator == "contains" and not self.condition.value:
+                raise ValueError("포함 여부를 확인할 문자열을 지정하세요.")
         if (self.kind == "set") != (self.assigned_value is not None):
             raise ValueError("값 지정 작업에는 적용할 값을 입력하세요. 빈 문자열도 사용할 수 있습니다.")
         if self.kind != "extract" and self.extraction_mode is not None:
@@ -161,6 +176,15 @@ class OperationRequest(StrictModel):
             raise ValueError("대상 열 개수와 행의 값 개수가 다릅니다.")
         if sum(len(value) for row in self.rows for value in row.values) > 16000000:
             raise ValueError("처리할 문자열이 너무 많습니다. 대상 행을 줄여 주세요.")
+        if self.operation.condition:
+            condition = self.operation.condition
+            for row in self.rows:
+                value = row.values[0]
+                matched = {"equals": value == condition.value, "not_equals": value != condition.value,
+                           "contains": condition.value in value, "blank": not value.strip(),
+                           "not_blank": bool(value.strip())}[condition.operator]
+                if not matched:
+                    raise ValueError("요청한 조건에 맞지 않는 행이 포함되어 있습니다.")
         return self
 
 
@@ -181,12 +205,6 @@ class SampleRow(StrictModel):
     excel_row: int = Field(ge=1, le=1048576)
     values: list[Annotated[str, Field(max_length=1000)]] = Field(min_length=1, max_length=20)
     truncated: bool = False
-
-
-class RowFilter(StrictModel):
-    column_id: ColumnId
-    operator: Literal["equals", "not_equals", "contains", "blank", "not_blank"]
-    value: Text = ""
 
 
 class WorkspaceContext(StrictModel):

@@ -25,6 +25,59 @@ from models.codex_adapter import CodexModel
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_group_review_chat_only_opens_review_card(self):
+        self.decision = {'intent': 'group_review'}
+        response = self.client.post('/chat', json={'conversation_id': self.cid, 'request_id': str(uuid4()),
+            'message': '모델을 같은 대상끼리 묶으면서 검토하고 싶어', 'workspace': self.workspace})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['ui_action'], {'type':'open_group_review','column_ids':['model'],'request':{'match_text':None,'output_name':None,'assigned_value':None}})
+        self.assertEqual(self.app.state.operation_jobs, {})
+        self.assertEqual(self.planning_inputs, [])
+
+    def test_conditional_mark_request_cannot_become_whole_table_set(self):
+        self.decision = {'intent': 'conditional_mark'}
+        response = self.client.post('/chat', json={'conversation_id': self.cid, 'request_id': str(uuid4()),
+            'message': '해외공급자 상호가 JIANGSU SHAGANG INTL TRADE이거나 이거랑 비슷한 것끼리만 분석대상이라는 새로운 열에 분석대상이라고 적어줄래?',
+            'workspace': self.workspace})
+        self.assertEqual(response.status_code, 200, response.text)
+        action = response.json()['ui_action']
+        self.assertEqual(action['type'], 'open_group_review')
+        self.assertEqual(action['request'], dict(match_text='JIANGSU SHAGANG INTL TRADE',output_name='분석대상',assigned_value='분석대상'))
+        self.assertEqual(self.app.state.operation_jobs, {})
+
+    def test_found_formula_input_does_not_ask_user_to_select_excel_cells(self):
+        self.workspace.update(task_type='investigation', row_count=3092,
+            columns=[dict(column_id='3',header='해외공급자상호',role='company_name'),
+                     dict(column_id='memo',header='메모',role='reference')],
+            target_column_ids=['memo'],last_result_column_ids=['memo'])
+        self.decision = {'intent':'start_task','task_type':'formula','formula_column_ids':['3']}
+        response = self.client.post('/chat',json={'conversation_id':self.cid,'request_id':str(uuid4()),
+            'message':'분석대상 열을 만들고 해외공급자상호가 JIANGSU SHAGANG INTL TRADE인 경우 Y, 아닌 경우 N으로 채워줘',
+            'workspace':self.workspace})
+        self.assertEqual(response.status_code,200,response.text)
+        data = response.json()
+        self.assertEqual(data['ui_action']['column_ids'],['3'])
+        self.assertEqual(data['ui_action']['workspace_id'],self.wid)
+        self.assertIn('해외공급자상호',data['answer'])
+        self.assertIn('따로 선택할 필요는 없습니다',data['answer'])
+        self.assertNotIn('범위를 선택하고',data['answer'])
+
+    def test_explicit_existing_column_update_produces_conditional_operation_not_group_review(self):
+        self.workspace.update(task_type='investigation', row_count=3092,
+            columns=[dict(column_id='source',header='해외거래처상호',role='company_name'),
+                     dict(column_id='flag',header='분석대상여부',role='reference')],
+            target_column_ids=['flag'], last_result_column_ids=['flag'])
+        self.decision = {'intent':'conditional_update'}
+        response = self.client.post('/chat',json={'conversation_id':self.cid,'request_id':str(uuid4()),
+            'message':"해외거래처상호에 JIANGSU SHANGANG이 존재하면 분석대상여부열을 ‘Y’로 바꿔줘", 'workspace':self.workspace})
+        self.assertEqual(response.status_code,200,response.text)
+        action=response.json()['ui_action']
+        self.assertEqual(action['type'],'configure_operation')
+        self.assertEqual(action['operation']['condition'],dict(column_id='source',operator='contains',value='JIANGSU SHANGANG'))
+        self.assertEqual(action['operation']['destination_column_id'],'flag')
+        self.assertEqual(self.app.state.operation_jobs,{})
+        self.assertEqual(self.planning_inputs,[])
+
     def setUp(self):
         self.repo = MemoryConversationRepository()
         app = FastAPI()
@@ -44,6 +97,12 @@ class WorkflowTests(unittest.TestCase):
             self.context = json.loads(payload['conversation'][1]['content'])['task_context']
             if payload['conversation'][-1]['role'] == 'tool':
                 name, args = 'ask_user', {'question': '수식에 사용할 열을 알려주세요.'}
+            elif self.decision['intent'] == 'group_review':
+                name, args = 'open_group_review', {'column_id': 'model'}
+            elif self.decision['intent'] == 'conditional_mark':
+                name, args = 'set_value', dict(column_id='model', match_text='JIANGSU SHAGANG INTL TRADE', output_name='분석대상', value='분석대상')
+            elif self.decision['intent'] == 'conditional_update':
+                name, args = 'update_matching_rows', dict(condition_column_id='source',operator='contains',value='JIANGSU SHANGANG',destination_column_id='flag',assigned_value='Y')
             elif self.decision['intent'] == 'operation':
                 op = self.decision['operation']
                 name, args = 'replace_text', dict(column_id=op['column_ids'][0],

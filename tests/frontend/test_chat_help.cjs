@@ -155,9 +155,11 @@ test('retry keeps request ID; new question changes it; stale saved conversation 
 });
 
 test('page bootstrap wires chat and formula callbacks before initialization', async () => {
-    const h = createDOM(); let workspaceOptions, formulaOptions, imports=0;
+    const h = createDOM(); let workspaceOptions, formulaOptions, imports=0, reviewRequest;
     const stub = {dismiss() {}, reset() { this.referenceTarget=()=>null; }, setBusy() {}, context: async () => null, referenceTarget: () => null,
         openSourceColumns:async()=>{imports++;},
+        openGroups:async(column,request)=>{reviewRequest={column,request};},
+        configure:async()=>{throw Error("unscoped set action reached ordinary operation");},
         formulaTarget() {}, validateFormulaSource() {}, prepareFormulaOutput() {}, formulaResultColumns() {}, formulaResult() {}};
     h.window.apiClient = {requestJson: async url => url.endsWith('/documents') ? {documents: []} : {conversation_id: 'conversation'}, newRequestId: () => 'id'};
     h.window.createWorkspaceController = options => { workspaceOptions = options; return stub; };
@@ -183,6 +185,18 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
     workspaceOptions.setBusy(false);
     await h.document.getElementById('new-chat').emit('click');
     assert.equal(button.textContent,'작업 준비');
+    for(const action of [
+        {type:'open_group_review',column_ids:['company'],request:{match_text:'JIANGSU',output_name:'분석대상',assigned_value:'분석대상'}},
+        {type:'configure_operation',operation:{kind:'set',column_ids:['company'],assigned_value:'분석대상'}}
+    ]){
+        h.window.apiClient.requestJson=async url=>url==='/chat'?{answer:'검토',ui_action:action}:{documents:[]};
+        h.document.getElementById('message').value='이 회사와 비슷한 행만 표시';
+        await h.document.getElementById('composer').emit('submit');
+        await new Promise(resolve=>setImmediate(resolve));
+        assert(reviewRequest,h.document.getElementById('notice').textContent+' '+h.document.getElementById('conversation').textContent);
+        assert.equal(reviewRequest.column,'company');assert.equal(reviewRequest.request.assigned_value,'분석대상');
+        if(action.request)assert.equal(reviewRequest.request.match_text,'JIANGSU');
+    }
 });
 
 test('all application scripts load in HTML order and the real controllers initialize', async () => {
@@ -220,4 +234,14 @@ test('chat displays server validation text without another failure message and c
     assert.equal(last.children[1].textContent, message);
     assert.equal(JSON.parse(h.localStorage.getItem('kcs-chat-session-v1')).pending_request, null);
     assert.equal(h.chat.isBusy(), false);
+});
+
+
+test('explicit conditional chat automatically prepares one preview after releasing chat busy state', async () => {
+    const h=await setup();let previews=0;
+    h.workspace.previewOperation=async()=>{assert.equal(h.chat.isBusy(),false);previews++;};
+    h.reply=async()=>({answer:'변경 내용을 확인하세요',ui_action:{type:'configure_operation',operation:{kind:'set',
+        column_ids:['trade'],condition:{column_id:'trade',operator:'contains',value:'ABC'},destination_column_id:'model',assigned_value:'확인'}}});
+    h.node('message').value='조건에 맞는 행을 수정해줘';await h.chat.sendMessage();
+    assert.equal(previews,1);assert.equal(h.chat.isBusy(),false);
 });

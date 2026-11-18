@@ -338,6 +338,9 @@
                     if (reply.ui_action && reply.ui_action.type === "configure_operation" && reply.ui_action.operation.kind === "extract") {
                         setBusy(false);
                         await options.getWorkspace().recommendExtraction();
+                    } else if (reply.ui_action && reply.ui_action.type === "configure_operation" && reply.ui_action.operation.condition) {
+                        setBusy(false);
+                        await options.getWorkspace().previewOperation();
                     }
                 } catch (uiError) {
                     // 서버에서 성공한 요청을 다시 전송하게 만들지 않는다.

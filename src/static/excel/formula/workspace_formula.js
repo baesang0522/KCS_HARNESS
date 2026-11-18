@@ -5,13 +5,12 @@
         return {
             formulaTarget: async function (scope, fromSelection) {
                 var workspace = options.getWorkspace();
-                var target = options.getTarget();
                 var lastFormula = options.getLastFormula();
                 if (!workspace) {
                     if (!fromSelection && scope && scope.workspace_id) throw new Error("요청한 작업 표를 다시 열어주세요.");
                     return fromSelection ? null : lastFormula;
                 }
-                if (workspace.row_filter) throw new Error("조건 범위에서는 수식 채우기를 아직 지원하지 않습니다. 정제 기능을 사용하거나 조건을 해제한 전체 범위를 명시적으로 선택하세요.");
+                if (workspace.row_filter) throw new Error("조건 범위에서는 수식 채우기를 아직 지원하지 않습니다. 정제 기능을 사용하거나 저장된 조건을 해제한 뒤 다시 요청하세요.");
                 var chosen = null;
                 if (fromSelection) {
                     chosen = await window.workspaceSheet.readWorkspaceTarget(workspace, false);
@@ -24,6 +23,10 @@
                     throw new Error("수식에 사용할 작업 표와 입력 열을 다시 지정해 주세요.");
                 }
                 await options.refresh();
+                var rows = chosen || await Excel.run(async function (context) {
+                    var info = await window.workspaceTable.layout(context, workspace);
+                    return {row_start: info.body.rowIndex, row_count: info.body.rowCount};
+                });
                 var columns = scope.column_ids.map(function (id) {
                     var column = workspace.columns.find(function (c) { return String(c.column_id) === id; });
                     if (!column) throw new Error("요청한 수식 입력 열이 삭제되었습니다. 대상을 다시 확인하세요.");
@@ -31,7 +34,7 @@
                 }).sort(function (a, b) { return a.column_index - b.column_index; });
                 return {worksheet_id: workspace.worksheet_id, workspace_id: workspace.workspace_id,
                     table_id: String(workspace.table_id), workspace_task_type: workspace.task_type,
-                    row_start: (chosen || target).row_start, row_count: (chosen || target).row_count,
+                    row_start: rows.row_start, row_count: rows.row_count,
                     column_start: columns[0].column_index,
                     column_count: columns[columns.length - 1].column_index - columns[0].column_index + 1,
                     input_columns: columns.map(function (c) { return {column_id: String(c.column_id),

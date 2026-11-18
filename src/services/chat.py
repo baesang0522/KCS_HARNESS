@@ -94,6 +94,9 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
                 action = {"type": "configure_operation", "operation": decision.operation.model_dump()}
             elif decision.intent == "similarity":
                 action = {"type": "configure_similarity", "similarity": decision.similarity.model_dump()}
+            elif decision.intent == "group_review":
+                action = {"type": "open_group_review", "column_ids": decision.analysis_column_ids,
+                          "request": decision.group_review_request.model_dump() if decision.group_review_request else None}
             elif decision.intent == "cleaning_help":
                 action = {"type": "open_cleaning_help", "column_ids": decision.analysis_column_ids}
             elif decision.intent == "recommendation":
@@ -112,7 +115,7 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
             if decision.task_type != "formula":
                 state.active_formula_job_id = None
 
-        elif workspace and decision.intent in {"operation", "similarity", "cleaning_help", "recommendation"}:
+        elif workspace and decision.intent in {"operation", "similarity", "cleaning_help", "recommendation", "group_review"}:
             state.task_type, state.pending_intent, state.phase = workspace["task_type"], None, "WORKSPACE_READY"
             state.active_formula_job_id = None
 

@@ -7,21 +7,25 @@ from agents.request_graph import run_request_graph
 from services.operations.schemas import Operation, extraction_column_id
 from services.chat_state import TaskType
 from services.similarity import SimilaritySelection
+from services.group_review import GroupReviewRequest
 from services.recommendation.service import resolve_advice_columns, resolve_columns
 
 
 class RequestDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    intent: Literal["general", "start_task", "clarify", "task_followup", "operation", "similarity", "recommendation", "cleaning_help"]
+    intent: Literal["general", "start_task", "clarify", "task_followup", "operation", "similarity", "recommendation", "cleaning_help", "group_review"]
     task_type: TaskType | None = None
     operation: Operation | None = None
     similarity: SimilaritySelection | None = None
+    group_review_request: GroupReviewRequest | None = None
     formula_column_ids: list[str] | None = Field(default=None, min_length=1, max_length=20)
     answer: str = Field(min_length=1, max_length=8000)
     analysis_column_ids: list[str] | None = Field(default=None, max_length=200)
 
     @model_validator(mode="after")
     def validate_decision(self, info: ValidationInfo):
+        if self.group_review_request is not None and self.intent != "group_review":
+            raise ValueError("묶음 검토 요청에만 기준값과 표시 설정을 지정하세요.")
         if not self.answer.strip():
             raise ValueError("답변이 비어 있습니다.")
         # 현재 작업의 업무 종류를 중복 기재한 경우만 생략한다.
@@ -44,9 +48,9 @@ class RequestDecision(BaseModel):
             raise ValueError("유사도 요청 외에는 similarity를 null로 반환해야 합니다.")
         if self.intent == "recommendation" and len(self.answer) > 6000:
             raise ValueError("추천 설명은 6,000자 이내로 작성하세요.")
-        if self.intent == "cleaning_help" and self.analysis_column_ids is not None and len(self.analysis_column_ids) != 1:
+        if self.intent in {"cleaning_help", "group_review"} and self.analysis_column_ids is not None and len(self.analysis_column_ids) != 1:
             raise ValueError("정제 도움의 초기 대상은 한 열만 지정하세요.")
-        if self.intent not in {"recommendation", "cleaning_help"} and self.analysis_column_ids is not None:
+        if self.intent not in {"recommendation", "cleaning_help", "group_review"} and self.analysis_column_ids is not None:
             raise ValueError("조언·정제 도움 요청 외에는 analysis_column_ids를 지정할 수 없습니다.")
         return self
 
@@ -79,7 +83,8 @@ async def route_request(runtime, messages, *, task_context: dict):
             column["column_id"]
             for column in workspace["columns"]
         }
-        if not set(decision.operation.input_column_ids) <= columns:
+        referenced = decision.operation.input_column_ids + ([decision.operation.destination_column_id] if decision.operation.destination_column_id else [])
+        if not set(referenced) <= columns:
             raise ValueError("현재 작업 시트에 없는 열을 요청했습니다.")
         if decision.operation.kind == "extract" and decision.operation.column_ids != [extraction_column_id(workspace)]:
             raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])
@@ -92,7 +97,7 @@ async def route_request(runtime, messages, *, task_context: dict):
     ):
         raise ValueError("후속 질문을 연결할 현재 작업이 없습니다.")
 
-    if decision.intent == "cleaning_help" and decision.analysis_column_ids is not None:
+    if decision.intent in {"cleaning_help", "group_review"} and decision.analysis_column_ids is not None:
         resolve_columns(workspace, decision.analysis_column_ids)
 
     if decision.intent == "recommendation":

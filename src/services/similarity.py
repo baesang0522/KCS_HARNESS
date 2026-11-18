@@ -36,6 +36,7 @@ class SimilaritySelection(BaseModel):
 
 class SimilaritySettings(SimilaritySelection):
     method: Literal["levenshtein", "sequence"]
+    base_value: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class SimilarityRow(BaseModel):
@@ -78,7 +79,11 @@ def inspect_similarity(payload: SimilarityRequest) -> dict:
         group = row.group if payload.settings.group_column_id is not None else ""
         groups[group].setdefault(row.value, []).append(row.excel_row)
 
-    pair_count = sum(len(items) * (len(items) - 1) // 2 for items in groups.values())
+    base = payload.settings.base_value
+    if base is not None and not any(base in items for items in groups.values()):
+        raise ValueError("비교 기준값이 현재 데이터에 없습니다.")
+    pair_count = sum((len(items) - 1 if base in items else 0) if base is not None
+                     else len(items) * (len(items) - 1) // 2 for items in groups.values())
     if pair_count > MAX_PAIRS:
         raise ValueError(
             f"예상 비교 {pair_count:,}쌍이 한도 {MAX_PAIRS:,}쌍을 넘었습니다. "
@@ -88,7 +93,10 @@ def inspect_similarity(payload: SimilarityRequest) -> dict:
     deadline = monotonic() + MAX_SECONDS
     matches = []
     for group, items in groups.items():
-        for a, b in combinations(sorted(items), 2):
+        pairs = ((base, other) for other in sorted(items) if other != base) if base is not None and base in items else (
+            [] if base is not None else combinations(sorted(items), 2)
+        )
+        for a, b in pairs:
             if monotonic() > deadline:
                 raise ValueError("계산 시간 한도를 넘었습니다. 검사 범위를 줄이세요.")
             value = score(a, b, payload.settings.method)

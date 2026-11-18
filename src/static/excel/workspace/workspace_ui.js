@@ -2,14 +2,12 @@
 (function () {
     window.createWorkspaceUI = function () {
         function el(id) { return document.getElementById("work-" + id); }
-        var columns = null, currentType = null, importChoices = [], importBusy = false;
+        var columns = null, importChoices = [], importBusy = false;
         function importSelection() {
             return importChoices.filter(function (choice) { return choice.input.checked; }).map(function (choice) { return choice.column; });
         }
         function importMode(active) {
             el("import").hidden = !active;
-            el("scope-settings").hidden = active;
-            el("advice-settings").hidden = active;
         }
         function updateImport() {
             var selected = importSelection();
@@ -58,10 +56,7 @@
                 columns = window.createWorkspaceColumns(selects, el("extra-columns"), profile.roles);
                 columns.bind(change); columns.showSelection(source); change();
             },
-            filter: function () { return el("filter-column").value ? {column_id: el("filter-column").value,
-                operator: el("filter-operator").value, value: el("filter-value").value} : null; },
             role: function () { return {column_id: el("role-column").value, role: el("role-value").value}; },
-            subject: function () { return el("advice-subject").value; },
             importColumns: function (available) {
                 el("import-confirm").checked = false;
                 el("import-columns").textContent = available.length ? "" : "추가할 원본 열이 없습니다";
@@ -86,17 +81,13 @@
                 el("selection-summary").textContent = "역할 " + count + "개 지정 · 선택 " + extras + "열 · " + rows.toLocaleString() + "행";
             },
             current: function (workspace, target) {
-                currentType = workspace.task_type;
                 el("setup").hidden = true; el("current").hidden = false;
-                choices("filter-column", workspace.columns, workspace.row_filter && workspace.row_filter.column_id, "전체 행 · 조건 없음");
                 choices("role-column", workspace.columns, el("role-column").value);
-                el("filter-operator").value = workspace.row_filter ? workspace.row_filter.operator : "equals";
-                el("filter-value").value = workspace.row_filter ? workspace.row_filter.value : "";
-                el("filter-summary").textContent = workspace.row_filter ? "현재 조건: " +
+                var operators = {equals: "같음", not_equals: "다름", contains: "포함", blank: "빈칸", not_blank: "빈칸 아님"};
+                el("operation-scope").textContent = workspace.row_filter ? "현재 조건: " +
                     (workspace.columns.find(function (c) { return String(c.column_id) === workspace.row_filter.column_id; }) || {header: "삭제된 열"}).header +
-                    " · " + el("filter-operator").selectedOptions[0].textContent + " · " + workspace.row_filter.value : "현재 조건: 전체 행";
-                el("operation-scope").textContent = el("filter-summary").textContent;
-                el("advice-subject").value = workspace.advice_subject || (workspace.task_type === "model_normalization" ? "model" : "company");
+                    " · " + operators[workspace.row_filter.operator] + " · " + workspace.row_filter.value : "현재 조건: 전체 행";
+                el("clear-filter").hidden = !workspace.row_filter;
                 el("title").textContent = window.workspaceProfiles[workspace.task_type].name;
                 el("current-summary").textContent = workspace.sheet_name + " · " + target.row_count.toLocaleString() + "행 작업 중";
                 el("column-summary").textContent = workspace.columns.map(function (column) {
@@ -109,7 +100,6 @@
                 el("panel").querySelectorAll("button,select,input,textarea").forEach(function (control) { control.disabled = busy; });
                 el("start").disabled = busy || !ready;
                 importBusy = busy; updateImport();
-                el("advice-subject").disabled = busy || currentType !== "investigation";
                 if (columns) columns.setBusy(busy);
             },
             status: status,
@@ -119,12 +109,11 @@
                     "select",
                     "start",
                     "restore",
-                    "new", "refresh", "import-add", "role-save", "filter-save"
+                    "new", "refresh", "groups", "import-add", "role-save", "clear-filter"
                 ].forEach(function (name) {
                     el(name).addEventListener("click", handlers[name]);
                 });
 
-                el("advice-subject").addEventListener("change", handlers.subject);
                 el("type").addEventListener("change", function () {
                     handlers.type(el("type").value);
                 });
