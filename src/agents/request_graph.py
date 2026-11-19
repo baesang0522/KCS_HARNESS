@@ -44,6 +44,8 @@ async def run_request_graph(runtime, messages, task_context: dict, *, log_contex
         from prompts.loader import load_agent_prompt
         from agents.execution_tools import execution_tools
         prompt = load_agent_prompt(Path(__file__).resolve().parents[1] / "prompts/execution.yml").render()
+        if task_context.get("agent_run", {}).get("code_grouping_request"):
+            prompt += "\n\n" + load_agent_prompt(Path(__file__).resolve().parents[1] / "prompts/code_grouping.yml").render()
         tools = execution_tools(task_context, tools)
     tools_by_name = {item.name: item for item in tools}
     model = runtime.model.bind_tools(

@@ -29,8 +29,10 @@ def preprocess(value: str, rules: list[Rule]) -> str:
                 # 정규식 입력은 받지 않는다. 대소문자를 구분해 온전한 단어/구절만 제거한다.
                 for word in rule.words:
                     pattern = re.escape(word)
-                    if re.search(r"\w", word):
-                        pattern = r"(?<!\w)" + pattern + r"(?!\w)"
+                    if re.match(r"\w", word):
+                        pattern = r"(?<!\w)" + pattern
+                    if re.search(r"\w$", word):
+                        pattern += r"(?!\w)"
                     value = re.sub(pattern, "", value)
         if len(value) > 32767:
             raise ValueError("결과가 Excel 셀 길이 32,767자를 초과합니다.")

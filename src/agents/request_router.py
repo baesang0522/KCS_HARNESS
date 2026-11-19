@@ -21,6 +21,7 @@ class RequestDecision(BaseModel):
     formula_output: OperationOutput | None = None
     goal: str | None = Field(default=None, min_length=1, max_length=8000)
     resume_agent: bool = False
+    code_grouping_request: str | None = Field(default=None, min_length=1, max_length=8000)
     task_type: TaskType | None = None
     operation: Operation | None = None
     similarity: SimilaritySettings | None = None
@@ -34,6 +35,8 @@ class RequestDecision(BaseModel):
 
     @model_validator(mode="after")
     def validate_decision(self, info: ValidationInfo):
+        if self.code_grouping_request is not None and (self.intent != "agent" or self.resume_agent):
+            raise ValueError("대표 부호 연결 지시는 새 조사 목표에만 지정하세요.")
         for intent, payload in [("document", self.document_action), ("workspace_action", self.workspace_action), ("formula_output", self.formula_output_action)]:
             if (self.intent == intent) != (payload is not None):
                 raise ValueError("요청 종류와 실행 설정이 일치하지 않습니다.")

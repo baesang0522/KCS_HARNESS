@@ -23,6 +23,7 @@ from services.agent_runs import MAX_STEPS
 class AgentTests(unittest.TestCase):
     def setUp(self):
         self.calls, self.queue = [], []
+        self.tool_sets, self.prompts = [], []
         outer = self
         class Model:
             def bind_tools(self, tools, **kwargs):
@@ -30,6 +31,8 @@ class AgentTests(unittest.TestCase):
                 return self
             async def ainvoke(self, messages):
                 outer.calls.append(json.loads(messages[1].content)["task_context"])
+                outer.tool_sets.append(self.names.copy())
+                outer.prompts.append(messages[0].content)
                 name, args = outer.queue.pop(0)
                 assert name in self.names, name
                 return AIMessage(content="", tool_calls=[{"id": str(uuid4()), "name": name, "args": args}])
@@ -54,11 +57,15 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.text)
         return response.json()
 
-    def start(self):
-        reply=self.chat('start_agent',dict(goal='실제 상호 값을 읽고 AA와 유사도를 비교해 보여줘'))
+    def start(self, goal='실제 상호 값을 읽고 AA와 유사도를 비교해 보여줘', code_grouping_request=None):
+        reply=self.chat('start_agent',dict(goal=goal,code_grouping_request=code_grouping_request),goal)
         self.rid=reply['ui_action']['run_id']
         self.base=f'/conversations/{self.cid}/agent-runs/{self.rid}'
         return reply
+
+    def start_code_groups(self):
+        request='100점인 행의 부호를 대표로 삼아 같은 부호는 같은 그룹으로 묶어줘'
+        return self.start(request, request)
 
     @property
     def agent_run(self): return self.app.state.conversations._conversations[self.cid].agent_runs[self.rid]
@@ -322,7 +329,7 @@ class AgentTests(unittest.TestCase):
         data=[]
         for code,group in pairs:data.extend([[code,group,'100'],[code,'기존 다른 그룹','30']])
         data.append(['OTHER','보존할 그룹','20'])
-        self.start()
+        self.start_code_groups()
         read=dict(column_ids=['code','group','score'],condition=dict(column_id='score',operator='equals',value='100'))
         state=self.advance('read_workspace',read)
         for index,(code,group) in enumerate(pairs):
@@ -364,7 +371,7 @@ class AgentTests(unittest.TestCase):
         for case in ['missing','conflict','blank','wrong_value','wrong_score','same_column']:
             with self.subTest(case=case):
                 self.workspace.update(columns=[dict(column_id=key,header=key,role='reference') for key in ['code','group','score']],target_column_ids=['group'])
-                self.start()
+                self.start_code_groups()
                 if case!='missing':
                     state=self.advance('read_workspace',dict(column_ids=['code','group','score'],condition=dict(column_id='score',operator='equals',value='100')))
                     rows=[dict(identity=1,excel_row=2,values=['A','그룹 A','100'])]
@@ -396,3 +403,55 @@ class AgentTests(unittest.TestCase):
         response=self.client.post(self.base+'/bind',json=dict(step_id=state['step']['step_id'],job_id=jid,kind='operation'))
         self.assertEqual(response.status_code,409,response.text)
         self.assertIsNone(self.agent_run.step['job'])
+
+    def test_name_matching_goal_never_exposes_code_propagation_or_its_instructions(self):
+        message='해외공급자상호 정제와 회사명에서 유사도비교한 후에 그룹명으로 묶어줄래?'
+        self.start(message)
+        state=self.read()
+        self.assertNotIn('apply_group_by_code', self.tool_sets[-1])
+        self.assertNotIn('먼저 기준 점수·부호·그룹 열을 읽어', self.prompts[-1])
+        self.assertEqual(self.calls[-1]['agent_run']['user_request'], message)
+        self.assertIsNone(self.agent_run.code_grouping_request)
+        result=self.advance('answer_question',dict(answer='요청한 비교를 마쳤어.'),self.receipt(state,rows=self.rows))
+        self.assertEqual(result['status'],'COMPLETED')
+        self.assertFalse(self.app.state.operation_jobs)
+
+    def test_new_goal_does_not_inherit_prior_code_grouping_but_explicit_resume_keeps_it(self):
+        self.start_code_groups();old=self.agent_run
+        state=self.read()
+        self.assertIn('apply_group_by_code',self.tool_sets[-1])
+        self.advance('ask_user',dict(question='확인 후 이어가줘'),self.receipt(state,rows=self.rows))
+        self.chat('resume_agent',{},'확인했어. 이어가줘')
+        self.read()
+        self.assertIn('apply_group_by_code',self.tool_sets[-1])
+        self.start('상호와 회사명을 유사도 비교해서 그룹명으로 묶어줘')
+        self.assertNotEqual(old.id,self.rid)
+        self.assertEqual(old.status,'PAUSED')
+        self.read()
+        self.assertNotIn('apply_group_by_code',self.tool_sets[-1])
+        self.assertIsNone(self.agent_run.code_grouping_request)
+
+    def test_model_cannot_authorize_code_grouping_using_an_old_or_unrelated_quote(self):
+        for quote in ['100점인 행의 부호를 대표로 삼아 같은 부호는 같은 그룹으로 묶어줘',
+                      '회사명 유사도 비교 후 그룹으로 묶어줘']:
+            self.queue.append(('start_agent',dict(goal='100점 대표 부호로 그룹 연결',code_grouping_request=quote)))
+            reply=self.chat('ask_user',dict(question='현재 요청만 처리할게'), '회사명 유사도 비교 후 그룹으로 묶어줘')
+            self.assertIsNone(reply['ui_action'])
+            self.assertFalse(self.app.state.conversations._conversations[self.cid].agent_runs)
+
+    def test_model_expanded_goal_does_not_grant_code_grouping(self):
+        message='회사명 유사도 비교 후 그룹으로 묶어줘'
+        reply=self.chat('start_agent',dict(goal='유사도 매칭 후 100점 대표 부호로 같은 부호의 그룹 연결'),message)
+        self.rid=reply['ui_action']['run_id'];self.base=f'/conversations/{self.cid}/agent-runs/{self.rid}'
+        self.read()
+        self.assertEqual(self.calls[-1]['agent_run']['user_request'],message)
+        self.assertNotIn('apply_group_by_code',self.tool_sets[-1])
+
+    def test_unrequested_automatic_decision_is_rejected_even_if_it_bypasses_tool_selection(self):
+        self.start()
+        with patch('agents.request_graph.run_request_graph',return_value=dict(intent='apply_group',answer='범위 밖 변경')):
+            result=self.advance()
+        self.assertEqual(result['status'],'FAILED')
+        self.assertIn('지시가 없습니다',result['answer'])
+        self.assertIsNone(result['step'])
+        self.assertFalse(self.app.state.operation_jobs)

@@ -372,12 +372,17 @@ def build_request_tools(task_context: dict):
         }
 
     @tool
-    def start_agent(goal: str) -> dict:
+    def start_agent(goal: str, code_grouping_request: str | None = None) -> dict:
         """방법을 맡긴 목표형 요청을 현재 작업표에서 읽기·비교·사용자 확인으로 이어간다.
-        단일 정제/수식/범위 변경에는 기존 도구를 사용한다. 기업 동일성을 자동 확정하지 않는다."""
+        단일 정제/수식/범위 변경에는 기존 도구를 사용한다. 기업 동일성을 자동 확정하지 않는다.
+        code_grouping_request는 현재 사용자가 100점 대표 부호로 같은 부호의 그룹 연결까지 명시한 원문 인용이다.
+        단순 유사도 비교·회사명 그룹 매칭에는 생략한다. 이전 대화의 지시나 부호·점수 열의 존재로 추가하지 않는다."""
         if not workspace or not goal.strip() or len(goal) > 8000:
             raise ValueError("작업표와 구체적인 조사 목표가 필요합니다.")
-        return {"intent": "agent", "goal": goal.strip(), "answer": "현재 데이터에서 목표에 필요한 작업을 이어갈게요."}
+        from services.agent_runs import validate_code_grouping_request
+        validate_code_grouping_request(code_grouping_request, task_context.get("user_request", ""))
+        return {"intent": "agent", "goal": goal.strip(), "code_grouping_request": code_grouping_request,
+                "answer": "현재 데이터에서 목표에 필요한 작업을 이어갈게요."}
 
     @tool
     def resume_agent() -> dict:

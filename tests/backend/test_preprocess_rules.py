@@ -9,6 +9,44 @@ from services.operations.schemas import Rule
 
 
 class PreprocessRulesTests(unittest.TestCase):
+    def test_remove_phrase_uses_word_boundaries_only_at_word_character_edges(self):
+        cases = [
+            ('PTE. LTD.', '. LTD.', 'PTE'),
+            ('PTE. LTD.', 'LTD.', 'PTE. '),
+            ('LTD LTDX XLTD LTD.', 'LTD', ' LTDX XLTD .'),
+            ('ALTD. LTD.X', 'LTD.', 'ALTD. X'),
+            ('PTE. LTDX PTE. LTD', '. LTD', 'PTE. LTDX PTE'),
+            ('ACME(LTD)TRADING', '(LTD)', 'ACMETRADING'),
+            ('ACME.*LTD', '.*', 'ACMELTD'),
+            ('PTE. Ltd.', '. LTD.', 'PTE. Ltd.'),
+            ('PTE.  LTD.', '. LTD.', 'PTE.  LTD.'),
+        ]
+        for text, word, expected in cases:
+            with self.subTest(text=text, word=word):
+                self.assertEqual(preprocess(text, [Rule(operation='remove_words', words=[word])]), expected)
+
+    def test_supplier_review_preview_removes_dotted_ltd_from_three_of_sixteen_names(self):
+        names = [
+            'BAOSHAN IRON & STEEL', 'WUHAN IRON & STEEL', 'SHANGHAI MEISHAN IRON & STEEL',
+            'BAOSTEEL ZHANJIANG IRON   & STEEL', 'SHANDONG IRON AND STEEL GROUP RIZHAO',
+            'HOWA TRADING', 'JIANGSU SHAGANG STEEL', 'JIANGSU SHAGANG   INTERNATIONAL TRADE',
+            'SHAGANG INTERNATIONAL (SINGAPORE) PTE. LTD.',
+            'KWAN TAK INTERNATIONAL   (SINGAPORE) PTE. LTD.',
+            'HUNAN VALIN XIANGTAN IRON AND STEEL', 'XISC (SINGAPORE) PTE. LTD.',
+            'ANGANG STEEL', 'ANGANG GROUP HONG KONG', 'JIANGYIN XINGCHENG SPECIAL STEEL WORKS',
+            'NANJING IRON AND STEEL',
+        ]
+        app = FastAPI(); app.include_router(router); client = TestClient(app)
+        response = client.post('/operations/preview', json=dict(
+            operation=dict(kind='preprocess', column_ids=['review-column'],
+                           rules=[dict(operation='remove_words', words=['. LTD.'])]),
+            rows=[dict(excel_row=i+2, values=[name]) for i, name in enumerate(names)]))
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['changed_count'], 3)
+        for index, row in enumerate(response.json()['rows']):
+            self.assertEqual(row['excel_row'], index+2)
+            self.assertEqual(row['values'], [names[index][:-6] if index in (8, 9, 11) else names[index]])
+
     def test_hangul_only_keeps_brackets_english_numbers_and_spaces(self):
         text = '바오 스틸(Baoshan 123) [중국] 한글'
         self.assertEqual(preprocess(text, [Rule(operation='remove_hangul')]), ' (Baoshan 123) [] ')
