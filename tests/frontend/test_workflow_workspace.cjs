@@ -14,9 +14,9 @@ async function setup({rows=90000,cachedRows=90000}={}) {
     let handlers,selected=['replaced'];
     const ui=new Proxy({bind:x=>{handlers=x;},status:x=>h.status.push(x)},{get:(o,k)=>o[k]||(()=>{})});
     const operations={targets:()=>selected.slice(),show:(w,t,ids)=>{selected=Array.from(ids);},
-        reconcile:()=>false,configure:x=>{h.configured=x;},sampleRows:async()=>[],invalidate(){},reset(){},busy(){}};
+        pending:()=>null, reconcile:()=>false,configure:x=>{h.configured=x;},sampleRows:async()=>[],invalidate(){},reset(){},busy(){}};
     const target=w=>({worksheet_id:'sheet',sheet_name:'Sheet1',row_start:1,row_count:cachedRows,columns:w.columns});
-    const window={resultDependencies:{reconcile:async()=>false,required:()=>[],register(){}},createWorkspaceUI:()=>ui,createOperationJobs:()=>({}),createOperations:()=>operations,
+    const window={resultDependencies:{pending:()=>null, reconcile:async()=>false,required:()=>[],register(){}},createWorkspaceUI:()=>ui,createOperationJobs:()=>({}),createOperations:()=>operations,
         createSimilarityController:()=>({reset(){},busy(){}}),
         workspaceStore:{current:async()=>saved,save:async()=>{}},
         workspaceSheet:{requireExcel(){},readWorkspaceTarget:async w=>h.selection||target(w)},
@@ -26,7 +26,7 @@ async function setup({rows=90000,cachedRows=90000}={}) {
     const sandbox={window,console,Excel:{run:async fn=>fn({})}};
     vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../src/static/excel/formula/workspace_formula.js'),'utf8'),sandbox);
     vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../src/static/excel/workspace/workspace.js'),'utf8'),sandbox);
-    h.controller=window.createWorkspaceController({api:{newRequestId:()=> 'id'},getConversationId:()=> 'conversation',
+    h.controller=window.createWorkspaceController({messages:h.messages,api:{newRequestId:()=> 'id'},getConversationId:()=> 'conversation',
         isBusy:()=>false,setBusy(){},complete(){},enterConversation(){},
         onWorkspaceReady: async target => { h.reference = target; }});
     await handlers.restore();

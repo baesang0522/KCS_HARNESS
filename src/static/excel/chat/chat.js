@@ -105,16 +105,15 @@
         function setBusy(value) {
             sending = value;
             var button = document.querySelector('.send');
-            var stoppable = value && activeRequest;
-            button.disabled = value && (!stoppable || activeRequest.cancelled);
+            var stoppable = value && (activeRequest || options.canStopTask && options.canStopTask());
+            button.disabled = value && (!stoppable || activeRequest && activeRequest.cancelled);
             button.setAttribute('aria-label', stoppable ? '요청 중지' : '요청 보내기');
             button.title = stoppable ? '요청 중지' : '요청 보내기';
             button.querySelector('path').setAttribute('d', stoppable
                 ? 'M7 7h10v10H7Z' : 'm6 12 6-6 6 6M12 6v13');
-            document.getElementById('new-chat').disabled = value;
             document.getElementById('open-workspace').disabled = value;
             document.querySelectorAll('[data-close-task]').forEach(function (button) { button.disabled = value; });
-            message.readOnly = value;
+            message.readOnly = false;
             document.querySelectorAll('[data-prompt], [data-task]').forEach(function (button) {
                 button.disabled = value;
             });
@@ -244,6 +243,10 @@
                 return;
             }
 
+            try {
+                if (!advice && options.localCommand && await options.localCommand(value)) { message.value = ''; return true; }
+            } catch (error) { notice.textContent = error.message; return false; }
+
             // 같은 질문은 기존 ID로 재시도하고, 다른 질문은 새 ID로 진행한다.
             if (pendingRequest && (pendingRequest.message !== value ||
                 (advice && !pendingRequest.advice_requested))) {
@@ -275,7 +278,7 @@
                     var context = await options.getWorkspace().context();
                     checkChat(run);
                     if (advice && (!context || context.workspace_id !== advice.workspace_id)) {
-                        throw new Error("분석 대상이 바뀌었습니다. 정제 도움을 다시 열어 주세요.");
+                        throw new Error("분석 대상이 바뀌었습니다. 원하는 열을 지정해 다시 요청하세요.");
                     }
                     if (advice && advice.column_ids) context = Object.assign({}, context, {target_column_ids: advice.column_ids});
                     pendingRequest = Object.assign({}, run.request, {
@@ -295,6 +298,8 @@
                 });
                 checkChat(run);
 
+                if (options.beforeAction) await options.beforeAction(reply.ui_action);
+                checkChat(run);
                 if (reply.ui_action && reply.ui_action.type === "analyze_data") {
                     notice.textContent = "전체 데이터를 읽고 있습니다…";
                     var data = await options.getWorkspace().readRecommendation(
@@ -340,18 +345,12 @@
                 notice.textContent = '';
 
                 try {
+                    setBusy(false);
                     await options.handleUIAction(reply.ui_action, value);
-                    if (reply.ui_action && reply.ui_action.type === "configure_operation" && reply.ui_action.operation.kind === "extract") {
-                        setBusy(false);
-                        await options.getWorkspace().recommendExtraction();
-                    } else if (reply.ui_action && reply.ui_action.type === "configure_operation" && reply.ui_action.operation.condition) {
-                        setBusy(false);
-                        await options.getWorkspace().previewOperation();
-                    }
                 } catch (uiError) {
                     // 서버에서 성공한 요청을 다시 전송하게 만들지 않는다.
                     notice.textContent =
-                        "답변은 받았지만 작업 화면을 열지 못했습니다. " +
+                        "답변은 받았지만 작업을 준비하지 못했습니다. " +
                         uiError.message;
                 }
 
@@ -390,35 +389,11 @@
             notice.textContent = '';
         }
 
-        document.getElementById('new-chat').addEventListener(
-            'click',
-            async function () {
-                if (sending) return;
-
-                setBusy(true);
-
-                try {
-                    await newConversation();
-                } catch (error) {
-                    notice.textContent = error.message;
-                } finally {
-                    setBusy(false);
-                    message.focus();
-                }
-            }
-        );
-
         document.getElementById('composer').addEventListener('submit', function (event) {
             event.preventDefault();
             if (activeRequest) stopMessage();
+            else if (sending && options.stopTask) options.stopTask();
             else sendMessage();
-        });
-        document.getElementById('message-resize').addEventListener('click', function () {
-            var expanded = this.getAttribute('aria-expanded') !== 'true';
-            document.getElementById('composer-fields').hidden = !expanded;
-            this.setAttribute('aria-expanded', String(expanded));
-            this.textContent = expanded ? '입력칸 접기' : '입력칸 펼치기';
-            if (expanded) message.focus();
         });
         message.addEventListener('compositionstart', function () { composing = true; });
         message.addEventListener('compositionend', function () { composing = false; });

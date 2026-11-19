@@ -49,7 +49,7 @@
     }
     window.writeRecoverySheet = {digest: digest, capture: capture, observe: observe, readBlock: readBlock};
     window.createWriteRecovery = function (options) {
-        var panel = document.getElementById("write-recovery"), pending = new Map(), generation = 0;
+        var panel = document.createElement("div"), pending = new Map(), generation = 0, attached = false;
         function path(kind, id, action, cid) { return "/write-recovery/" + kind + "/" + encodeURIComponent(id) + "/" + action +
             "?conversation_id=" + encodeURIComponent(cid || options.getConversationId()); }
         function request(kind, id, action, data, method, cid) {
@@ -69,8 +69,9 @@
                 if (version !== generation || cid !== options.getConversationId()) return;
                 jobs = jobs.filter(function (job) { return ["APPLYING", "UNKNOWN"].includes(job.status) || pending.has(job.job_id); });
                 panel.textContent = ""; panel.hidden = !jobs.length;
+                if (jobs.length && !attached) { options.messages.say("완료 여부를 확인할 쓰기가 있어. 기존 실행을 다시 쓰지 않고 현재 값을 대조할 수 있어.").appendChild(panel); attached = true; }
                 for (var job of jobs) render(job);
-            } catch (error) { if (version === generation) { panel.hidden = false; panel.textContent = "쓰기 기록 확인 실패 · " + error.message; } }
+            } catch (error) { if (version === generation) { panel.hidden = false; panel.textContent = "쓰기 기록 확인 실패 · " + error.message; options.messages.say(panel.textContent); } }
         }
         function render(job) {
             var card = document.createElement("section"), label = document.createElement("p"), check = document.createElement("button"), status = document.createElement("p");
@@ -85,15 +86,22 @@
             }
             check.type = "button"; check.textContent = "현재 값 대조";
             card.appendChild(label); card.appendChild(check); card.appendChild(status); panel.appendChild(card);
-            var manual = document.createElement("details"), summary = document.createElement("summary"), note = document.createElement("textarea"), choice = document.createElement("select"), record = document.createElement("button");
-            summary.textContent = "직접 확인한 내용 기록"; manual.appendChild(summary);
-            choice.setAttribute("aria-label", "직접 확인한 쓰기 결과"); note.setAttribute("aria-label", "확인한 범위와 판단 근거"); note.placeholder = "확인한 범위와 판단 근거"; note.maxLength = 8000;
+            var manual = document.createElement("div"), choice = {value: "unknown"}, note = {value: ""}, record = {disabled: false};
+            card.appendChild(manual);
             [["unknown", "판단 불가"], ["partial", "일부 반영"], ["not_applied", "미반영 확인"], ["completed", "반영 완료 확인"]].forEach(function (item) {
-                var option = document.createElement("option"); option.value = item[0]; option.textContent = item[1]; choice.appendChild(option);
+                options.messages.button(manual, item[1] + " 기록", function () {
+                    if (record.disabled) return;
+                    options.messages.ask("직접 확인한 범위와 판단 근거를 채팅으로 적어 줘. 취소하려면 ‘취소’라고 입력해.", function (text) {
+                        choice.value = item[0]; note.value = text;
+                        options.messages.confirm(item[1] + "으로 기록할까?\n" + text, {apply: function () { return run(true); }, cancel: function () {}});
+                    });
+                });
             });
-            record.type = "button"; record.textContent = "확인 내용 저장"; manual.appendChild(choice); manual.appendChild(note); manual.appendChild(record); card.appendChild(manual);
+            var conversationId = options.getConversationId(), target = options.getWorkspace();
             async function run(user) {
                 if (options.isBusy()) return;
+                var current = options.getWorkspace();
+                if (conversationId !== options.getConversationId() || target && (!current || target.worksheet_id !== current.worksheet_id || String(target.table_id) !== String(current.table_id))) throw new Error("조사나 작업표가 바뀌었어요. 쓰기 결과 확인을 다시 요청하세요.");
                 options.setBusy(true); check.disabled = record.disabled = true;
                 try {
                     var observation = {values: [], identities: [], formulas: []};
@@ -125,11 +133,11 @@
                 } catch (error) { status.textContent = error.message; check.disabled = record.disabled = false; }
                 finally { options.setBusy(false); }
             }
-            check.addEventListener("click", function () { return run(false); }); record.addEventListener("click", function () { return run(true); });
+            check.addEventListener("click", function () { return run(false).catch(function (error) { status.textContent = error.message; }); });
         }
         return {
             refresh: refresh,
-            reset: function () { generation++; pending.clear(); panel.hidden = true; panel.textContent = ""; },
+            reset: function () { generation++; pending.clear(); attached = false; panel = document.createElement("div"); panel.hidden = true; panel.textContent = ""; },
             completed: function (id) { pending.delete(id); },
             remember: function (id, restore) { pending.set(id, restore); },
             operation: async function (job, context, info, snapshot, outputs, values) {

@@ -152,28 +152,6 @@ input:focus-visible,select:focus-visible{outline:2px solid #75609d;outline-offse
 .workspace-launch{margin-left:auto;white-space:nowrap;background:#f5f1fb;color:#70598b;border:1px solid #ddd4eb;border-radius:7px;padding:6px 8px;font-size:11px}
 @media(max-width:340px){.brand{font-size:12px;gap:5px}.topbar{gap:5px}}
 
-/* 정제 도움에서는 기존 작업 설정을 같은 카드 안에 표시한다. */
-#cleaning-help #work-panel {
-    border: 0;
-    padding: 0;
-    margin: 0;
-    background: transparent;
-}
-#cleaning-help #work-title,
-#cleaning-help #work-panel > [data-close-task],
-#cleaning-help #work-current-summary,
-#cleaning-help #work-current > details,
-#cleaning-help #work-new,
-#cleaning-help [data-open-cleaning-help],
-#cleaning-help #op-finalize,
-#cleaning-help #sim-back {
-    display: none;
-}
-#cleaning-help[data-mode="extract"] #op-settings > label:first-child,
-#cleaning-help[data-mode="similarity"] #operations {
-    display: none;
-}
-
 .normalization-panel .work-import-choice{display:flex;gap:8px;align-items:flex-start;margin:8px 0}
 
 #gr-panel input[type=text]{width:100%;box-sizing:border-box;padding:7px;border:1px solid #e3dfea;border-radius:7px}
@@ -187,3 +165,11 @@ input:focus-visible,select:focus-visible{outline:2px solid #75609d;outline-offse
 .workspace-launch + .workspace-launch{margin-left:0}
 
 #work-review-warning { flex-shrink: 0; margin: 0; padding: 8px 20px; overflow-wrap: anywhere; }
+
+/* 채팅 결과: 긴 표는 대화 폭 안에서만 스크롤한다. */
+.task-message>button,.task-message details>button{border:1px solid #d7d0e6;border-radius:7px;background:#f5f1fb;color:#70598b;padding:7px 12px;margin:10px 6px 0 0;font-size:12px}
+.task-message details{margin-top:12px;max-width:100%;font-size:12px}
+.task-message summary{cursor:pointer;color:#70598b}
+.task-message details>div{overflow-x:auto}
+.task-message table{border-collapse:collapse;font-size:12px;min-width:100%}
+.task-message th,.task-message td{border-bottom:1px solid #e8e5ef;padding:7px;text-align:left;vertical-align:top;min-width:65px;max-width:220px;overflow-wrap:anywhere}

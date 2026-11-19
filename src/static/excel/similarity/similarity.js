@@ -1,90 +1,34 @@
 "use strict";
 (function () {
     window.createSimilarityController = function (options) {
-        function el(id) { return document.getElementById("sim-" + id); }
-        function progress(label, done, total) {
-            options.status(label + " · " + done.toLocaleString() + "/" + total.toLocaleString());
-        }
-        function updateRun() {
-            el("run").disabled = options.isBusy() || !el("column").value ||
-                el("column").value === el("group").value ||
-                !["sequence", "levenshtein"].includes(el("method").value);
-        }
-        function reset() {
-            el("panel").hidden = true;
-            el("method").value = "";
-            updateRun();
-            document.getElementById("operations").hidden = false;
-        }
-        function describe() {
-            updateRun();
-            if (!el("method").value) {
-                el("description").textContent = "설명과 샘플을 확인하고 비교 방식을 선택하세요.";
-                return;
-            }
-            el("description").textContent = el("method").value === "sequence"
-                ? "같은 순서로 이어지는 문자열 부분을 비교합니다. 비교 방향에 따른 차이를 줄이기 위해 양방향 점수의 평균을 사용합니다."
-                : "글자 추가·삭제·교체 횟수를 문자열 길이에 맞춰 0~100점으로 계산합니다. 작은 철자 차이를 찾는 데 사용합니다.";
-        }
-        function show(workspace, target, settings) {
-            var ids = [settings.column_id, settings.group_column_id].filter(Boolean);
-            if (ids.some(function (id) { return !workspace.columns.some(function (c) { return String(c.column_id) === id; }); })) {
-                throw new Error("유사도 검사 대상 열이 없습니다. 다시 요청하세요.");
-            }
-            el("column").replaceChildren(new Option("계산 대상열을 선택하세요", ""));
-            el("group").replaceChildren(new Option("제한 없음", ""));
-            workspace.columns.forEach(function (column) {
-                el("column").add(new Option(column.header, String(column.column_id)));
-                el("group").add(new Option(column.header, String(column.column_id)));
-            });
-            el("column").value = settings.column_id || "";
-            el("group").value = settings.group_column_id || "";
-            el("method").value = "";
-            el("scope").textContent = workspace.sheet_name + " · 현재 범위 " + target.row_count.toLocaleString() +
-                (workspace.row_filter ? "행 중 작업 조건에 맞는 행만 검사합니다." : "행. 숨긴 행도 포함합니다.");
-            document.getElementById("operations").hidden = true;
-            el("panel").hidden = false;
-            describe();
-        }
-        el("method").addEventListener("change", describe);
-        el("column").addEventListener("change", updateRun);
-        el("group").addEventListener("change", updateRun);
-        el("back").addEventListener("click", function () { if (!options.isBusy()) reset(); });
-        el("run").addEventListener("click", async function () {
+        async function run(settings) {
             if (options.isBusy()) return;
-            if (!["sequence", "levenshtein"].includes(el("method").value)) { options.status("비교 방식을 선택해 주세요."); return; }
-            var settings = {
-                column_id: el("column").value,
-                group_column_id: el("group").value || null,
-                method: el("method").value
-            };
-            if (settings.column_id === settings.group_column_id) { options.status("검사 대상과 비교 조건에는 다른 열을 선택하세요."); return; }
             options.setBusy(true);
+            var progress = function (label, done, total) { options.status(label + ' · ' + done + '/' + total); };
             try {
-                var current = await options.getInput();
-                var ids = [settings.column_id].concat(settings.group_column_id ? [settings.group_column_id] : []);
+                if (!['levenshtein', 'sequence'].includes(settings.method)) throw new Error('비교 방식을 알려주세요: 철자 차이 또는 공통 문자열.');
+                var current = await options.getInput(), ids = [settings.column_id].concat(settings.group_column_id ? [settings.group_column_id] : []);
                 var snapshot = await window.operationsSheet.read(current.workspace, current.target, ids, progress, function () {});
-                var capturedAt = new Date().toISOString();
-                options.status("유사도 계산 중입니다. 검사 완료까지 작업 시트를 편집·정렬하지 마세요.");
-                var result = await options.api.requestJson("/operations/similarity", {
-                    method: "POST", headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({settings: settings, rows: snapshot.rows.map(function (row) {
-                        return {excel_row: row.excel_row, value: row.values[0], group: settings.group_column_id ? row.values[1] : ""};
-                    })})
-                });
-                current = await options.getInput();
-                var latest = await window.operationsSheet.read(current.workspace, current.target, ids, progress, function () {});
-                if (snapshot.stamp !== latest.stamp || JSON.stringify(snapshot.rows) !== JSON.stringify(latest.rows)) {
-                    throw new Error("검사 중 값이나 표 구성이 바뀌었습니다. 다시 검사하세요.");
+                var result = await options.api.requestJson('/operations/similarity', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({settings: settings, rows: snapshot.rows.map(function (row) { return {excel_row: row.excel_row, value: row.values[0], group: settings.group_column_id ? row.values[1] : ''}; })})});
+                async function verify() {
+                    var latest = await options.getInput();
+                    var next = await window.operationsSheet.read(latest.workspace, latest.target, ids, progress, function () {});
+                    if (snapshot.stamp !== next.stamp || JSON.stringify(snapshot.rows) !== JSON.stringify(next.rows)) throw new Error('비교 중 데이터나 작업 범위가 바뀌었어. 다시 요청해 줘.');
                 }
-                snapshot.workspace.sheet_name = latest.workspace.sheet_name;
-                var name = await window.similaritySheet.write(snapshot, result, settings, capturedAt, options.api.newRequestId(), progress);
-                reset();
-                options.complete("유사도 검사 결과 " + result.rows.length.toLocaleString() + "쌍을 ‘" + name + "’ 시트에 작성했습니다. " +
-                    "원본 데이터는 변경하지 않았습니다.");
-            } catch (error) { options.status(error.message); }
-            finally { options.setBusy(false); }
-        });
-        return {show: show, reset: reset, busy: updateRun};
+                await verify();
+                var text = snapshot.rows.length.toLocaleString() + '행에서 ' + result.rows.length.toLocaleString() + '쌍을 ' + (settings.method === 'levenshtein' ? '철자 차이' : '공통 문자열') + ' 방식으로 비교했어. 셀은 변경하지 않았어. 점수는 같은 기업이라는 확정 판단이 아니야.';
+                var headers = ['기준값', '비교값', '점수', '기준 건수', '비교 건수', '그룹', '기준 첫 행', '비교 첫 행'];
+                var rows = result.rows.map(function (r) { return [r.base, r.candidate, r.score, r.base_count, r.candidate_count, r.group, r.base_row, r.candidate_row]; });
+                if (settings.result_sheet) {
+                    options.messages.confirm(text + '\n적용하면 비교 결과를 새 시트에 저장할게.', {apply: async function () {
+                        options.setBusy(true);
+                        try { await verify(); var name = await window.similaritySheet.write(snapshot, result, settings, new Date().toISOString(), options.api.newRequestId(), progress); options.complete('완료했어. ‘' + name + '’ 시트에 ' + rows.length + '쌍을 저장했어.'); }
+                        finally { options.setBusy(false); }
+                    }, cancel: function () { options.messages.say('결과 시트 만들기를 취소했어.'); }}, headers, rows);
+                } else options.messages.table(options.messages.say(text), headers, rows);
+            } finally { options.setBusy(false); }
+        }
+        return {run: run, reset: function () {}, busy: function () {}};
     };
 })();

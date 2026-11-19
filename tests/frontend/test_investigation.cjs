@@ -109,57 +109,33 @@ test('direct scope selection persists without cell writes or groups and filters 
     }};
     ['workspace/workspace_sheet.js','workspace/table_reader.js','operations/operations_sheet.js','operations/operations_ui.js',
         'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js','workspace/result_dependencies.js','workspace/workspace.js'].forEach(h.load);
-    controller=h.window.createWorkspaceController({api,getConversationId:()=> 'conversation',isBusy:()=>busy,
+    controller=h.window.createWorkspaceController({messages:h.messages,api,getConversationId:()=> 'conversation',isBusy:()=>busy,
         showWorkspace:()=>{revealed++;},
         setBusy:v=>{busy=v;controller?.setBusy(v);},complete:noop,enterConversation:noop});
     const node=id=>h.document.getElementById(id);
     await node('work-restore').emit('click');
     const before=structuredClone(f.sheet.cells);
-    await controller.openScope();
-    assert.equal(node('work-tools').hidden,true);assert.equal(node('work-import').hidden,true);
-    assert.equal(node('work-scope').hidden,false);assert.equal(node('work-title').textContent,'작업 범위');
-    node('work-scope-value').value='';await node('work-scope-apply').emit('click');
-    assert.match(node('work-status').textContent,/비교할 값/);assert.equal(stored.row_filter.value,'OK');
-    node('work-scope-column').value='deleted';node('work-scope-value').value='NO';
-    await node('work-scope-apply').emit('click');assert.match(node('work-status').textContent,/조건 열/);
-    assert.equal(stored.row_filter.value,'OK');
-    node('work-scope-column').value=f.work.columns[1].column_id;
-    failSave=true;await node('work-scope-apply').emit('click');failSave=false;
-    assert.match(node('work-status').textContent,/저장 실패/);assert.equal(stored.row_filter.value,'OK');
+    const condition={column_id:f.work.columns[1].column_id,operator:'equals',value:'OK'};
+    await assert.rejects(controller.changeScope({mode:'replace',condition:{...condition,value:''}}),/비교할 값/);
+    await assert.rejects(controller.changeScope({mode:'replace',condition:{...condition,column_id:'deleted'}}),/조건 열/);
+    failSave=true;await assert.rejects(controller.changeScope({mode:'replace',condition}),/저장 실패/);failSave=false;
     assert.equal((await controller.context()).row_filter.value,'OK');
-    await node('work-scope-clear').emit('click');assert.equal(stored.row_filter,null);
-    node('work-scope-column').value=f.work.columns[1].column_id;
-    node('work-scope-operator').value='blank';await node('work-scope-operator').emit('change');
-    assert.equal(node('work-scope-value-label').hidden,true);
-    await node('work-scope-apply').emit('click');assert.equal(stored.row_filter.operator,'blank');
-    node('work-scope-operator').value='equals';await node('work-scope-operator').emit('change');
-    assert.equal(node('work-scope-value-label').hidden,false);
-    node('work-scope-value').value='OK';await node('work-scope-apply').emit('click');
-    assert.equal(stored.row_filter.value,'OK');assert.equal(node('work-tools').hidden,true);
+    await controller.changeScope({mode:'clear'});assert.equal(stored.row_filter,null);
+    await controller.changeScope({mode:'replace',condition:{...condition,operator:'blank',value:''}});
+    assert.equal(stored.row_filter.operator,'blank');
+    await controller.changeScope({mode:'replace',condition});assert.equal(stored.row_filter.value,'OK');
     assert.deepEqual(f.sheet.cells,before);assert.equal(stored.group_reviews,undefined);
-    await controller.openScope();assert.equal(node('work-scope-value').value,'OK');
-    await controller.open();assert.equal(node('work-tools').hidden,false);assert.equal(node('work-scope').hidden,true);
-    assert.match(node('work-operation-scope').textContent,/OK/);
-    node('op-kind').value='set';node('op-column').value=f.work.columns[0].column_id;
-    node('op-assigned-value').value='confirmed';node('op-output-mode').value='existing';node('op-existing-column').value=f.work.columns[0].column_id;
-    await node('op-preview').emit('click');
-    assert.equal(node('op-result').hidden,false,node('work-status').textContent);
-    assert(node('op-summary').textContent.includes('기존'));
-    await node('op-apply').emit('click');
+    await controller.configure({kind:'set',column_ids:[f.work.columns[0].column_id],assigned_value:'confirmed',condition,
+        destination_column_id:f.work.columns[0].column_id});
+    await controller.previewOperation();assert.match(h.chatText(),/기존 열/);await h.messages.command('적용');
     assert.deepEqual(f.sheet.cells.slice(1).map(r=>r[1]),['confirmed','keep','confirmed']);
     assert.equal(stored.columns.length,2);assert.equal(stored.target.row_count,3);
     await node('work-restore').emit('click');
-    assert.match(node('work-operation-scope').textContent,/OK/);
-    await node('work-clear-filter').emit('click');assert.equal(stored.row_filter,null);
-    assert.equal(node('work-clear-filter').hidden,true);
+    assert.equal((await controller.context()).row_filter.value,'OK');
+    await controller.changeScope({mode:'clear'});assert.equal(stored.row_filter,null);
     await controller.openSourceColumns();
-    assert.equal(revealed,3);assert.equal(node('work-panel').hidden,false);
     assert.equal(node('work-import').hidden,false);assert.equal(node('work-import-add').disabled,true);
-    assert.equal(node('work-tools').hidden,true);assert.equal(node('work-scope').hidden,true);
-    assert.equal(node('work-title').textContent,'열 추가');
-    assert.equal(node('work-import').parentNode,node('work-current'));
-    assert.equal(node('work-groups'),null);assert.equal(node('gr-panel'),null);
-    assert.equal(node('work-tools').contains(node('operations')),true);
+    assert.equal(node('work-title').textContent,'열 추가');assert.equal(node('work-groups'),null);
     assert(node('work-status').textContent.includes('모두 가져왔습니다'));
 });
 
@@ -167,7 +143,7 @@ test('source import stays disabled for an empty list after busy state changes; h
     const {createDOM}=require('../helpers/taskpane_dom.cjs'),h=createDOM();h.load('workspace/workspace_ui.js');
     const ui=h.window.createWorkspaceUI(),node=id=>h.document.getElementById(id);
     assert.equal(node('welcome-content').querySelector('[data-open-cleaning-help]'),null);
-    assert(node('work-current').querySelector('[data-open-cleaning-help]'));
+    assert.equal(node('work-current').querySelector('[data-open-cleaning-help]'),null);
     ui.importColumns([]);ui.busy(true,false);ui.busy(false,false);
     assert.equal(node('work-import-add').disabled,true);
     ui.importColumns([{column_id:'source',header:'추가 열'}]);ui.busy(false,false);
@@ -328,16 +304,16 @@ for (const failSecond of [false, true]) test(`multiple imports preserve row iden
     h.window.createSimilarityController=()=>({reset(){},show(){},busy(){}});
     ['workspace/workspace_sheet.js','workspace/table_reader.js','operations/operations_sheet.js','operations/operations_ui.js',
         'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js','workspace/result_dependencies.js','workspace/workspace.js'].forEach(h.load);
-    controller=h.window.createWorkspaceController({api:{newRequestId:()=> 'job'},getConversationId:()=> 'conversation',
+    controller=h.window.createWorkspaceController({messages:h.messages,api:{newRequestId:()=> 'job'},getConversationId:()=> 'conversation',
         isBusy:()=>busy,setBusy:v=>{busy=v;controller?.setBusy(v);},showWorkspace:noop,complete:noop,enterConversation:noop});
     const node=id=>h.document.getElementById(id);
     await node('work-restore').emit('click');await controller.openSourceColumns();
     assert.equal(node('work-scope-settings'),null);assert.equal(node('work-advice-settings'),null);
-    assert.equal(node('op-settings').hidden,false);
+    assert.equal(node('op-settings'),null);
     for(const check of node('work-import-columns').querySelectorAll('input')){check.checked=true;await check.emit('change');}
     node('work-import-confirm').checked=true;await node('work-import-confirm').emit('change');
     await node('work-import-add').emit('click');
-    assert.equal(node('work-tools').hidden,true);assert.equal(node('work-scope').hidden,true);
+    assert.equal(node('work-tools'),null);assert.equal(node('work-scope'),null);
     assert.equal(node('work-title').textContent,'열 추가');
     assert.deepEqual(calls,['live:0','live:1']);
     assert(saves.some(work=>work.columns.length===2 && work.columns[1].source_column_index===0),'first import link not persisted');
@@ -353,12 +329,12 @@ for (const failSecond of [false, true]) test(`multiple imports preserve row iden
     for(const [header,expected] of [['금액',[30,20,10]],['상호',['C','B','A']]]){
         const column=stored.columns.find(c=>c.header===header);
         assert.deepEqual(f.sheet.cells.slice(1).map(row=>row[column.column_index]),expected);
-        assert(node('op-column').querySelectorAll('option').some(o=>o.textContent===header));
+        assert((await controller.context()).columns.some(c=>c.header===header));
     }
-    assert.equal(stored.row_filter.value,'AB1');assert.match(node('work-operation-scope').textContent,/AB1/);
+    assert.equal(stored.row_filter.value,'AB1');assert.equal((await controller.context()).row_filter.value,'AB1');
     assert.equal(node('work-scope-settings'),null);assert.equal(node('work-advice-settings'),null);
     assert.equal(node('work-import-add').disabled,true);
     await controller.open();
-    assert.equal(node('work-tools').hidden,false);assert.equal(node('work-import').hidden,true);
+    assert.equal(node('work-tools'),null);assert.equal(node('work-import').hidden,true);
     assert.equal(node('work-scope-settings'),null);assert.equal(node('work-advice-settings'),null);
 });

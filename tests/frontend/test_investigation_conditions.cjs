@@ -17,7 +17,7 @@ async function setup() {
         return structuredClone(h.state);
     };
     h.load('documents/investigation.js');
-    h.controller=h.window.createInvestigationController({sheet:h.sheet,
+    h.controller=h.window.createInvestigationController({messages:h.messages,sheet:h.sheet,
         api:{newRequestId:()=> 'request-'+ ++h.serial,requestJson:async(url,opts={})=>{h.requests.push({url,opts});return h.reply(url,opts);}},
         getWorkspace:()=>h.workspace,isBusy:()=>h.busy,setBusy:v=>{h.busy=v;},beginRequest:()=>h.run={controller:new AbortController(),cancelled:false},
         endRequest:()=>{},checkRequest:run=>{if(run.cancelled)throw new DOMException('취소','AbortError');},reportStop:async()=>{}});

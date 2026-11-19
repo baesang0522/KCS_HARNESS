@@ -35,7 +35,8 @@ class SimilaritySelection(BaseModel):
 
 
 class SimilaritySettings(SimilaritySelection):
-    method: Literal["levenshtein", "sequence"]
+    result_sheet: bool = False
+    method: Literal["levenshtein", "sequence"] = "levenshtein"
     base_value: str | None = Field(default=None, min_length=1, max_length=200)
 
 

@@ -26,49 +26,34 @@ async function setup(saved) {
     h.reply = async () => ({answer: '완료', ui_action: null});
     h.progress = async () => ({message: 'AI 분석을 준비하고 있습니다…'});
     if (saved) h.localStorage.setItem('kcs-chat-session-v1', JSON.stringify(saved));
-    h.load('chat/chat.js'); h.load('chat/agent.js'); h.load('cleaning_help/cleaning_help.js');
+    h.load('chat/chat.js'); h.load('chat/agent.js');
     const close = () => { if (h.help) h.help.dismiss(); h.workspace.dismiss(); };
     h.chat = h.window.createChatController({api: h.api, getWorkspace: () => h.workspace,
         closeTaskCards: close, resetTasks: () => h.workspace.reset(),
         beforeSend:()=>h.beforeSend && h.beforeSend(),
-        handleUIAction: async action => { h.actions.push(action); if (action?.type === 'open_cleaning_help') await h.help.open(action.column_ids); },
+        handleUIAction: async action => { h.actions.push(action);  },
         onBusy: () => { if (h.help) h.help.updateControls(); }});
-    h.help = h.window.createCleaningHelp({workspace: h.workspace, isBusy: h.chat.isBusy, setBusy: h.chat.setBusy,
-        closeTaskCards: close, enterConversation: h.chat.enterConversation, sendMessage: h.chat.sendMessage});
+
     await h.chat.initialize();
     h.node = id => h.document.getElementById(id);
     return h;
 }
 
-test('chat response opens help; switching modes uses current target and restores the work panel', async () => {
-    const h = await setup(); const panel = h.node('work-panel'), home = panel.parentNode, next = panel.nextSibling;
-    h.reply = async () => ({answer: '도움 방식을 선택하세요.', ui_action: {type: 'open_cleaning_help', column_ids: ['trade']}});
-    h.node('message').value = '다른 방식 있어?'; await h.chat.sendMessage();
-    assert.equal(h.node('cleaning-help').hidden, false); assert.equal(h.chat.isBusy(), false);
-    h.node('cleaning-help-kind').value = 'similarity'; await h.node('cleaning-help-kind').emit('change');
-    assert.equal(h.similarity.column_id, 'trade'); assert.equal(panel.parentNode, h.node('cleaning-help-work'));
-    h.node('cleaning-help-kind').value = 'extract'; await h.node('cleaning-help-kind').emit('change');
-    assert.deepEqual(Array.from(h.configured.column_ids), ['model']);
-    h.help.dismiss(); assert.equal(panel.parentNode, home); assert.equal(panel.nextSibling, next);
-    assert.equal(h.node('cleaning-help').hidden, true);
+test('chat dispatches actions without opening removed settings panels', async () => {
+ const h=await setup();h.reply=async()=>({answer:'변경 내용을 계산할게.',ui_action:{type:'configure_operation',operation:{kind:'preprocess'}}});
+ h.node('message').value='공백 정리';await h.chat.sendMessage();
+ assert.equal(h.actions[0].type,'configure_operation');assert.equal(h.chat.isBusy(),false);
+ assert.equal(h.node('cleaning-help'),null);assert.equal(h.node('operations'),null);
 });
 
-test('AI advice reads requested data, restores draft, and never sends after workspace changed', async () => {
-    const h = await setup(); await h.help.open();
-    h.node('cleaning-help-kind').value = 'advice'; await h.node('cleaning-help-kind').emit('change');
-    h.node('message').value = '남겨둔 입력';
-    h.reply = async url => url === '/chat' ? {ui_action: {type: 'analyze_data', column_ids: ['trade', 'model']}}
-        : {answer: '추천 결과', ui_action: null};
-    await h.node('cleaning-help-advice').emit('click');
-    assert.deepEqual(Array.from(h.readIds), ['trade', 'model']);
-    assert.equal(h.node('message').value, '남겨둔 입력');
-    assert(h.node('conversation').textContent.includes('추천 결과'));
-    assert.equal(h.requests.filter(x => x.url === '/chat/recommendation').length, 1);
-    await h.help.open(); h.node('cleaning-help-kind').value = 'advice';
-    h.context = {...h.context, workspace_id: 'other'};
-    await h.node('cleaning-help-advice').emit('click');
-    assert(h.node('notice').textContent.includes('작업 표가 바뀌었습니다'));
-    assert.equal(h.requests.filter(x => x.url === '/chat').length, 1);
+test('AI advice reads requested data, restores draft, and rejects changed workspace', async()=>{
+ const h=await setup();h.node('message').value='남겨둔 입력';
+ h.reply=async url=>url==='/chat'?{ui_action:{type:'analyze_data',column_ids:['trade','model']}}:{answer:'추천 결과',ui_action:null};
+ await h.chat.sendMessage({workspace_id:'work'});
+ assert.deepEqual(Array.from(h.readIds),['trade','model']);assert.equal(h.node('message').value,'남겨둔 입력');
+ assert.match(h.node('conversation').textContent,/추천 결과/);h.context={...h.context,workspace_id:'other'};
+ await h.chat.sendMessage({workspace_id:'work'});assert.match(h.node('conversation').textContent,/대상이 바뀌/);
+ assert.equal(h.requests.filter(x=>x.url==='/chat').length,1);
 });
 
 test('stop aborts local request, calls server cancellation, and ignores a late reply', async () => {
@@ -157,7 +142,7 @@ test('retry keeps request ID; new question changes it; stale saved conversation 
 
 test('page bootstrap wires chat and formula callbacks before initialization', async () => {
     const h = createDOM(); let workspaceOptions, formulaOptions, imports=0, scopes=0, reviewRequest, scopeRequest;
-    const stub = {dismiss() {}, reset() { this.referenceTarget=()=>null; }, setBusy() {}, context: async () => null, referenceTarget: () => null,
+    const stub = {cancelPending() {}, isProcessing:()=>false, open:async()=>{}, dismiss() {}, reset() { this.referenceTarget=()=>null; }, setBusy() {}, context: async () => null, referenceTarget: () => null,
         openSourceColumns:async()=>{imports++;}, openScope:async()=>{scopes++;},
         changeScope:async(request,expected)=>{scopeRequest={request,expected};return "범위 변경 완료";},
         openGroups:async(column,request)=>{reviewRequest={column,request};},
@@ -167,7 +152,7 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
     h.window.createWorkspaceController = options => { workspaceOptions = options; return stub; };
     h.window.createFormulaController = options => { formulaOptions = options; return stub; };
     h.window.createFormulaUI = () => ({});
-    h.load('chat/chat.js'); h.load('chat/agent.js'); h.load('cleaning_help/cleaning_help.js'); h.load('documents/documents.js'); h.load('documents/investigation.js'); h.load('documents/review_preprocess.js'); h.load('operations/write_recovery.js'); h.load('taskpane.js');
+    h.load('chat/chat.js'); h.load('chat/agent.js'); h.load('documents/documents.js'); h.load('documents/investigation.js'); h.load('documents/review_preprocess.js'); h.load('operations/write_recovery.js'); h.load('taskpane.js');
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(workspaceOptions.isBusy(), false); assert.equal(workspaceOptions.getConversationId(), 'conversation');
     assert.equal(formulaOptions.validateSource, stub.validateFormulaSource);
@@ -175,7 +160,7 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
     assert.equal(h.document.querySelector('.send').disabled, false);
     const button=h.document.getElementById('open-workspace');
     assert.equal(button.textContent,'작업 준비');
-    assert.equal(h.document.getElementById('open-scope').hidden,true);
+    assert.equal(h.document.getElementById('open-scope'),null);
     stub.referenceTarget=()=>({workspace_id:'work',task_type:'investigation'});
     await workspaceOptions.onWorkspaceReady(stub.referenceTarget());
     for(const message of ['변경이 없어 작업을 마쳤습니다.','결과를 작성했습니다.']) {
@@ -184,15 +169,8 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
         await button.emit('click');
     }
     assert.equal(imports,2);
-    const scopeButton=h.document.getElementById('open-scope');assert.equal(scopeButton.hidden,false);
-    await scopeButton.emit('click');assert.equal(scopes,1);
-    workspaceOptions.setBusy(true);await scopeButton.emit('click');assert.equal(scopes,1);
-    workspaceOptions.setBusy(false);
     workspaceOptions.setBusy(true);await button.emit('click');assert.equal(imports,2);
     workspaceOptions.setBusy(false);
-    await h.document.getElementById('new-chat').emit('click');
-    assert.equal(button.textContent,'작업 준비');
-    assert.equal(scopeButton.hidden,true);
     const scopeAction={type:'change_scope',workspace_id:'work',expected_filter:null,request:{mode:'exclude',condition:{column_id:'country',operator:'equals',value:'CN'}}};
     h.window.apiClient.requestJson=async url=>url==='/chat'?{answer:'범위 확인',ui_action:scopeAction}:{documents:[]};
     h.document.getElementById('message').value='중국 제외';await h.document.getElementById('composer').emit('submit');
@@ -234,9 +212,9 @@ test('all application scripts load in HTML order and the real controllers initia
     h.document.getElementById('message').value = '정제 도움';
     await h.document.getElementById('composer').emit('submit');
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(h.document.getElementById('cleaning-help').hidden, false);
+    assert.equal(h.document.getElementById('cleaning-help'), null);
     assert.equal(h.document.getElementById('work-panel').hidden, true);
-    assert.equal(h.document.getElementById('cleaning-help-setup').hidden, false);
+    assert.match(h.document.getElementById('conversation').textContent,/채팅으로/);
     assert.equal(h.document.querySelector('.send').disabled, false);
 });
 
@@ -252,15 +230,11 @@ test('chat displays server validation text without another failure message and c
 });
 
 
-test('explicit conditional chat automatically prepares one preview after releasing chat busy state', async () => {
-    const h=await setup();let previews=0;
-    h.workspace.previewOperation=async()=>{assert.equal(h.chat.isBusy(),false);previews++;};
-    h.reply=async()=>({answer:'변경 내용을 확인하세요',ui_action:{type:'configure_operation',operation:{kind:'set',
-        column_ids:['trade'],condition:{column_id:'trade',operator:'contains',value:'ABC'},destination_column_id:'model',assigned_value:'확인'}}});
-    h.node('message').value='조건에 맞는 행을 수정해줘';await h.chat.sendMessage();
-    assert.equal(previews,1);assert.equal(h.chat.isBusy(),false);
+test('chat releases busy state before the action handler prepares a preview',async()=>{
+ const h=await setup();h.reply=async()=>({answer:'변경 확인',ui_action:{type:'configure_operation',operation:{kind:'set'}}});
+ let busy;h.actions.push=function(action){busy=h.chat.isBusy();return Array.prototype.push.call(this,action);};
+ h.node('message').value='조건에 맞는 행 수정';await h.chat.sendMessage();assert.equal(busy,false);assert.equal(h.actions.length,1);
 });
-
 
 test('unreflected review edits block both new chat requests and a pending retry before sending',async()=>{
     const h=await setup();h.reply=async()=>{throw Error('network');};
@@ -273,15 +247,14 @@ test('unreflected review edits block both new chat requests and a pending retry 
     assert.match(h.node('conversation').textContent,/수정 내용 반영/);assert.equal(h.chat.isBusy(),false);
 });
 
-test('advice button carries the chosen target and uses the server-selected subject for the data read',async()=>{
- const h=await setup();h.context.task_type='investigation';h.context.advice_subject='company';
- await h.help.open(['model']);h.node('cleaning-help-kind').value='advice';await h.node('cleaning-help-kind').emit('change');
- let subject;h.workspace.readRecommendation=async(ids,expected)=>{subject=expected.advice_subject;return {rows:[],column_ids:ids};};
+test('chat advice uses server-selected subject without changing the workspace subject',async()=>{
+ const h=await setup();h.context.task_type='investigation';h.context.advice_subject='company';let subject;
+ h.workspace.readRecommendation=async(ids,expected)=>{subject=expected.advice_subject;return {rows:[],column_ids:ids};};
  h.reply=async url=>url==='/chat'?{ui_action:{type:'analyze_data',column_ids:['model'],advice_subject:'model'}}:{answer:'모델 의견',ui_action:null};
- await h.node('cleaning-help-advice').emit('click');
- assert.deepEqual(h.requests.find(r=>r.url==='/chat').body.workspace.target_column_ids,['model']);
+ h.node('message').value='모델 정제 의견';await h.chat.sendMessage();
  assert.equal(subject,'model');assert.equal(h.context.advice_subject,'company');
 });
+
 test('new investigation waits for conversation creation and preserves current UI if creation fails',async()=>{
  const h=await setup();h.node('conversation').textContent='기존 조사';
  const original=h.api.requestJson;h.api.requestJson=async url=>{if(url==='/conversations')throw Error('연결 실패');return original(url);};

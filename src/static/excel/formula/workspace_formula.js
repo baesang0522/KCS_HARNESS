@@ -4,6 +4,18 @@
     window.createWorkspaceFormula = function (options) {
         var dependencyRecord = null, appliedPlan = null, resultRecords = null;
         return {
+            resolveOutput: async function (output, selection) {
+                var workspace = options.getWorkspace();
+                if (!workspace || workspace.workspace_id !== selection.workspace_id) throw new Error('수식 작업표가 바뀌었습니다. 다시 요청하세요.');
+                await options.refresh();
+                if (output.mode === 'new') {
+                    if (output.anchor || output.side === 'before') throw new Error('수식의 새 결과 열은 작업표 오른쪽 빈 공간에 저장해. 중간 위치 삽입은 지원하지 않아.');
+                    return null;
+                }
+                var column = workspace.columns.find(function (c) { return String(c.column_id) === output.column_id; });
+                if (!column) throw new Error('결과 열이 삭제되었습니다. 다시 지정하세요.');
+                return {worksheet_id: workspace.worksheet_id, column_index: column.column_index};
+            },
             dependencies: function () { return dependencyRecord; },
             plan: function () { return appliedPlan; },
             resultDependencies: function () { return resultRecords; },

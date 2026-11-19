@@ -90,7 +90,7 @@ test('changing conversations ignores a late attachment list response', async () 
     h.reply = (url, options) => url.endsWith('/documents') ? new Promise(resolve => { release = resolve; }) : original(url, options);
     const refresh = h.documents.refresh();
     h.reply = original; h.storage.clear();
-    await h.node('new-chat').emit('click');
+    await h.chat.newConversation();
     release({documents:[{document_id:'old',filename:'이전 대화 파일.pdf',page_count:1,unreadable_pages:[]}]}); await refresh;
     assert.equal(h.node('documents-list').children.length, 0);
 });
@@ -108,19 +108,13 @@ test('upload errors stay visible and do not create a ready attachment', async ()
 });
 
 
-test('retry button passes the document ID and filename to extraction', async () => {
-    let selected;
-    const page = createDOM(); page.load('documents/documents.js');
-    const document = {document_id:'reference',filename:'기준.pdf',page_count:1,unreadable_pages:[],link:null};
-    const controller = page.window.createDocumentsController({
-        api:{requestJson:async()=>({documents:[document]})}, getWorkspace:()=>null,
-        isBusy:()=>false,setBusy(){},readConditions:async id=>{selected=id;}
-    });
-    await controller.load('conversation');
-    const button = page.document.getElementById('documents-list').querySelectorAll('button').find(b=>b.textContent==='추출 다시 시도');
-    await button.emit('click');assert.equal(selected,'reference');
+test('document list exposes IDs and statuses for chat retry without per-file action buttons',async()=>{
+ const page=createDOM();page.load('documents/documents.js');const doc={document_id:'reference',filename:'기준.pdf',page_count:1,unreadable_pages:[],link:null};
+ const controller=page.window.createDocumentsController({api:{requestJson:async()=>({documents:[doc]})},getWorkspace:()=>null,isBusy:()=>false,setBusy(){}});
+ await controller.load('conversation');assert.equal(controller.items()[0].document_id,'reference');
+ assert.equal(page.document.getElementById('documents-list').querySelectorAll('button').length,0);
+ assert.match(page.document.getElementById('documents-list').textContent,/기준.pdf/);
 });
-
 
 test('stopping the first upload stops the remaining dropped-file queue',async()=>{
     const h=await setup(),original=h.reply;let release,entered;

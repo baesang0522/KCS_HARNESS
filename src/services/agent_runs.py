@@ -236,7 +236,7 @@ def reconcile_job(run, operation_jobs, formula_jobs):
         run.status, run.answer = "UNKNOWN", "쓰기 완료 여부를 확인하지 못했습니다. 결과 범위를 확인하세요. 자동 재실행하지 않습니다."
         return True
     if job.status in {"CREATED", "PREVIEW_READY", "PLANNING", "NEEDS_INPUT"}:
-        run.status, run.answer = "WAITING_USER", "기존 작업 화면에서 미리보기와 적용 결과를 확인해 주세요."
+        run.status, run.answer = "WAITING_USER", "채팅의 미리보기와 적용 결과를 확인해 주세요."
         return True
     run.observation = job_observation(run.step["job"], job)
     if job.status not in {"APPLIED", "NO_CHANGE"}:

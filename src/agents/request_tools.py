@@ -1,8 +1,8 @@
 from typing import Literal
 from langchain_core.tools import tool
 from services.errors import SHARED_MESSAGES
-from services.operations.schemas import Mapping, Operation, Rule, RowFilter, ScopeRequest, extraction_column_id
-from services.similarity import SimilaritySelection
+from services.operations.schemas import Mapping, Operation, OperationOutput, Rule, RowFilter, ScopeRequest, extraction_column_id
+from services.similarity import SimilaritySettings
 from services.group_review import GroupReviewRequest
 from services.recommendation.service import resolve_advice_columns, resolve_advice_subject, resolve_columns
 
@@ -10,7 +10,7 @@ from services.recommendation.service import resolve_advice_columns, resolve_advi
 def build_request_tools(task_context: dict):
     workspace = task_context.get("workspace")
 
-    def card(**settings) -> dict:
+    def prepare_operation(**settings) -> dict:
         if not workspace:
             raise ValueError("먼저 작업 시트를 준비해야 합니다.")
 
@@ -20,6 +20,12 @@ def build_request_tools(task_context: dict):
             for column in workspace["columns"]
         }
         referenced = operation.input_column_ids + ([operation.destination_column_id] if operation.destination_column_id else [])
+        if operation.output:
+            referenced += [value for value in [operation.output.column_id, operation.output.anchor] if value]
+            if operation.condition and (operation.output.mode != "existing" or operation.output.column_id != operation.destination_column_id):
+                raise ValueError("조건부 변경은 지정한 기존 열에만 반영합니다. 다른 목적지에는 새 작업을 요청하세요.")
+        if operation.kind != "extract" or operation.extraction_mode is not None:
+            operation.validate_ready()
         if not set(referenced) <= known_ids:
             raise ValueError("현재 작업시트에 없는 열입니다.")
 
@@ -28,8 +34,7 @@ def build_request_tools(task_context: dict):
             "task_type": None,
             "operation": operation.model_dump(),
             "answer": (
-                "요청한 작업의 설정 카드를 준비했습니다. "
-                "대상 열과 조건을 확인한 뒤 변경 내용을 확인해 주세요. "
+                "현재 데이터로 변경 내용을 계산할게요. 채팅의 미리보기에서 저장 위치를 확인하고 적용해 주세요. "
                 "아직 셀은 수정하지 않았습니다."
             ),
         }
@@ -46,7 +51,7 @@ def build_request_tools(task_context: dict):
     @tool
     def open_investigation() -> dict:
         """PDF의 조사 조건을 읽고 확인·수정하는 화면을 연다. 행 선별·셀 수정·조건 확정을 수행하지 않는다."""
-        return {"intent": "investigation", "answer": "PDF 추출내용을 열었어요. 검토 시트에서 값을 수정하고 ‘수정 내용 반영’을 눌러 주세요. PDF를 첨부하면 추출과 검토 시트 작성을 시작해요. 거래 행 선별은 아직 실행하지 않았어요."}
+        return {"intent": "investigation", "answer": "PDF 추출내용을 열었어요. 검토 시트에서 값을 수정한 뒤 채팅으로 ‘PDF 수정 내용 반영’이라고 요청하세요. PDF를 첨부하면 추출과 검토 시트 작성을 시작해요. 거래 행 선별은 아직 실행하지 않았어요."}
 
     @tool
     def answer_question(answer: str) -> dict:
@@ -79,11 +84,18 @@ def build_request_tools(task_context: dict):
                 "investigation", "model_normalization", "counterparty_cleanup", "formula"
             ],
             input_column_ids: list[str] | None = None,
+            output: OperationOutput | None = None,
     ) -> dict:
         """새 업무를 시작하거나 수식·조건부 비교를 요청한다.
         A열의 마지막 단어가 B열에 있으면 추출하는 요청은 formula이며 두 입력 열 ID를 지정한다.
         현재 작업 시트가 있어도 사용자가 업무 전환을 명시하면 사용한다.
         같은 업무 안의 전처리, 치환, 분리 요청에는 사용하지 않는다."""
+        if output:
+            if task_type != "formula" or not workspace:
+                raise ValueError("작업표의 수식 요청에만 저장 위치를 지정하세요.")
+            output_ids = [v for v in [output.column_id, output.anchor] if v]
+            if output_ids:
+                resolve_columns(workspace, output_ids)
         answer = "작업할 범위를 선택하고 설정을 확인해 주세요."
         if task_type == "formula" and workspace:
             if not input_column_ids:
@@ -100,6 +112,7 @@ def build_request_tools(task_context: dict):
             "intent": "start_task",
             "task_type": task_type,
             "formula_column_ids": input_column_ids,
+            "formula_output": output.model_dump() if output else None,
             "operation": None,
             "answer": answer,
         }
@@ -155,7 +168,7 @@ def build_request_tools(task_context: dict):
         문자열 포함은 contains, 전체 값 일치는 equals이며 공백·대소문자를 구분한다.
         맞지 않는 행은 유지한다. 비슷한 회사 판단, 새 열 생성, 복합 조건에는 사용하지 않는다.
         """
-        result = card(kind="set", column_ids=[condition_column_id],
+        result = prepare_operation(kind="set", column_ids=[condition_column_id],
                       condition=dict(column_id=condition_column_id, operator=operator, value=value),
                       destination_column_id=destination_column_id, assigned_value=assigned_value, condition_scope=scope)
         result["answer"] = ("작업표 전체에서" if scope == "all" else "현재 작업 범위 안에서") + " 조건에 맞는 행의 변경 내용을 준비할게요. 미리보기를 확인하고 적용하면 기존 열에 반영됩니다."
@@ -165,9 +178,11 @@ def build_request_tools(task_context: dict):
     def remove_words(
             words: list[str],
             column_id: str | None = None,
+            output: OperationOutput | None = None,
     ) -> dict:
         """사용자가 지정한 단어·구절·기호만 제거하도록 설정한다. 대소문자를 구분한다."""
-        return card(
+        return prepare_operation(
+            output=output,
             kind="preprocess",
             column_ids=[target(column_id)],
             rules=[{"operation": "remove_words", "words": words}],
@@ -177,9 +192,11 @@ def build_request_tools(task_context: dict):
     def preprocess(
             rules: list[Rule],
             column_id: str | None = None,
+            output: OperationOutput | None = None,
     ) -> dict:
         """공백·전각·대소문자 변환, 한글 제거, 괄호 기호만 제거 등 독립된 전처리를 요청한 순서대로 설정한다."""
-        return card(
+        return prepare_operation(
+            output=output,
             kind="preprocess",
             column_ids=[target(column_id)],
             rules=rules,
@@ -190,9 +207,11 @@ def build_request_tools(task_context: dict):
             find: str | None = None,
             replacement: str = "",
             column_id: str | None = None,
+            output: OperationOutput | None = None,
     ) -> dict:
-        """부분 문자열 치환을 설정한다. 빈 replacement는 삭제, find 미정은 카드에서 입력한다."""
-        return card(
+        """부분 문자열 치환을 설정한다. 빈 replacement는 삭제, find가 미정이면 먼저 질문한다."""
+        return prepare_operation(
+            output=output,
             kind="replace",
             column_ids=[target(column_id)],
             find=find,
@@ -204,10 +223,12 @@ def build_request_tools(task_context: dict):
             column_id: str | None = None,
             delimiter: str | None = None,
             part: Literal["all", "last"] = "all",
+            output: OperationOutput | None = None,
     ) -> dict:
         """한 열의 문자열만 분리한다. delimiter=null은 공백, part=last는 마지막 단어다.
         다른 열에 포함되는지 검사하는 조건부 추출은 start_task의 formula를 사용한다."""
-        return card(
+        return prepare_operation(
+            output=output,
             kind="split",
             column_ids=[target(column_id)],
             delimiter=delimiter,
@@ -218,9 +239,11 @@ def build_request_tools(task_context: dict):
     def map_values(
             mappings: list[Mapping],
             column_id: str | None = None,
+            output: OperationOutput | None = None,
     ) -> dict:
-        """공백·대소문자 정리 후 같은 전체 값을 대표값으로 매핑한다. 빈 목록은 선택 카드를 연다."""
-        return card(
+        """공백·대소문자 정리 후 같은 전체 값을 대표값으로 매핑한다. 빈 목록은 대응표가 미정이면 질문한다."""
+        return prepare_operation(
+            output=output,
             kind="map",
             column_ids=[target(column_id)],
             mappings=mappings,
@@ -233,14 +256,16 @@ def build_request_tools(task_context: dict):
             source_row: int | None = None,
             representative: str | None = None,
             group_mode: Literal["manual", "first_non_empty"] = "manual",
+            output: OperationOutput | None = None,
     ) -> dict:
-        """같은 기준의 행에 대표값을 적용하는 카드를 연다.
+        """같은 기준의 행에 대표값을 적용하는 채팅 미리보기를 준비한다.
 
         manual은 지정한 기준 행의 그룹만 처리한다.
         first_non_empty는 모든 그룹에 첫 번째 빈칸 아닌 값을 적용한다.
         결과값과 변경여부를 새 열 두 개로 만든다.
         """
-        return card(
+        return prepare_operation(
+            output=output,
             kind="group",
             column_ids=column_ids,
             value_column_id=value_column_id,
@@ -253,27 +278,46 @@ def build_request_tools(task_context: dict):
     def find_model_candidates(
         column_id: str | None = None,
         extraction_mode: Literal["alphanumeric", "labelled"] | None = None,
+            output: OperationOutput | None = None,
     ) -> dict:
         """모델규격명 한 열에서 문자+숫자 또는 MODEL·CODE·GRADE 뒤 후보를 추출한다.
-        방식 미지정이면 추천 카드를 연다. 다른 열과 비교하는 조건부 추출은 formula다. 자동 적용하지 않는다."""
+        방식 미지정이면 실제 패턴 추천을 채팅에 표시한다. 다른 열과 비교하는 조건부 추출은 formula다. 자동 적용하지 않는다."""
         expected = extraction_column_id(workspace)
         if column_id is not None and column_id != expected:
             raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])
-        return card(
+        return prepare_operation(
+            output=output,
             kind="extract",
             column_ids=[expected],
             extraction_mode=extraction_mode,
         )
 
     @tool
+    def change_output(output: OperationOutput) -> dict:
+        """현재 채팅의 정제 또는 수식 미리보기 저장 위치만 바꿔 다시 계산한다. 적용은 하지 않는다.
+        기존 열은 실제 column_id, 새 열은 name/anchor/side를 지정한다."""
+        pending = workspace and workspace.get("pending_operation")
+        if not pending:
+            job = task_context.get("active_formula_job")
+            if not job or job.get("status") != "PREVIEW_READY":
+                raise ValueError("변경할 미리보기가 없습니다. 작업을 다시 요청하세요.")
+            output_ids = [v for v in [output.column_id, output.anchor] if v]
+            if output_ids:
+                resolve_columns(workspace, output_ids)
+            return {"intent": "formula_output", "formula_output_action": {"type": "formula_output", "formula_job_id": job["formula_job_id"], "output": output.model_dump()}, "answer": "수식 결과 저장 위치를 확인할게요. 기존 값이 있는 열은 덮어쓰지 않습니다."}
+        return prepare_operation(**{**pending, "output": output})
+
+    @tool
     def inspect_similarity(
             column_id: str | None = None,
             group_column_id: str | None = None,
+            method: Literal["levenshtein", "sequence"] = "levenshtein",
+            result_sheet: bool = False,
     ) -> dict:
-        """정제한 한 열의 유사도 비교 카드를 연다. 알고리즘은 사용자가 카드에서 선택한다.
-         group_column_id는 요청한 경우에만 같은 값끼리 비교할 조건 열이다. 계산이나 셀 수정은 하지 않는다."""
-        settings = SimilaritySelection(
-            column_id=target(column_id), group_column_id=group_column_id,
+        """정제한 한 열의 유사도를 계산해 채팅에 표시한다. 지정한 알고리즘을 전달한다.
+         group_column_id는 요청한 경우에만 같은 값끼리 비교할 조건 열이다. 원본 셀은 수정하지 않는다."""
+        settings = SimilaritySettings(
+            column_id=target(column_id), group_column_id=group_column_id, method=method, result_sheet=result_sheet,
         )
         settings.check_workspace(workspace)
         return {
@@ -281,18 +325,7 @@ def build_request_tools(task_context: dict):
             "task_type": None,
             "operation": None,
             "similarity": settings.model_dump(),
-            "answer": "어떤 방식으로 유사도를 비교할까요? 카드의 설명과 샘플을 보고 알고릐즘을 선택해 주세요. "
-                      "아직 계산하거나 셀을 변경하지 않았습니다."
-        }
-
-    @tool
-    def open_cleaning_help(column_id: str | None = None) -> dict:
-        """정제 방법을 모르거나 방법 선택을 요청하면 도움 카드를 연다. 분석은 시작하지 않는다."""
-        ids = resolve_columns(workspace, [column_id]) if column_id is not None else None
-        return {
-            "intent": "cleaning_help",
-            "analysis_column_ids": ids,
-            "answer": "정제 도움에서 유사도 검사, 모델명 추출, AI 의견 중 필요한 기능을 선택하세요.",
+            "answer": "현재 범위의 실제 값을 읽어 유사도를 계산할게요. 결과는 채팅에 표시하며 셀은 변경하지 않습니다."
         }
 
     @tool
@@ -341,7 +374,29 @@ def build_request_tools(task_context: dict):
             raise ValueError("이어갈 조사 실행이 없습니다.")
         return {"intent": "agent", "resume_agent": True, "answer": "직접 수정한 값과 실행 결과를 확인하고 이어갈게요."}
 
-    tools = [answer_question, ask_user, start_task, open_cleaning_help, open_investigation]
+    @tool
+    def set_column_role(column_id: str, role: Literal["reference", "country_code", "party_code", "company_name", "declared_name", "trade_name", "model_spec"]) -> dict:
+        """사용자가 요청한 작업표 열의 역할을 지정한다. 셀 값은 변경하지 않는다."""
+        resolve_columns(workspace, [column_id])
+        return {"intent": "workspace_action", "workspace_action": {"type": "workspace_action", "column_id": column_id, "role": role}, "answer": "요청한 열 역할을 저장할게요."}
+
+    @tool
+    def review_document(document_id: str, action: Literal["apply", "retry", "preprocess"],
+                        kind: Literal["supplier", "item", "other"] = "supplier", column: str = "회사명",
+                        rules: list[Rule] = []) -> dict:
+        """PDF 검토 시트의 수정 반영, 추출 재시도, 전처리를 채팅에서 준비한다.
+        document_id는 조사 문서 목록의 실제 ID다. preprocess는 supplier(거래처)/item(품목)/other(기타)와 열 이름,
+        요청한 전처리 규칙을 지정한다. 예: supplier 회사명, item 규격. 적용 전에 채팅 확인을 거친다."""
+        documents = (task_context.get("investigation") or {}).get("documents", [])
+        if not any(str(item.get("document_id")) == document_id for item in documents):
+            raise ValueError("현재 조사에 첨부한 PDF를 지정하세요.")
+        if action == "preprocess":
+            Operation(kind="preprocess", column_ids=["review-column"], rules=rules).validate_ready()
+        return {"intent": "document", "document_action": {"type": "document_action", "action": action, "document_id": document_id,
+                "kind": kind, "column": column, "rules": [Rule.model_validate(r).model_dump() for r in rules]},
+                "answer": "PDF 검토 작업을 준비할게요. 아직 수정 내용을 적용하지 않았어요."}
+
+    tools = [answer_question, ask_user, start_task, open_investigation, review_document]
     if workspace and not task_context.get("agent_execution"):
         tools.extend([start_agent, resume_agent])
     if workspace:
@@ -349,6 +404,8 @@ def build_request_tools(task_context: dict):
             # 묶음 검토 보류(2026-11-18): 재사용 여부 검토 후 불필요하면 삭제. 기존 저장 정보는 보존.
             # set_value,
             change_scope,
+            change_output,
+            set_column_role,
             update_matching_rows,
             remove_words,
             preprocess,
