@@ -163,6 +163,16 @@
             snapshot.output_column_id, progress, function () {});
         if (JSON.stringify(rows) !== JSON.stringify(expected)) throw new Error('입력값 또는 기존 결과값이 바뀌었습니다. 미리보기를 다시 만드세요.');
     }
+    function uniqueNames(names, columns) {
+        var used = new Set(columns.map(function (c) { return c.header.toLowerCase(); }));
+        return names.map(function (name) {
+            var base = name.trim().slice(0, 220);
+            if (!base) throw new Error('결과 열 이름을 입력하세요.');
+            name = base;
+            for (var n = 2; used.has(name.toLowerCase()); n++) name = base + ' ' + n;
+            used.add(name.toLowerCase()); return name;
+        });
+    }
     async function write(snapshot, values, names, output, progress, formats, beforeWrite) {
         if (values.length !== snapshot.rows.length || !names.length || names.length > 100 ||
             values.some(function (row) { return row.length !== names.length || row.some(function (v) {
@@ -200,14 +210,8 @@
                     info.body.columnIndex + info.body.columnCount, tableRange.rowCount, names.length).getUsedRangeOrNullObject();
                 adjacent.load('address'); await context.sync();
                 if (!adjacent.isNullObject) throw new Error('작업 표 오른쪽에 사용 중인 셀이 있습니다. 먼저 공간을 확보하세요.');
-                var used = new Set(info.columns.map(function (c) { return c.header.toLowerCase(); }));
-                names = names.map(function (name) {
-                    var base = name.trim().slice(0, 220);
-                    if (!base) throw new Error('결과 열 이름을 입력하세요.');
-                    name = base;
-                    for (var n = 2; used.has(name.toLowerCase()); n++) name = base + ' ' + n;
-                    used.add(name.toLowerCase()); return name;
-                });
+                names = uniqueNames(names, info.columns);
+                var used = new Set(info.columns.map(function (c) { return c.header.toLowerCase(); }).concat(names.map(function (name) { return name.toLowerCase(); })));
             }
             try {
                 if (!existing) {
@@ -274,5 +278,5 @@
             }
         });
     }
-    window.operationsSheet = {read: read, write: write, matches: matches, filterColumns: filterColumns, compileFilter: compileFilter, filterKey: filterKey, describeFilter: describeFilter};
+    window.operationsSheet = {uniqueNames: uniqueNames, read: read, write: write, matches: matches, filterColumns: filterColumns, compileFilter: compileFilter, filterKey: filterKey, describeFilter: describeFilter};
 })();

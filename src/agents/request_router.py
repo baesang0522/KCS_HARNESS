@@ -1,24 +1,29 @@
 from typing import Literal
+from services.chat_actions import DocumentAction, WorkspaceAction, FormulaOutputAction
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
 from services.errors import SHARED_MESSAGES
 from agents.request_graph import run_request_graph
-from services.operations.schemas import Operation, ScopeRequest, extraction_column_id
+from services.operations.schemas import Operation, OperationOutput, ScopeRequest, extraction_column_id
 from services.chat_state import TaskType
-from services.similarity import SimilaritySelection
+from services.similarity import SimilaritySettings
 from services.group_review import GroupReviewRequest
 from services.recommendation.service import resolve_advice_columns, resolve_advice_subject, resolve_columns
 
 
 class RequestDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    intent: Literal["general", "start_task", "clarify", "task_followup", "operation", "similarity", "recommendation", "cleaning_help", "group_review", "investigation", "scope", "agent"]
+    intent: Literal["general", "start_task", "clarify", "task_followup", "operation", "similarity", "recommendation", "cleaning_help", "group_review", "investigation", "scope", "agent", "workspace_action", "document", "formula_output"]
+    document_action: DocumentAction | None = None
+    workspace_action: WorkspaceAction | None = None
+    formula_output_action: FormulaOutputAction | None = None
+    formula_output: OperationOutput | None = None
     goal: str | None = Field(default=None, min_length=1, max_length=8000)
     resume_agent: bool = False
     task_type: TaskType | None = None
     operation: Operation | None = None
-    similarity: SimilaritySelection | None = None
+    similarity: SimilaritySettings | None = None
     group_review_request: GroupReviewRequest | None = None
     scope_change: ScopeRequest | None = None
     formula_instruction: str | None = Field(default=None, min_length=1, max_length=8000)
@@ -29,6 +34,11 @@ class RequestDecision(BaseModel):
 
     @model_validator(mode="after")
     def validate_decision(self, info: ValidationInfo):
+        for intent, payload in [("document", self.document_action), ("workspace_action", self.workspace_action), ("formula_output", self.formula_output_action)]:
+            if (self.intent == intent) != (payload is not None):
+                raise ValueError("요청 종류와 실행 설정이 일치하지 않습니다.")
+        if self.formula_output is not None and (self.intent != "start_task" or self.task_type != "formula"):
+            raise ValueError("수식 작업에만 수식 저장 위치를 지정하세요.")
         if self.intent == "agent":
             if bool(self.goal) == self.resume_agent:
                 raise ValueError("새 목표 또는 기존 목표 재개 중 하나만 지정하세요.")
@@ -98,6 +108,8 @@ async def route_request(runtime, messages, *, task_context: dict):
             for column in workspace["columns"]
         }
         referenced = decision.operation.input_column_ids + ([decision.operation.destination_column_id] if decision.operation.destination_column_id else [])
+        if decision.operation.output:
+            referenced += [value for value in [decision.operation.output.column_id, decision.operation.output.anchor] if value]
         if not set(referenced) <= columns:
             raise ValueError("현재 작업 시트에 없는 열을 요청했습니다.")
         if decision.operation.kind == "extract" and decision.operation.column_ids != [extraction_column_id(workspace)]:

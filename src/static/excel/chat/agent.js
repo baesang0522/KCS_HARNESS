@@ -139,14 +139,12 @@
                     var reply = await drive({run_id: saved.run_id}, request, saved.receipt);
                     chat.checkRequest(request);
                     chat.appendMessage("assistant", reply.answer);
+                    chat.setBusy(false);
                     await options.handleUIAction(reply.ui_action, current.goal);
                 } catch (error) {
                     if (request.cancelled) { await chat.reportStop(request); chat.appendMessage("assistant", "조사 실행을 중지했습니다."); }
                     else chat.appendMessage("assistant", error.message);
                 } finally { chat.endRequest(request); chat.setBusy(false); }
-                if (reply && reply.ui_action && reply.ui_action.type === "configure_operation" && reply.ui_action.operation.condition) {
-                    await options.getWorkspace().previewOperation();
-                }
             }, 0);
         }
         return {

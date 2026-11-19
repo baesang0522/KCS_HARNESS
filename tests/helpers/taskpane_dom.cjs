@@ -77,7 +77,15 @@ function createDOM(html = fs.readFileSync(path.join(root, 'taskpane.html'), 'utf
     const localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value)};
     const window = {crypto: require('node:crypto').webcrypto, errorMessages: messages, setTimeout: () => 1, clearTimeout() {}, markdownRenderer: {render: (node, text) => { node.textContent = text; }}};
     const sandbox = vm.createContext({window, document, localStorage, navigator: {userAgent: 'test'}, TextEncoder, Uint8Array, AbortController, DOMException, console});
-    return {window, document, localStorage, sandbox,
+    const h = {window, document, localStorage, sandbox,
         load: file => vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, {filename: file})};
+    h.load('chat/task_messages.js');
+    h.messages = window.createTaskMessages({enterConversation() {}, isBusy: () => false,
+        appendMessage(role, text) { const message = document.createElement('div'), body = document.createElement('div');
+            body.className = 'message-body'; body.textContent = text; message.appendChild(body);
+            document.getElementById('conversation').appendChild(message); return message; }});
+    h.chatText = () => document.getElementById('conversation').textContent;
+    h.action = label => document.getElementById('conversation').querySelectorAll('button').findLast(b => b.textContent === label && !b.disabled);
+    return h;
 }
 module.exports = {createDOM};

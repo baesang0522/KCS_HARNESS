@@ -29,11 +29,8 @@
                 row.appendChild(node('p', item.page_count + '쪽 · ' + (info.ready ? info.count + '개 항목' : '추출 대기')));
                 if (item.unreadable_pages.length) row.appendChild(node('p', '텍스트 없음: ' + item.unreadable_pages.join(', ') + '쪽'));
                 info.warnings.forEach(function (warning) { row.appendChild(node('p', warning)); });
-                var actions = node('div'); actions.className = 'document-actions';
-                if (!info.ready) button(actions, '추출 다시 시도', function () { return options.readConditions(item.document_id, item.filename); });
-                if (info.ready && options.preprocessReview) button(actions, '전처리', function () { return options.preprocessReview(item.document_id, item.filename); });
-                if (info.ready) button(actions, '수정 내용 반영', function () { return options.applyReview(item.document_id); });
-                row.appendChild(actions); list.appendChild(row);
+                row.appendChild(node('p', info.ready ? '검토 시트 수정 후 채팅으로 ‘PDF 수정 내용 반영’이라고 요청하세요.' : '채팅으로 이 PDF의 추출 재시도를 요청하세요.'));
+                list.appendChild(row);
             });
             updateControls();
         }
@@ -100,6 +97,6 @@
         toggle.addEventListener('click', function () { show(panel.hidden); });
         document.getElementById('documents-close').addEventListener('click', function () { show(false); toggle.focus(); });
         render();
-        return {load: load, refresh: refresh, render: render, updateControls: updateControls};
+        return {items: function () { return items.slice(); }, load: load, refresh: refresh, render: render, updateControls: updateControls};
     };
 })();

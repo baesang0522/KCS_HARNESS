@@ -4,7 +4,7 @@
         var cid = null, state = null, version = 0, binding = null, readySheets = new Set();
         var sheet = options.sheet || window.investigationSheet;
         function endpoint() { return '/conversations/' + encodeURIComponent(cid) + '/investigation'; }
-        function status(text) { document.getElementById('documents-status').textContent = text; }
+        function status(text) { document.getElementById('documents-status').textContent = text; if (options.messages) options.messages.say(text); }
         function show() {
             document.getElementById('documents-panel').hidden = false;
             document.getElementById('documents-toggle').textContent = '추출내용 접기';
@@ -82,7 +82,7 @@
                 await sheet.ensure(cid, documentId, filename, state.reviews[documentId] || []);
                 if (expected === version) {
                     readySheets.add(documentId);
-                    status(filename + ' · 검토 시트를 만들었어요. Excel 시트 탭에서 확인·수정한 뒤 ‘수정 내용 반영’을 눌러 주세요.');
+                    status(filename + ' · 검토 시트를 만들었어요. Excel 시트 탭에서 확인·수정한 뒤 채팅으로 ‘PDF 수정 내용 반영’이라고 요청해 주세요.');
                 }
                 return true;
             } catch (error) {
@@ -93,7 +93,7 @@
                 return false;
             } finally { options.endRequest(run); options.setBusy(false); render(); }
         }
-        async function apply(documentId) {
+        async function apply(documentId, approvedDraft) {
             if (options.isBusy() || !cid) return;
             var expected = version, conversationId = cid, url = endpoint();
             options.setBusy(true); show();
@@ -101,6 +101,7 @@
                 await prepare();
                 var draft = await sheet.read(conversationId, documentId);
                 if (!draft) throw new Error('먼저 검토 시트를 열어 주세요.');
+                if (approvedDraft && sheet.canonical(draft.rows) !== sheet.canonical(approvedDraft.rows)) throw new Error('확인 이후 검토 시트가 바뀌었어요. 수정 반영을 다시 요청하세요.');
                 if (expected !== version) return;
                 // 저장 응답 유실/시트 메타데이터 저장 실패 후에도 같은 수정값을 안전하게 재반영한다.
                 var current = state.reviews[documentId] || [];
@@ -113,8 +114,8 @@
                     state = saved;
                 }
                 try { await sheet.markSaved(conversationId, documentId, state.reviews[documentId] || []); }
-                catch (error) { throw new Error('서버에는 반영했지만 시트 기록 저장에 실패했어요. 같은 버튼으로 다시 반영해 주세요. ' + error.message); }
-                if (expected === version) { render(); status('수정 내용을 반영했어요. 이후 대화에서는 이 값을 사용해요. 거래 행 추출은 아직 실행하지 않았어요.'); }
+                catch (error) { throw new Error('서버에는 반영했지만 시트 기록 저장에 실패했어요. 채팅으로 수정 내용 반영을 다시 요청해 주세요. ' + error.message); }
+                if (expected === version) { render(); status('수정 내용을 반영했어요. 이후 대화에서는 이 값을 사용해요. 거래 행 추출은 아직 실행하지 않았어요.'); return true; }
             } catch (error) { if (expected === version) status(error.message); }
             finally { options.setBusy(false); }
         }
@@ -124,16 +125,37 @@
             for (var did of Object.keys(state.reviews || {})) {
                 var draft = await sheet.read(cid, did);
                 if (draft && sheet.canonical(draft.rows) !== sheet.canonical(state.reviews[did])) {
-                    show(); throw new Error('검토 시트에 반영하지 않은 수정이 있어요. ‘수정 내용 반영’을 먼저 눌러 주세요.');
+                    show(); throw new Error('검토 시트에 반영하지 않은 수정이 있어요. 채팅으로 ‘PDF 수정 내용 반영’이라고 요청해 주세요.');
                 }
             }
+        }
+        async function previewApply(documentIds) {
+            if (options.isBusy()) return;
+            options.setBusy(true);
+            var drafts = [], conversationId = cid, expected = version;
+            try {
+                await prepare();
+                var ids = documentIds || Object.keys(state.reviews || {});
+                for (var id of ids) {
+                    var draft = await sheet.read(cid, id);
+                    if (!draft) throw new Error('PDF 검토 시트를 먼저 준비해 주세요.');
+                    drafts.push({id: id, draft: draft});
+                }
+                if (!drafts.length) { status('반영할 PDF 검토 내용이 없어요.'); return; }
+                if (version !== expected) return;
+                var rows = drafts.flatMap(function (item) { return item.draft.rows.map(function (row) { return [{supplier: '거래처', item: '품목', other: '기타'}[row.target.kind] + ' · ' + sheet.values(row).slice(0, -1).join(' · '), (row.source_pages || []).join(', ')]; }); });
+                options.messages.confirm('PDF ' + drafts.length + '개의 검토 내용 ' + rows.length + '건을 조사 조건에 반영할까? 거래 행 선별이나 셀 변경은 실행하지 않아.', {apply: async function () {
+                    if (cid !== conversationId || version !== expected) throw new Error('조사가 바뀌었어요. 다시 요청하세요.');
+                    for (var item of drafts) { if (!await apply(item.id, item.draft)) break; }
+                }, cancel: function () { status('조사 조건 반영을 취소했어요. 검토 시트 수정값은 남아 있어요.'); }}, ['조건 내용', '근거 페이지'], rows);
+            } finally { options.setBusy(false); }
         }
         function info(did) {
             return state ? {ready: Object.prototype.hasOwnProperty.call(state.document_notes, did) && readySheets.has(did),
                 count: (state.reviews[did] || []).length, warnings: state.document_notes[did] || []} : {ready: false, count: 0, warnings: []};
         }
         return {load: load, refresh: refresh, prepare: prepare, bind: bind, validateWorkspace: validateWorkspace,
-            extract: extract, apply: apply, info: info, ensureSynced: ensureSynced,
+            extract: extract, apply: apply, previewApply: previewApply, info: info, ensureSynced: ensureSynced,
             open: async function () { show(); await refresh(); }};
     };
 })();

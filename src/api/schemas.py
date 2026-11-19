@@ -1,9 +1,10 @@
+from services.chat_actions import DocumentAction, WorkspaceAction, FormulaOutputAction
 from uuid import UUID
 from typing import Annotated, Literal
-from services.similarity import SimilaritySelection
+from services.similarity import SimilaritySettings
 from services.group_review import GroupReviewRequest
 from pydantic import BaseModel, Field, field_validator
-from services.operations.schemas import ColumnId, Operation, RowScope, ScopeRequest, WorkspaceContext
+from services.operations.schemas import ColumnId, OperationOutput, Operation, Rule, RowScope, ScopeRequest, WorkspaceContext
 
 
 class ChatRequest(BaseModel):
@@ -25,6 +26,7 @@ class ChatRequest(BaseModel):
 
 
 class ConfirmSelectionAction(BaseModel):
+    output: OperationOutput | None = None
     instruction: str | None = None
     type: Literal["confirm_selection"]
     task_type: Literal[
@@ -43,7 +45,7 @@ class ConfigureOperationAction(BaseModel):
 
 class ConfigureSimilarityAction(BaseModel):
     type: Literal["configure_similarity"]
-    similarity: SimilaritySelection
+    similarity: SimilaritySettings
 
 
 class AnalyzeDataAction(BaseModel):
@@ -88,7 +90,10 @@ UIAction = Annotated[
     | OpenGroupReviewAction
     | OpenInvestigationAction
     | ChangeScopeAction
-    | AgentAction,
+    | AgentAction
+    | WorkspaceAction
+    | FormulaOutputAction
+    | DocumentAction,
     Field(discriminator="type"),
 ]
 

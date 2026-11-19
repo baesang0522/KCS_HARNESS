@@ -181,6 +181,11 @@ def begin_apply(job: OperationJob, output: OutputPlacement) -> OperationJob:
         output.mode != "existing" or output.column_id != job.source.operation.destination_column_id
     ):
         raise ConflictError("요청한 기존 열에만 조건부 변경을 반영할 수 있습니다.")
+    planned = job.source.operation.output
+    if planned:
+        keys = ["mode", "column_id"] if planned.mode == "existing" else ["mode", "name", "anchor", "side"]
+        if any(getattr(planned, key) is not None and getattr(planned, key) != getattr(output, key) for key in keys):
+            raise ConflictError("미리보기의 저장 위치와 다릅니다. 새 미리보기를 확인하세요.")
     job.output = output.model_copy(deep=True)
     job.status = "APPLYING"
     return job

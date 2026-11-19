@@ -1,319 +1,81 @@
 "use strict";
 (function () {
-    window.readPreprocessRules = function (container, words) {
-        return Array.from(container.querySelectorAll("input")).filter(function (input) { return input.checked; }).map(function (input) {
-            return {operation: input.value, words: input.value === "remove_words"
-                ? words.split("\n").map(function (v) { return v.trim(); }).filter(Boolean) : []};
-        });
-    };
-    window.createOperationsUI = function () {
-        function el(id) { return document.getElementById("op-" + id); }
-        var columns = [], currentTaskType = null, hasPreview = false, conditional = null, mapping = window.createMappingEditor();
-        function conditionSummary() {
-            document.getElementById("work-management").hidden = !!conditional;
-            el("condition").hidden = !conditional;
-            el("edit").textContent = conditional ? "현재 값 다시 확인" : "설정 다시 보기";
-            if (!conditional) return;
-            function name(id) { return columns.find(function (c) { return String(c.column_id) === id; }).header; }
-            var filter = conditional.condition;
-            var labels = {equals: "같음", not_equals: "다름", contains: "포함", blank: "빈칸", not_blank: "빈칸 아님"};
-            document.getElementById("work-title").textContent = "조건에 맞는 값 변경";
-            el("condition").textContent = (conditional.condition_scope === "all" ? "작업표 전체에서 ‘" : "현재 작업 범위 안에서 ‘") + name(filter.column_id) + "’ · " + labels[filter.operator] +
-                (filter.operator.includes("blank") ? "" : " · " + JSON.stringify(filter.value)) +
-                " → ‘" + name(conditional.destination_column_id) + "’에 " + JSON.stringify(conditional.assigned_value) +
-                " 입력. 나머지 행은 유지합니다. 문자열은 대소문자와 공백을 구분합니다.";
+    window.createOperationsUI = function (messages) {
+        var columns = [], selected = [], operation = null, output = null, handlers = {}, offer = null;
+        function find(id) {
+            var column = columns.find(function (c) { return String(c.column_id) === String(id); });
+            if (!column) throw new Error('요청한 열이 삭제되었거나 작업표에 없습니다.');
+            return column;
         }
-        function extractionColumn() {
-            var models = columns.filter(function (column) { return column.role === "model_spec"; });
-            return models.length === 1 ? String(models[0].column_id) : "";
+        function clear() { if (offer) offer.disable(); offer = null; }
+        function outputNames(data) {
+            if (output.mode === 'existing') return [find(output.column_id).header];
+            var names = ['group', 'extract'].includes(data.operation.kind) ? [output.name, output.name + (data.operation.kind === 'group' ? ' 변경여부' : ' 추출상태')] : data.names.map(function (_, i) { return output.name + (data.names.length > 1 ? ' ' + (i + 1) : ''); });
+            return window.operationsSheet.uniqueNames(names, columns);
         }
-        function fill(select, selected) {
-            select.textContent = "";
-            columns.forEach(function (column) {
-                if (select === el("column") && el("kind").value === "extract" && String(column.column_id) !== extractionColumn()) return;
-                var option = document.createElement("option"); option.value = String(column.column_id);
-                option.textContent = column.header; option.selected = selected.indexOf(option.value) >= 0;
-                select.appendChild(option);
-            });
-        }
-        function kind() {
-            var value = el("kind").value;
-            fill(el("column"), [el("column").value]);
-            el("column").disabled = value === "extract";
-            ["preprocess", "split", "group", "replace", "map", "extract", "set"].forEach(function (name) { el(name).hidden = name !== value; });
-            el("single").hidden = value === "group";
-            var automatic = el("group-mode").value === "first_non_empty";
-            el("group-manual").hidden = automatic;
-            el("group-auto").hidden = !automatic;
-        }
-        function keys() { return Array.from(el("keys").selectedOptions).map(function (o) { return o.value; }); }
-        function targets() {
-            return el("kind").value === "group" ? Array.from(new Set(keys().concat(el("value-column").value).filter(Boolean))) : [el("column").value];
-        }
-        function clear() { el("extraction-preview").hidden = true; el("settings").hidden = false; el("preview").hidden = false; el("finalize").hidden = false; hasPreview = false; el("result").hidden = true; el("final-review").hidden = true; el("apply").disabled = true;
-            el("settings").hidden = el("finalize").hidden = !!conditional;
-        }
-        function rules() { return window.readPreprocessRules(el("rules"), el("words").value); }
         return {
-            targets: targets,
-            reconcile: function (available, fallback, taskType) {
-                currentTaskType = taskType;
-                var ids = new Set(available.map(function (column) { return String(column.column_id); }));
-                var lostTarget = targets().concat(conditional ? [conditional.destination_column_id] : []).some(function (id) { return !ids.has(id); });
-                if (lostTarget) {
-                    this.show(available, fallback, taskType, true);
-                } else {
-                    columns = available;
-                    ["column", "keys", "value-column", "anchor", "existing-column"].forEach(function (name) {
-                        var selected = Array.from(el(name).selectedOptions).map(function (option) { return option.value; });
-                        fill(el(name), selected.filter(function (id) { return ids.has(id); }));
-                    });
-                }
-                conditionSummary();
-                return lostTarget;
+            targets: function () { return selected.slice(); },
+            pending: function () { return operation ? JSON.parse(JSON.stringify(operation)) : null; },
+            forget: function () { clear(); operation = output = null; },
+            reconcile: function (available, fallback) {
+                columns = available;
+                var missing = selected.concat(output && output.column_id || []).some(function (id) { return !columns.some(function (c) { return String(c.column_id) === String(id); }); });
+                if (missing) { operation = output = null; selected = fallback.map(String); clear(); }
+                return missing;
             },
-            show: function (available, preferred, taskType, resetMode) {
-                conditional = null; columns = available; currentTaskType = taskType; conditionSummary(); clear(); mapping.reset();
-                el("extraction-suggestions").textContent = "";
-                if (resetMode) {
-                    el("kind").value = "preprocess"; el("part").value = "all"; el("group-mode").value = "manual"; el("extraction-mode").value = "";
-                    el("rules").querySelectorAll("input").forEach(function (input) { input.checked = false; });
-                    ["words", "find", "replacement", "delimiter", "source-row", "group-value", "assigned-value"].forEach(function (id) { el(id).value = ""; });
+            show: function (available, preferred) { columns = available; selected = preferred.map(String); operation = output = null; clear(); },
+            configure: function (value) {
+                clear(); operation = JSON.parse(JSON.stringify(value));
+                selected = Array.from(new Set(value.column_ids.concat(value.kind === 'group' ? [value.value_column_id] : [])));
+                selected.forEach(find);
+                var source = find(value.kind === 'group' ? value.value_column_id : value.column_ids[0]);
+                output = Object.assign({mode: 'new', anchor: String(source.column_id), side: 'after', name: source.header + ({split: value.part === 'last' ? ' 마지막 단어' : ' 단어', replace: ' 치환', map: ' 대표값', group: ' 통일', extract: ' 모델명 후보'}[value.kind] || ' 정제')}, Object.fromEntries(Object.entries(value.output || {}).filter(function (entry) { return entry[1] !== null; })));
+                if (value.condition) {
+                    if (value.output && (value.output.mode !== 'existing' || value.output.column_id !== value.destination_column_id)) throw new Error('조건부 변경의 저장 열이 일치하지 않습니다.');
+                    output = {mode: 'existing', column_id: value.destination_column_id};
                 }
-                fill(el("column"), preferred.slice(0, 1).map(String));
-                var defaults = columns.filter(function (c) { return taskType === "counterparty_cleanup" ?
-                    ["country_code", "company_name"].indexOf(c.role) >= 0 : c.role === "trade_name"; }).map(function (c) { return String(c.column_id); });
-                fill(el("keys"), defaults); fill(el("value-column"), preferred.slice(0, 1).map(String)); fill(el("anchor"), preferred.map(String)); fill(el("existing-column"), preferred.slice(0, 1).map(String));
-                if (resetMode) el("output-mode").value = "new"; kind();
+                if (output.mode === 'existing') { output.name = find(output.column_id).header; delete output.anchor; }
+                else { find(output.anchor); if (!output.name || !output.name.trim()) throw new Error('새 열 이름을 알려주세요.'); }
+                operation.output = Object.assign({}, output);
             },
-            operation: function () {
-                if (conditional) return JSON.parse(JSON.stringify(conditional));
-                var type = el("kind").value;
-                var ids = type === "group" ? keys() : targets();
-                var selected = type === "preprocess" ? rules() : [];
-                if (type === "preprocess" && !selected.length) return null;
-                var delimiter = type === "split" && el("delimiter-mode").value === "custom" ? el("delimiter").value : null;
-                var operation = {kind: type, column_ids: ids, rules: selected, delimiter: delimiter};
-                if (type === "group") {
-                    operation.value_column_id = el("value-column").value;
-                    operation.group_mode = el("group-mode").value;
-
-                    operation.source_row = null;
-                    operation.representative = null;
-
-                    if (operation.group_mode === "manual") {
-                        operation.source_row = Number(el("source-row").value);
-                        operation.representative = el("group-value").value || null;
-
-
-                    }
-                }
-                if (type === "set") operation.assigned_value = el("assigned-value").value;
-                if (type === "split") operation.part = el("part").value;
-                if (type === "replace") {
-                    operation.find = el("find").value; operation.replacement = el("replacement").value;
-                }
-                if (type === "map") operation.mappings = mapping.get();
-                if (type === "extract") {
-                    operation.extraction_mode = el("extraction-mode").value || null;
-                }
-                return operation;
-            },
-            configure: function (operation) {
-                if (operation.kind === "extract" && (!extractionColumn() || operation.column_ids.length !== 1 || operation.column_ids[0] !== extractionColumn())) {
-                    throw new Error(window.errorMessages.MODEL_SPEC_REQUIRED);
-                }
-                if (!operation.column_ids.concat(operation.value_column_id || [], operation.destination_column_id || []).every(function (id) { return columns.some(function (c) { return String(c.column_id) === id; }); })) {
-                    throw new Error("현재 작업에 없는 열입니다. 범위를 다시 확인하세요.");
-                }
-                conditional = null;
-                if (operation.condition) {
-                    if (operation.kind !== "set" || !operation.destination_column_id || operation.column_ids.length !== 1 ||
-                        operation.column_ids[0] !== operation.condition.column_id) throw new Error("조건과 반영할 열을 다시 확인하세요.");
-                    conditional = JSON.parse(JSON.stringify(operation));
-                    el("output-mode").value = "existing";
-                    fill(el("existing-column"), [operation.destination_column_id]);
-                }
-                conditionSummary();
-                clear(); el("kind").value = operation.kind;el("group-mode").value = operation.group_mode || "manual"; kind();
-                fill(el("column"), operation.column_ids); fill(el("keys"), operation.column_ids);
-                if (operation.value_column_id) fill(el("value-column"), [operation.value_column_id]);
-                el("source-row").value = operation.source_row || "";
-                el("group-value").value = operation.representative || "";
-                el("part").value = operation.part || "all";
-                el("extraction-mode").value = operation.extraction_mode || "";
-                // 모델이 제안한 적용 순서를 카드에도 그대로 반영한다.
-                operation.rules.forEach(function (rule) {
-                    var input = Array.from(el("rules").querySelectorAll("input")).find(function (item) { return item.value === rule.operation; });
-                    if (input) el("rules").appendChild(input.parentElement.parentElement);
-                });
-                el("rules").querySelectorAll("input").forEach(function (input) {
-                    input.checked = operation.rules.some(function (rule) { return rule.operation === input.value; });
-                });
-                el("words").value = operation.rules.filter(function (r) { return r.operation === "remove_words"; }).flatMap(function (r) { return r.words; }).join("\n");
-                el("delimiter-mode").value = operation.delimiter === null ? "whitespace" : "custom";
-                el("assigned-value").value = operation.assigned_value || "";
-                el("delimiter").value = operation.delimiter || "";
-                el("find").value = operation.find || ""; el("replacement").value = operation.replacement || "";
-                mapping.set(operation.mappings || []);
-            },
+            operation: function () { return operation && JSON.parse(JSON.stringify(operation)); },
+            destination: function () { return output && output.mode === 'existing' ? output.column_id : null; },
+            output: function () { if (!output) throw new Error('저장할 위치가 없습니다. 작업을 다시 요청하세요.'); return Object.assign({}, output); },
+            names: outputNames,
             preview: function (data) {
-                hasPreview = true; el("result").hidden = false;
-                el("settings").hidden = el("preview").hidden = el("finalize").hidden = true;
-                var count = data.values.length.toLocaleString();
-                el("summary").textContent = count + "행 확인 · 결과 " + data.names.length + "열 · " + data.changed + "행 변경";
-                if (data.operation.kind === "extract") {
-                    var counts = {"단일 후보": 0, "미검출": 0, "확인 필요 · 복수 후보": 0};
-                    data.values.forEach(function (row) { counts[row[1]] += 1; });
-                    el("summary").textContent = count + "행 확인 · 결과 2열 · 단일 후보 " + counts["단일 후보"] +
-                        "행 · 미검출 " + counts["미검출"] + "행 · 복수 후보 " + counts["확인 필요 · 복수 후보"] + "행";
-
-                }
-                if (data.operation.kind === "group") {
-                    var counts = {"변경": 0, "유지": 0, "확인 필요": 0};
-
-                    data.values.forEach(function (row) {
-                        counts[row[1]] += 1;
-                    });
-
-                    el("summary").textContent =
-                        count + "행 확인 · 결과 2열" +
-                        " · 변경 " + counts["변경"].toLocaleString() + "행" +
-                        " · 유지 " + counts["유지"].toLocaleString() + "행" +
-                        " · 확인 필요 " + counts["확인 필요"].toLocaleString() + "행";
-
-                    if (data.operation.group_mode === "first_non_empty") {
-                        el("summary").textContent +=
-                            " · 그룹별 첫 번째 빈칸 아닌 값 사용";
-                    } else {
-                        var source = data.snapshot.rows.find(function (row) {
-                            return row.excel_row === data.operation.source_row;
-                        });
-                        var value = data.operation.representative == null
-                            ? source.values[source.values.length - 1]
-                            : data.operation.representative;
-
-                        el("summary").textContent += " · 적용 대표값: " + value;
-                    }
-                }
-                var column = data.snapshot.columns[data.operation.kind === "group" ? data.snapshot.columns.length - 1 : 0];
-                fill(el("anchor"), [String(column.column_id)]);
-                el("name").value = column.header + ({split: data.operation.part === "last" ? " 마지막 단어" : " 단어", replace: " 치환", map: " 대표값", group: " 통일", extract: " 모델명 후보"}[data.operation.kind] || " 정제");
-                el("side").value = "after";
-                var existing = el("output-mode").value === "existing";
-                el("new-placement").hidden = existing;
-                el("apply").textContent = existing ? "확인한 결과를 기존 열에 반영" : "확인한 결과를 새 열로 만들기";
-                if (existing) {
-                    var destination = data.snapshot.output_columns.find(function (c) { return String(c.column_id) === data.snapshot.output_column_id; });
-                    el("summary").textContent += " · 기존 ‘" + destination.header + "’ 열의 " + data.changed + "행 변경";
-                    if (data.operation.kind === "split" && data.names.length > 1) {
-                        el("summary").textContent += " · 여러 열로 분리하는 결과는 새 열 저장을 선택하세요.";
-                    } else if (data.names.length > 1) el("summary").textContent += " · 상태 정보는 미리보기에서 확인하고 첫 번째 결과값만 반영합니다.";
-                }
-                if (conditional) el("summary").textContent = "조건에 맞는 " + count + "행 중 " + data.changed.toLocaleString() + "행 변경 예정";
-                else if (data.snapshot.row_filter) el("summary").textContent += " · 작업 조건에 맞는 행만 처리합니다.";
-                var examples = el("extraction-preview"), offset = 0;
-                var special = ["group", "extract"].includes(data.operation.kind);
-                var rows = data.values.map(function (values, index) {
-                    var original = data.snapshot.rows[index];
-                    var before = existing || conditional ? original.destination : original.values[data.operation.kind === "group" ? original.values.length - 1 : 0];
-                    var outputs = special ? values.slice(0, 1) : values;
-                    return {row: original.excel_row, before: before, after: outputs,
-                        changed: outputs.length !== 1 || before !== outputs[0],
-                        blank: outputs.some(function (value) { return !String(value).trim(); }),
-                        note: special ? values[1] : ""};
+                var names = outputNames(data), existing = output.mode === 'existing', special = ['group', 'extract'].includes(data.operation.kind);
+                var rows = data.values.map(function (values, i) {
+                    var original = data.snapshot.rows[i], before = existing ? original.destination : original.values[data.operation.kind === 'group' ? original.values.length - 1 : 0];
+                    var after = special || existing ? values.slice(0, 1) : values;
+                    return {changed: after.length !== 1 || before !== after[0], blank: after.some(function (v) { return !String(v).trim(); }),
+                        cells: [original.excel_row, before].concat(after).concat(special ? [values[1]] : [])};
                 });
-                var blanks = rows.filter(function (row) { return row.blank; }).length;
-                el("summary").textContent += " · 빈 결과 " + blanks + "행 · 대상: " + data.snapshot.columns.map(function (c) { return c.header; }).join(", ");
                 rows.sort(function (a, b) { return Number(b.changed || b.blank) - Number(a.changed || a.blank); });
-                examples.hidden = false;
-                function renderExamples() {
-                    examples.textContent = "변경·빈 결과 우선 · " + (offset + 1) + "–" + Math.min(offset + 10, rows.length) + " / " + rows.length + "행";
-                    rows.slice(offset, offset + 10).forEach(function (row) {
-                        var line = document.createElement("p"); line.style.whiteSpace = "pre-wrap";
-                        line.textContent = row.row + "행: " + (row.before || "(빈 값)") + " → " + row.after.map(function (v) { return v || "(빈 결과)"; }).join(" | ") +
-                            " · " + (row.changed ? "변경" : "유지") + (row.note ? " · " + row.note : "");
-                        examples.appendChild(line);
-                    });
-                    [["이전", -10], ["다음", 10]].forEach(function (item) {
-                        var button = document.createElement("button"); button.type = "button"; button.textContent = item[0];
-                        button.disabled = item[1] < 0 ? offset === 0 : offset + 10 >= rows.length;
-                        button.dataset.previewDisabled = String(button.disabled);
-                        button.addEventListener("click", function () { var next = offset + item[1]; if (next >= 0 && next < rows.length) { offset = next; renderExamples(); } }); examples.appendChild(button);
-                    });
-                }
-                renderExamples();
-            },
-            destination: function () { if (conditional) return conditional.destination_column_id; return el("output-mode").value === "existing" ? el("existing-column").value : null; },
-            output: function () {
-                if (conditional) return {mode: "existing", column_id: conditional.destination_column_id,
-                    name: columns.find(function (c) { return String(c.column_id) === conditional.destination_column_id; }).header.slice(0, 200)};
-                if (el("output-mode").value === "existing") return {mode: "existing", column_id: el("existing-column").value,
-                    name: columns.find(function (c) { return String(c.column_id) === el("existing-column").value; }).header.slice(0, 200)};
-                var name = el("name").value.trim();
-                if (!name) throw new Error("결과 열 이름을 입력하세요.");
-                return {anchor: el("anchor").value, side: el("side").value, name: name};
+                var title = data.snapshot.columns.map(function (c) { return c.header; }).join(' · ');
+                var text = title + ' ' + data.values.length.toLocaleString() + '행 중 ' + data.changed.toLocaleString() + '행이 변경될 예정이야.\n';
+                text += existing ? '저장 위치: 작업표의 기존 열 ‘' + names[0] + '’\n' : '저장 위치: 새 열 ‘' + names.join('’, ‘') + '’ · ‘' + find(output.anchor).header + '’ ' + (output.side === 'before' ? '앞' : '뒤') + '\n';
+                text += (data.operation.condition_scope === 'all' ? '작업표 전체에서 처리 · ' : '현재 작업 범위 안에서 처리 · ') + '작업 범위: ' + window.operationsSheet.describeFilter(data.snapshot.row_filter, columns) + '\n';
+                if (data.operation.condition) text += '추가 조건: ' + window.operationsSheet.describeFilter(data.operation.condition, columns) + '\n';
+                text += '빈 결과 ' + rows.filter(function (r) { return r.blank; }).length.toLocaleString() + '행. 아직 셀은 변경하지 않았어.';
+                if (special) text += '\n' + ['변경', '유지', '확인 필요', '단일 후보', '미검출', '확인 필요 · 복수 후보'].map(function (status) { var count = data.values.filter(function (v) { return v[1] === status; }).length; return count ? status + ' ' + count + '행' : ''; }).filter(Boolean).join(' · ');
+                rows.slice(0, 3).forEach(function (row) { text += '\n변경 예시 ' + row.cells[0] + '행: ' + JSON.stringify(row.cells[1]) + ' → ' + row.cells.slice(2, special ? -1 : undefined).map(function (v) { return JSON.stringify(v); }).join(' | '); });
+                if (existing && special) text += '\n기존 열에는 결과값만 반영하고 상태 정보는 아래 결과에서 확인할 수 있어.';
+                offer = messages.confirm(text, {apply: handlers.apply, cancel: async function () { await handlers.edit(); operation = output = null; }}, ['Excel 행', '이전 값'].concat(names.slice(0, existing ? 1 : special ? 1 : undefined)).concat(special ? ['상태'] : []), rows.map(function (r) { return r.cells; }));
             },
             extractionSuggestions: function (data) {
-                var box = el("extraction-suggestions");
-                box.textContent = "전체 대상 " + data.sample_count.toLocaleString() + "행 검사 완료 · " +
-                    (data.suggestions.length
-                        ? "추천은 자동 적용되지 않습니다."
-                        : "일치 패턴이 없습니다. 다른 범위나 추출 방식을 확인하세요.");
+                var expected = operation;
+                var message = messages.say('현재 대상 ' + data.sample_count.toLocaleString() + '행에서 추출 방식을 비교했어. 사용할 방식을 골라줘. 아직 셀은 변경하지 않았어.');
                 data.suggestions.forEach(function (suggestion) {
-                    var text = document.createElement("p");
-                    text.textContent = suggestion.label + " · 일치 " + suggestion.matched_rows + "행 · 복수 후보 " + suggestion.multiple_rows + "행";
-                    box.appendChild(text);
-                    suggestion.examples.forEach(function (example) {
-                        var line = document.createElement("p");
-                        line.textContent = example.before + " → " + example.after;
-                        box.appendChild(line);
+                    var line = document.createElement('p'); line.textContent = suggestion.label + ' · 일치 ' + suggestion.matched_rows + '행 · 복수 후보 ' + suggestion.multiple_rows + '행'; message.appendChild(line);
+                    messages.button(message, suggestion.label + ' 사용', async function () {
+                        if (!operation || operation !== expected) throw new Error('작업이 바뀌었어. 다시 추출을 요청해 줘.');
+                        operation.extraction_mode = suggestion.mode; await handlers.preview();
                     });
-                    var button = document.createElement("button");
-                    button.type = "button";
-                    button.textContent = "이 방식 선택";
-                    button.dataset.extractionMode = suggestion.mode;
-                    box.appendChild(button);
                 });
             },
-            clear: clear,
-            catalog: mapping.catalog,
-            finalReview: function (snapshot, blanks) {
-                el("final-summary").textContent = snapshot.columns.map(function (c) { return c.header; }).join(", ") +
-                    " · " + snapshot.rows.length.toLocaleString() + "행 · 빈 셀 " + blanks.toLocaleString() + "개";
-                el("final-review").hidden = false;
-            },
-            busy: function (busy, processing) {
-                document.getElementById("operations").querySelectorAll("button,select,input,textarea").forEach(function (control) { control.disabled = busy || control.dataset.previewDisabled === "true"; });
-                el("column").disabled = busy || el("kind").value === "extract";
-                el("apply").disabled = busy || !hasPreview;
-                el("cancel").hidden = !processing; el("cancel").disabled = !processing;
-            },
-            bind: function (handlers) {
-                ["preview", "apply", "cancel", "finalize", "confirm-final", "cancel-final", "load-values"].forEach(function (name) { el(name).addEventListener("click", handlers[name]); });
-                el("edit").addEventListener("click", function () { return conditional ? handlers.preview() : handlers.edit(); });
-                mapping.bind(function () { clear(); handlers.change(); }, handlers.status);
-                el("recommend-extraction").addEventListener("click", handlers.recommend);
-                el("extraction-suggestions").addEventListener("click", function (event) {
-                    var button = event.target.closest("button[data-extraction-mode]");
-                    if (!button || button.disabled) return;
-                    el("extraction-mode").value = button.dataset.extractionMode;
-                    clear(); handlers.change();
-                });
-                document.getElementById("op-settings").addEventListener("input", function (event) {
-                    if (event.target.id === "op-column") mapping.reset();
-                    if (["op-kind", "op-column"].includes(event.target.id)) el("extraction-suggestions").textContent = "";
-                    kind(); clear(); handlers.change();
-                    if (["op-kind", "op-column"].includes(event.target.id) && el("kind").value === "extract") handlers.recommend();
-                });
-                el("rules").addEventListener("click", function (event) {
-                    var button = event.target.closest("button[data-move]");
-                    if (!button) return;
-                    var row = button.parentElement;
-                    if (row.previousElementSibling) el("rules").insertBefore(row, row.previousElementSibling);
-                    clear(); handlers.change();
-                });
-            }
+            finalReview: function (snapshot, blanks) { offer = messages.confirm(snapshot.rows.length + '행의 현재 결과를 최종 기록으로 남길까? 빈 셀은 ' + blanks + '개야. 셀 값은 바꾸지 않아.', {apply: handlers['confirm-final'], cancel: handlers['cancel-final']}); },
+            clear: clear, busy: function () { if (messages) messages.busy(); },
+            bind: function (value) { handlers = value; }
         };
     };
 })();

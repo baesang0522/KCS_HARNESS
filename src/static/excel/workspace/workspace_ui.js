@@ -1,20 +1,15 @@
 "use strict";
 (function () {
-    window.createWorkspaceUI = function () {
+    window.createWorkspaceUI = function (messages) {
         function el(id) { return document.getElementById("work-" + id); }
-        var columns = null, importChoices = [], importBusy = false, mode = "work";
+        var columns = null, importChoices = [], importBusy = false, mode = "work", lastWarning = "", lastFinal = "";
         function importSelection() {
             return importChoices.filter(function (choice) { return choice.input.checked; }).map(function (choice) { return choice.column; });
         }
         function setMode(next) {
             mode = next;
             el("import").hidden = mode !== "import";
-            el("scope").hidden = mode !== "scope";
-            el("tools").hidden = mode !== "work";
-            if (mode !== "work") el("title").textContent = mode === "import" ? "열 추가" : "작업 범위";
-        }
-        function scopeOperator() {
-            el("scope-value-label").hidden = ["blank", "not_blank"].includes(el("scope-operator").value);
+            if (mode === "import") el("title").textContent = "열 추가";
         }
         function updateImport() {
             var selected = importSelection();
@@ -26,16 +21,7 @@
                 : "처음 보관한 열은 조사 시작 당시의 값을 원본 행 번호로 맞춰 추가합니다.";
             el("import-add").disabled = importBusy || !selected.length || (live && !el("import-confirm").checked);
         }
-        function choices(id, available, selected, empty) {
-            var control = el(id); control.textContent = "";
-            if (empty) { var option = document.createElement("option"); option.value = ""; option.textContent = empty; control.appendChild(option); }
-            available.forEach(function (column) {
-                var option = document.createElement("option"); option.value = String(column.column_id); option.textContent = column.header;
-                control.appendChild(option);
-            });
-            control.value = selected || (empty ? "" : available.length ? String(available[0].column_id) : "");
-        }
-        function status(text) { el("status").textContent = text; }
+        function status(text) { el("status").textContent = text; if (el("panel").hidden) document.getElementById("notice").textContent = text; }
         return {
             open: function (type) { el("panel").hidden = false; el("type").value = type; setMode("work"); },
             mode: setMode,
@@ -49,7 +35,7 @@
 
 
                 columns = null;
-                el("review-warning").hidden = true; el("review-warning").textContent = "";
+                lastWarning = lastFinal = "";
                 status("");
             },
             source: function (source, profile, change) {
@@ -65,7 +51,6 @@
                 columns = window.createWorkspaceColumns(selects, el("extra-columns"), profile.roles);
                 columns.bind(change); columns.showSelection(source); change();
             },
-            role: function () { return {column_id: el("role-column").value, role: el("role-value").value}; },
             importColumns: function (available) {
                 el("import-confirm").checked = false;
                 el("import-columns").textContent = available.length ? "" : "추가할 원본 열이 없습니다";
@@ -81,11 +66,6 @@
                 setMode("import"); updateImport();
                 if (el("import").scrollIntoView) el("import").scrollIntoView({block: "start"});
             },
-            scope: function () {
-                var operator = el("scope-operator").value;
-                return {column_id: el("scope-column").value, operator: operator,
-                    value: ["blank", "not_blank"].includes(operator) ? "" : el("scope-value").value};
-            },
             importSelection: importSelection,
             importPolicy: function () { return {original_order_confirmed: !!el("import-confirm").checked}; },
             mapping: function () { return columns ? columns.getMapping() : []; },
@@ -96,22 +76,7 @@
             },
             current: function (workspace, target) {
                 el("setup").hidden = true; el("current").hidden = false;
-                choices("role-column", workspace.columns, el("role-column").value);
-                el("operation-scope").textContent = "현재 조건: " + window.operationsSheet.describeFilter(workspace.row_filter, workspace.columns);
-                el("clear-filter").hidden = !workspace.row_filter;
-                el("scope-current").textContent = el("operation-scope").textContent;
-                el("scope-clear").hidden = !workspace.row_filter;
-                var filter = workspace.row_filter && workspace.row_filter.column_id ? workspace.row_filter : null;
-                choices("scope-column", workspace.columns, filter ? filter.column_id : el("scope-column").value, "열을 선택하세요");
-                el("scope-operator").value = filter ? filter.operator : "equals";
-                el("scope-value").value = filter ? filter.value : "";
-                scopeOperator();
-                el("title").textContent = mode === "import" ? "열 추가" : mode === "scope" ? "작업 범위" : window.workspaceProfiles[workspace.task_type].name;
-                el("current-summary").textContent = workspace.sheet_name + " · " + target.row_count.toLocaleString() + "행 작업 중";
-                el("column-summary").textContent = workspace.columns.map(function (column) {
-                    return column.header + " (" + (column.role === "reference" ? "일반" : column.role === "result" ? "결과" : "역할 지정") + ")" +
-                        (column.description ? " — " + column.description : "");
-                }).join("\n");
+                el("title").textContent = mode === "import" ? "열 추가" : "작업 데이터 준비";
             },
             setup: function () { el("title").textContent = "작업 데이터 준비"; el("setup").hidden = false; el("mapping").hidden = true; el("current").hidden = true; setMode("work"); },
             busy: function (busy, ready) {
@@ -121,28 +86,18 @@
                 if (columns) columns.setBusy(busy);
             },
             finalRecord: function (record, workspace) {
-                var element = el("final-record"); element.hidden = !record;
-                element.textContent = record ? "최종 결과 기록 · " + record.column_ids.map(function (id) {
-                    var column = workspace.columns.find(function (c) { return String(c.column_id) === id; }); return column ? column.header : id;
-                }).join(", ") + " · " + record.row_count.toLocaleString() + "행 · " + new Date(record.at).toLocaleString() : "";
+                var text = record ? "최종 결과 기록 · " + record.column_ids.map(function (id) { return (workspace.columns.find(function (c) { return String(c.column_id) === id; }) || {header: id}).header; }).join(", ") + " · " + record.row_count + "행" : "";
+                if (text && text !== lastFinal && messages) messages.say(text); lastFinal = text;
             },
             review: function (workspace) {
                 var ids = window.resultDependencies.required(workspace);
-                var warning = el("review-warning");
-                warning.hidden = !ids.length;
-                warning.textContent = ids.length ? "재검토 필요: " + ids.map(function (id) {
-                    return (workspace.columns.find(function (column) { return String(column.column_id) === id; }) || {header: "삭제된 열"}).header;
-                }).join(", ") + " — 사용한 입력이나 범위가 바뀌었습니다. 결과값은 유지했으며 재처리가 필요합니다." : "";
+                var text = ids.length ? "재검토 필요: " + ids.map(function (id) { return (workspace.columns.find(function (c) { return String(c.column_id) === id; }) || {header: "삭제된 열"}).header; }).join(", ") + " — 입력이나 범위가 바뀌었어. 기존 결과값은 유지했으니 필요한 작업을 다시 요청해 줘." : "";
+                if (text && text !== lastWarning && messages) messages.say(text); lastWarning = text;
             },
             status: status,
             bind: function (handlers) {
-                el("scope-operator").addEventListener("change", scopeOperator);
                 el("import-confirm").addEventListener("change", updateImport);
-                [
-                    "select",
-                    "start",
-                    "restore",
-                    "new", "refresh", /* "groups", // 묶음 검토 보류: 재사용 여부 검토 후 삭제 */ "import-add", "role-save", "clear-filter", "scope-apply", "scope-clear"
+                ["select", "start", "restore", "import-add"
                 ].forEach(function (name) {
                     el(name).addEventListener("click", handlers[name]);
                 });

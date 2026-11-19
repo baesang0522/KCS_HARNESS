@@ -21,7 +21,7 @@ async function setup({count=4,targetCount=count}={}){
  'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js',
  'workspace/result_dependencies.js','workspace/workspace.js'].forEach(h.load);
  const messages=[];
- controller=h.window.createWorkspaceController({api,getConversationId:()=> 'conversation',isBusy:()=>busy,
+ controller=h.window.createWorkspaceController({messages:h.messages,api,getConversationId:()=> 'conversation',isBusy:()=>busy,
  setBusy:value=>{busy=value;controller?.setBusy(value);},complete:message=>messages.push(message),enterConversation:noop,
  beforeWorkspaceChange:target=>{if(!target)throw Error('기존 조사에 연결됨');},
  newInvestigation:async()=>{if(h.rejectNew)throw Error('새 조사 연결 실패');messages.push('새 조사 생성');controller.reset();}});
@@ -33,7 +33,7 @@ async function setup({count=4,targetCount=count}={}){
   await controller.configure({kind:'set',condition_scope:scope,column_ids:[ids[source]],assigned_value:value,rules:[],delimiter:null,
    condition:{column_id:ids[source],operator:'not_blank',value:''},destination_column_id:ids[destination]});
   await controller.previewOperation();
-  if(!node('op-apply').disabled)await node('op-apply').emit('click');
+  if(h.action('적용'))await h.messages.command('적용');
  }
  return {...f,h,host,controller,node,ids,change,apply,messages,get stored(){return stored;},set failSave(v){failSave=v;}};
 }
@@ -88,7 +88,7 @@ test('only dependent outputs need review; unrelated notes, outside rows, rename 
  f.sheet.cells.find(row=>row[0]===1)[2]='changed input';
  const before=structuredClone(f.sheet.cells),context=await f.controller.context();
  assert.deepEqual(new Set(context.review_required_column_ids),new Set([f.ids['결과'],f.ids['후속']]));
- assert.deepEqual(f.sheet.cells,before);assert.equal(f.node('work-review-warning').hidden,false);
+ assert.deepEqual(f.sheet.cells,before);assert.match(f.h.chatText(),/재검토|다시 확인/);
  await f.node('work-restore').emit('click');assert.equal((await f.controller.context()).review_required_column_ids.length,2);
 });
 test('manual selection edits and scope changes invalidate filtered results but leave whole-table results valid',async()=>{
@@ -105,7 +105,7 @@ test('reprocessing clears the covered output only, including unchanged values, w
  await f.apply('회사');
  assert.deepEqual(Array.from((await f.controller.context()).review_required_column_ids),[f.ids['후속']]);
  await f.apply('결과','downstream','후속');assert.deepEqual(Array.from((await f.controller.context()).review_required_column_ids),[]);
- assert.equal(f.node('work-review-warning').hidden,true);
+ assert.deepEqual(Array.from((await f.controller.context()).review_required_column_ids),[]);
 });
 test('formula dependencies use raw numeric inputs and ignore sort; changed inputs invalidate the stored output',async()=>{
  const f=await setup(),deps=f.h.window.resultDependencies;
@@ -120,7 +120,7 @@ test('compound-filter preview refuses later predicate edits and preserves all ma
  await f.controller.configure({kind:'set',column_ids:[f.ids['회사']],assigned_value:'write',condition_scope:'current',rules:[],delimiter:null,
  condition:{column_id:f.ids['회사'],operator:'not_blank',value:''},destination_column_id:f.ids['결과']});
  await f.controller.previewOperation();f.sheet.cells[1][2]='KR';const before=structuredClone(f.sheet.cells);
- await f.node('op-apply').emit('click');assert.deepEqual(f.sheet.cells,before);assert.match(f.messages.at(-1),/바뀌/);
+ await f.h.messages.command('적용');assert.deepEqual(f.sheet.cells,before);assert.match(f.messages.at(-1),/바뀌/);
 });
 test('partial reprocessing never clears stale results in untouched rows; a whole-table rewrite does',async()=>{
  const f=await setup();await f.apply('회사');f.sheet.cells[1][1]='changed';await f.controller.context();
@@ -131,7 +131,7 @@ test('partial reprocessing never clears stale results in untouched rows; a whole
 test('new matching rows and deleted input columns mark the associated results for review without writes',async()=>{
  const f=await setup();await f.change('replace','판정','Y');await f.apply('회사');
  f.sheet.cells.push([5,'A','KR','Y','manual','note','down']);f.table.count++;
- const before=structuredClone(f.sheet.cells);await f.controller.context();assert.equal(f.node('work-review-warning').hidden,false);assert.deepEqual(f.sheet.cells,before);
+ const before=structuredClone(f.sheet.cells);await f.controller.context();assert.match(f.h.chatText(),/재검토|다시 확인/);assert.deepEqual(f.sheet.cells,before);
  const g=await setup();await g.apply('회사');g.table.columns.items.splice(1,1);g.sheet.cells.forEach(row=>row.splice(1,1));
  assert.deepEqual(Array.from((await g.controller.context()).review_required_column_ids),[g.ids['결과']]);
 });
@@ -165,15 +165,10 @@ test('model advice uses the same combined range without reading excluded rows in
  assert.equal(result.selection.total_rows,2);assert(result.rows.every(row=>row.values[1]==='KR'));
 });
 
-test('opening scope after an input edit shows both dependent warnings outside the scrolling conversation',async()=>{
+test('input changes report affected outputs in chat without persistent warning panels',async()=>{
  const f=await setup();await f.apply('회사','1차완료','결과','all');await f.apply('결과','2차완료','후속','all');
- f.sheet.cells[1][1]='changed input';const before=structuredClone(f.sheet.cells);
- await f.controller.openScope();
- const warning=f.node('work-review-warning');
- assert.equal(warning.hidden,false);assert.match(warning.textContent,/결과, 후속/);
- assert.equal(f.node('work-scope').hidden,false);assert.deepEqual(f.sheet.cells,before);
- assert.equal(f.h.document.querySelector('main').contains(warning),false);
- assert.equal(warning.parentElement.className,'app');
+ f.sheet.cells[1][1]='changed input';const before=structuredClone(f.sheet.cells);await f.controller.context();
+ assert.match(f.h.chatText(),/결과, 후속/);assert.deepEqual(f.sheet.cells,before);assert.equal(f.node('work-review-warning'),null);
 });
 
 test('one formula run tracks only actual earlier output references, including ranges and quoted sheet names',async()=>{
@@ -191,20 +186,16 @@ test('one formula run tracks only actual earlier output references, including ra
  assert.equal(deps.referencesOutput('="E2"',4,'조사'),false);
 });
 test('final result record survives manual panels and disappears when recorded values change',async()=>{
- const f=await setup();await f.apply('회사');await f.controller.openScope();
- await f.node('op-finalize').emit('click');await f.node('op-confirm-final').emit('click');
- assert(f.stored.finalized);assert.match(f.node('work-final-record').textContent,/4행/);
- await f.controller.openScope();assert(f.stored.finalized);
+ const f=await setup();await f.apply('회사');await f.controller.context();
+ await f.controller.recordFinal();await f.h.messages.command('적용');
+ assert(f.stored.finalized);assert.match(f.h.chatText(),/4행/);
+ await f.controller.context();assert(f.stored.finalized);
  f.sheet.cells[1][4]='manual';await f.controller.context();assert.equal(f.stored.finalized,null);
 });
 
-test('new source starts a new investigation while keeping the old worksheet; failure keeps the current workspace',async()=>{
+test('reset for a new investigation keeps the previous worksheet and saved workspace',async()=>{
  const f=await setup(),before=structuredClone(f.sheet.cells),savedId=f.stored.workspace_id;
- f.h.rejectNew=true;await f.node('work-new').emit('click');
- assert.equal(f.controller.referenceTarget().workspace_id,savedId);assert.match(f.node('work-status').textContent,/연결 실패/);
- f.h.rejectNew=false;await f.node('work-new').emit('click');
- assert.equal(f.controller.referenceTarget(),null);assert.equal(f.stored.workspace_id,savedId);
- assert(f.messages.includes('새 조사 생성'));assert.deepEqual(f.sheet.cells,before);
+ f.controller.reset();assert.equal(f.controller.referenceTarget(),null);assert.equal(f.stored.workspace_id,savedId);assert.deepEqual(f.sheet.cells,before);
 });
 
 test('editing an earlier formula output during the completion acknowledgement marks its downstream result for review',async()=>{

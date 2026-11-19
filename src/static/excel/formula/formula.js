@@ -48,6 +48,7 @@
                 options.checkRequest(run);
                 var names = (selection.input_columns || []).map(function (column) { return column.header; }).join(", ");
                 ui.setStatus((names || selection.address) + " · " + selection.row_count.toLocaleString() + "행으로 수식 계획을 만들고 있습니다…");
+                if (inputScope && inputScope.output && inputScope.output.name) instruction += "\n결과 열 이름: " + inputScope.output.name;
                 var payload = Object.assign({}, selection, {
                     conversation_id: options.getConversationId(),
                     formula_job_id: api.newRequestId(),
@@ -77,7 +78,9 @@
                     throw new Error(formulaJob.error || "수식 계획을 만들지 못했습니다.");
                 }
                 preview = formulaJob.preview;
-                var prepared = await excel.prepareFormulaPreview(preview, selection);
+                var output = inputScope && inputScope.output;
+                var destination = output && options.resolveOutput ? await options.resolveOutput(output, selection) : null;
+                var prepared = destination ? await excel.readFormulaTarget(preview, selection, destination) : await excel.prepareFormulaPreview(preview, selection);
                 options.checkRequest(run);
                 await useTarget(prepared, run);
             } catch (error) {
@@ -178,8 +181,21 @@
             }
         }
 
-        ui.bind({source: selectSource, target: selectTarget, apply: approveAndApply});
+        ui.bind({source: selectSource, target: selectTarget, apply: approveAndApply, cancel: function () { preview = targetSnapshot = null; if (formulaJob) options.complete('수식 적용을 취소했어.', {kind: 'formula', job_id: formulaJob.formula_job_id, status: 'FAILED'}); options.setBusy(false); }});
         return {
+            changeOutput: async function (action) {
+                ui.reset();
+                if (!formulaJob || formulaJob.formula_job_id !== action.formula_job_id || !preview || applied || writeAttempted) throw new Error('변경할 수식 미리보기가 없어. 작업을 다시 요청해 줘.');
+                options.setBusy(true);
+                try {
+                    if (action.output.name) throw new Error('수식 결과 이름을 바꾸려면 원하는 이름과 함께 수식 작업을 다시 요청해 줘.');
+                    var destination = await options.resolveOutput(action.output, selection);
+                    if (!destination) {
+                        preview = formulaJob.preview;
+                        await useTarget(await excel.prepareFormulaPreview(preview, selection));
+                    } else await useTarget(await excel.readFormulaTarget(preview, selection, destination));
+                } finally { options.setBusy(false); }
+            },
             dismiss: function () { window.clearTimeout(startTimer); ui.reset(); },
             openAndSelect: function (value, scope) {
                 instruction = value;

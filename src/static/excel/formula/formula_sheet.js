@@ -159,13 +159,13 @@
         });
     }
 
-    async function readFormulaTarget(preview, selection) {
+    async function readFormulaTarget(preview, selection, destination) {
         requireFormulaHost();
         if (preview.plan.actions.length > 1) {
             throw new Error("복수 결과 작업은 계획된 열을 함께 사용합니다.");
         }
         return await Excel.run(async function (context) {
-            var chosen = context.workbook.getSelectedRange();
+            var chosen = destination ? context.workbook.worksheets.getItem(destination.worksheet_id).getRangeByIndexes(selection.row_start, destination.column_index, 1, 1) : context.workbook.getSelectedRange();
             var chosenSheet = chosen.worksheet;
             var planned = context.workbook.worksheets.getItem(selection.worksheet_id).getRange(preview.plan.actions[0].target_range);
             planned.load("rowIndex,rowCount");

@@ -172,18 +172,13 @@ test('failed value paste reports saved count and does not return successful comp
     await assert.rejects(()=>h.window.formulaSheet.applyFormulaPreview(plan(3092),h.selection),/값 저장 완료 1000셀.*C1002:C2001.*value paste failed/);
     assert.equal(h.formulaAt(1,2),'');assert.notEqual(h.formulaAt(1001,2),'');
 });
-test('formula UI explains fixed values before approval and reports value completion',()=>{
-    const {createDOM}=require('../helpers/taskpane_dom.cjs'),h=createDOM();h.load('formula/formula_ui.js');
-    const chat={enterConversation(){},conversation:h.document.getElementById('conversation'),scrollArea:h.document.getElementById('scroll-area')};
-    // reset only needs an append target; the production chat supplies its scroll area.
-    chat.scrollArea=chat.conversation;
-    const ui=h.window.createFormulaUI(chat);ui.reset();
-    assert.equal(h.document.getElementById('formula-apply').textContent,'확인 후 결과값 저장');
-    ui.showPreview('계산', {address:'A2:A4'}, {plan:{actions:[{output_label:'값',target_range:'B2:B4',formula:'=A2'}],summary:'계산'}},
-        {address:'B2:B4',row_count:3,reason:'planned'});
-    assert.match(h.document.getElementById('formula-preview').textContent,/결과값만 저장.*자동 재계산되지/);
-    ui.setApplied({address:'B2:B4',row_count:3});
-    assert.match(h.document.getElementById('formula-status').textContent,/값으로 저장/);
+test('formula chat explains planned calculation before approval and revokes the applied offer',async()=>{
+ const {createDOM}=require('../helpers/taskpane_dom.cjs'),h=createDOM();h.load('formula/formula_ui.js');
+ const ui=h.window.createFormulaUI(h.messages);let applied=0;ui.bind({apply:()=>{applied++;}});
+ ui.showPreview('계산',{address:'A2:A4'}, {plan:{actions:[{output_label:'값',target_range:'B2:B4',formula:'=A2'}]}},{address:'B2:B4',row_count:3});
+ assert.match(h.chatText(),/아직 셀은 변경하지/);assert.match(h.chatText(),/계산한 뒤 결과값으로 저장/);
+ assert.equal(applied,0);await h.messages.command('적용');assert.equal(applied,1);
+ ui.setApplied();assert.equal(h.action('적용'),undefined);
 });
 
 test('frozen Y/N results can be passed to existing-column conditional edits',async()=>{
@@ -210,4 +205,14 @@ test('formula evidence is recorded before writes and again before values are fro
  const stopped=createHost({rows:2});stopped.load('formula/formula_sheet.js');
  await assert.rejects(stopped.window.formulaSheet.applyFormulaPreview(plan(2),stopped.selection,()=>{},async()=>{throw Error('증거 저장 실패');}),/증거 저장 실패/);
  assert.equal(stopped.writes.length,0);
+});
+
+test('chat resolves an existing formula destination by ID without relying on current selection',async()=>{
+ const h=createHost({rows:3});h.load('formula/formula_sheet.js');h.selected=h.range(0,0,1,1);
+ const destination={worksheet_id:h.selection.worksheet_id,column_index:3};
+ const target=await h.window.formulaSheet.readFormulaTarget(plan(3),h.selection,destination);
+ assert.equal(target.target_range,'D2:D4');assert.equal(h.writes.length,0);
+ h.occupied.set('1,3',{value:'keep',formula:''});
+ await assert.rejects(()=>h.window.formulaSheet.readFormulaTarget(plan(3),h.selection,destination),/기존 값이나 수식/);
+ await assert.rejects(()=>h.window.formulaSheet.readFormulaTarget(plan(3),h.selection,{...destination,column_index:0}),/겹칠 수/);
 });

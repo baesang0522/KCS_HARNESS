@@ -1,7 +1,7 @@
 """Goal execution reuses the manual tools; reads return evidence instead of a card."""
 from langchain_core.tools import tool
 from services.agent_runs import ReadAction
-from services.operations.schemas import RowFilter
+from services.operations.schemas import RowFilter, OperationOutput
 from services.similarity import SimilaritySettings
 from services.recommendation.service import resolve_columns
 
@@ -31,13 +31,13 @@ def execution_tools(context, manual_tools):
         return {"intent": "read", "read": action.model_dump(), "answer": "현재 범위의 값을 읽어 유사도를 비교합니다."}
 
     @tool
-    async def calculate_formula(instruction: str, input_column_ids: list[str]) -> dict:
-        """이번 단계의 구체적인 수식 계산 지시와 입력 열을 기존 미리보기·승인 화면으로 넘긴다.
+    async def calculate_formula(instruction: str, input_column_ids: list[str], output: OperationOutput | None = None) -> dict:
+        """이번 단계의 구체적인 수식 계산 지시와 입력 열을 채팅 미리보기·확인으로 넘긴다.
         전체 조사 목표를 그대로 넘기지 않는다. 조건 범위 수식의 기존 차단은 유지한다."""
         if not instruction.strip() or len(instruction) > 8000:
             raise ValueError("이번 수식 계산 지시를 구체적으로 작성하세요.")
         start = next(item for item in manual_tools if item.name == "start_task")
-        result = await start.ainvoke({"task_type": "formula", "input_column_ids": input_column_ids})
+        result = await start.ainvoke({"task_type": "formula", "input_column_ids": input_column_ids, "output": output.model_dump() if output else None})
         result["formula_instruction"] = instruction
         return result
 

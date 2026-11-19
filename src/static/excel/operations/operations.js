@@ -1,9 +1,9 @@
 "use strict";
 (function () {
     window.createOperations = function (options) {
-        var ui = window.createOperationsUI(), sheet = window.operationsSheet;
+        var ui = window.createOperationsUI(options.messages), sheet = window.operationsSheet;
         var workspace = null, target = null, preview = null, processing = false, cancelled = false, abort = null;
-        var finalSnapshot = null;
+        var finalSnapshot = null, retirement = Promise.resolve();
         function invalidate(keepJob) {
             var discarded = preview;
 
@@ -11,32 +11,15 @@
             ui.clear();
 
             if (discarded && keepJob !== true) {
-                options.jobs.status(
-                    discarded.job,
-                    "CANCELLED"
-                ).catch(function (error) {
-                    console.warn("정제 미리보기 취소 기록 실패", error);
-                });
+                retirement = options.jobs.status(discarded.job, "CANCELLED").then(function () { return null; }, function (error) { return error; });
             }
         }
-        function complete(text, outcome) { invalidate(); options.complete(text, outcome); }
+        function complete(text, outcome) { invalidate(); ui.forget(); options.complete(text, outcome); }
         async function sampleRows() {
             if (!workspace || !target) return [];
             if (!ui.targets().length) return [];
             var snapshot = await sheet.read(workspace, target, ui.targets(), function () {}, function () {}, null, 10, null, null, true);
             return snapshot.rows;
-        }
-        async function loadValues() {
-            if (options.isBusy() || !target) return;
-            options.setBusy(true);
-            try {
-                if (await options.refresh()) { options.status("삭제된 대상 열을 제외했습니다. 처리할 열을 확인하고 다시 불러오세요."); return; }
-                var snapshot = await sheet.read(workspace, target, ui.targets(), progress, function () {});
-                var data = await options.api.requestJson("/operations/values", {method: "POST", headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({values: snapshot.rows.map(function (row) { return row.values[0]; })})});
-                ui.catalog(data); options.status("현재 데이터의 그룹을 불러왔습니다. 빈 값 " + data.blank_count + "행은 제외했습니다.");
-            } catch (error) { options.status(error.message); }
-            finally { options.setBusy(false); }
         }
         async function recommendExtraction() {
             if (options.isBusy() || !target) return;
@@ -48,7 +31,7 @@
                     workspace, target, ui.targets(), options.api, progress
                 );
                 ui.extractionSuggestions(summary);
-                options.status("전체 대상의 추천을 확인하고 추출 방식을 선택하세요. 적용 전 ‘변경 내용 확인’에서 결과를 검토합니다.");
+                options.status("전체 대상의 추천을 확인하고 추출 방식을 선택하세요. 방식을 고르면 채팅에서 실제 변경 결과를 확인할 수 있습니다.");
             } catch (error) {
                 options.status(error.message);
             } finally {
@@ -62,9 +45,10 @@
             options.setBusy(true);
             var job = null;
             try {
-                if (await options.refresh()) { complete("삭제된 대상 열을 제외했습니다. 작업 화면에서 다음 처리할 열을 선택하세요."); return; }
+                if (await options.refresh()) { complete("삭제된 대상 열을 제외했습니다. 채팅으로 다음 처리할 열을 알려주세요."); return; }
                 var operation = ui.operation(); invalidate(); processing = true; cancelled = false;
                 if (!operation) { complete("선택한 전처리 규칙이 없어 변경 없이 작업을 마쳤습니다."); return; }
+                var cancellationError = await retirement; if (cancellationError) throw cancellationError;
                 abort = new AbortController();
                 options.setBusy(true);
 
@@ -109,7 +93,7 @@
                 }
                 values.forEach(function (row) { while (row.length < headers.length) row.push(""); });
                 if (destination) changed = values.filter(function (row, i) { return row[0] !== snapshot.rows[i].destination; }).length;
-                if (!changed && !["group", "extract"].includes(operation.kind)) {
+                if (!changed && destination && !["group", "extract"].includes(operation.kind)) {
                     if (destination && options.reviewed) {
                         var current = await sheet.read(readWorkspace, readTarget, ids, progress, check, destination, null, null, operation.condition);
                         if (current.stamp !== snapshot.stamp || JSON.stringify(current.rows) !== JSON.stringify(snapshot.rows) || JSON.stringify(current.scope_rows) !== JSON.stringify(snapshot.scope_rows)) throw new Error("확인 중 값이 바뀌었습니다. 다시 요청하세요.");
@@ -133,6 +117,7 @@
                     names: headers,
                     changed: changed
                 };
+                if (ui.output().mode === "existing" && operation.kind === "split" && headers.length !== 1) throw new Error("여러 열로 분리하는 결과는 새 열에 저장해야 해요. 새 열로 다시 요청해 주세요.");
                 ui.preview(preview); options.status(operation.condition
                     ? "변경 내용을 확인하고 적용하세요. 조건을 바꾸려면 채팅으로 요청하세요."
                     : "변경 내용과 결과 위치를 확인하세요. 기존 열을 선택하면 해당 열의 대상 셀 값이 바뀝니다.");
@@ -150,6 +135,7 @@
                     }
                 }
 
+                if (preview && preview.job === job) { preview = null; ui.clear(); }
                 console.error("[operations.build]", error);
 
                 complete(error.message || String(error), job && {kind: "operation", job_id: job.source.operation_job_id, status: "FAILED"});
@@ -267,8 +253,7 @@
                 if (options.recovery) options.recovery.completed(data.job.source.operation_job_id);
 
                 complete(
-                    result.row_count.toLocaleString() +
-                    "행의 결과를 작성하고 실행 기록을 저장했습니다.",
+                    "완료했어. " + (output.mode === "existing" ? "기존 열 ‘" : "새 열 ‘") + result.columns.map(function (column) { return column.header; }).join("’, ‘") + "’에 " + result.row_count.toLocaleString() + "행의 결과를 저장했어. 변경된 값은 " + data.changed.toLocaleString() + "행이야.",
                     {kind: "operation", job_id: data.job.source.operation_job_id, status: "SUCCEEDED"}
                 );
             } catch (error) {
@@ -323,10 +308,15 @@
             finally { options.setBusy(false); }
         }
         ui.bind({preview: build, apply: apply, finalize: finalize, status: options.status,
-            "load-values": loadValues,
             recommend: recommendExtraction,
             change: function () { invalidate(); options.changed(); },
-            "confirm-final": confirmFinal, "cancel-final": invalidate, edit: invalidate,
+            "confirm-final": confirmFinal, "cancel-final": invalidate, edit: async function () {
+                var discarded = preview; invalidate(); ui.forget();
+                var error = await retirement;
+                if (error) { options.complete(error.message); return; }
+                if (discarded) options.complete('취소했어. 셀은 변경하지 않았어.', {kind: 'operation', job_id: discarded.job.source.operation_job_id, status: 'FAILED'});
+                options.setBusy(false);
+            },
             cancel: function () { cancelled = true; if (abort) abort.abort(); }});
         return {
             reconcile: function (work, next, fallback) { workspace = work; target = next; invalidate(); return ui.reconcile(work.columns, fallback, work.task_type); },
@@ -336,9 +326,14 @@
             recommendExtraction: recommendExtraction,
             sampleRows: sampleRows,
             targets: ui.targets,
+            pending: ui.pending,
+            isProcessing: function () { return processing; },
+            apply: apply,
+            finalize: finalize,
+            cancel: function () { cancelled = true; if (abort) abort.abort(); invalidate(); ui.forget(); },
             invalidate: invalidate,
             busy: function (busy) { ui.busy(busy, processing); },
-            reset: function () { workspace = target = null; invalidate(); }
+            reset: function () { workspace = target = null; invalidate(); ui.forget(); }
         };
     };
 })();

@@ -44,7 +44,7 @@ class TaskpaneAssetsTests(unittest.TestCase):
             ('operations/extraction_suggestions.js', 'operations/operations.js'),
             ('chat/chat.js', 'taskpane.js'),
             ('documents/documents.js', 'taskpane.js'),
-            ('cleaning_help/cleaning_help.js', 'taskpane.js'),
+            ('chat/task_messages.js', 'taskpane.js'),
         ):
             self.assertLess(paths.index(dependency), paths.index(consumer))
         base = Path(__file__).resolve().parents[2] / 'src/static/excel'

@@ -34,7 +34,7 @@ async function setup() {
         onConversationChanged:id=>Promise.all([h.documents.load(id),h.investigation.load(id)]),
         onBusy:()=>h.documents?.updateControls()});
     const shared={api:h.api,isBusy:h.chat.isBusy,setBusy:h.chat.setBusy,beginRequest:h.chat.beginRequest,endRequest:h.chat.endRequest,checkRequest:h.chat.checkRequest,reportStop:h.chat.reportStop};
-    h.investigation=h.window.createInvestigationController({...shared,getWorkspace:()=>null,onChanged:()=>h.documents?.render()});
+    h.investigation=h.window.createInvestigationController({messages:h.messages,...shared,getWorkspace:()=>null,onChanged:()=>h.documents?.render()});
     h.documents=h.window.createDocumentsController({...shared,beforeUpload:h.investigation.prepare,readConditions:h.investigation.extract,
         reviewInfo:h.investigation.info,applyReview:h.investigation.apply,preprocessReview:async()=>{}});
     await h.chat.initialize();
@@ -47,12 +47,12 @@ test('supplier then item from file picker keep distinct editable sheets and per-
     await h.upload('품목.pdf');
     assert.equal(h.excel.sheets.length,2);assert.equal(h.chat.isBusy(),false);assert.equal(h.node('document-add').disabled,false);
     assert.equal(h.node('documents-list').children.length,2);assert.equal(supplierSheet.cells[4][2],'사용자가 수정한 회사');
-    assert.deepEqual(h.node('documents-list').querySelectorAll('button').map(b=>b.textContent),['전처리','수정 내용 반영','전처리','수정 내용 반영']);
+    assert.deepEqual(h.node('documents-list').querySelectorAll('button').map(b=>b.textContent),[]);
     const did2=Object.keys(h.state.reviews)[1];assert.equal(h.excel.active,h.excel.sheets[1]);
     assert.notEqual(h.excel.sheets[0].id,h.excel.sheets[1].id);
-    await h.investigation.apply(did1);assert.equal(h.state.reviews[did1][0].target.company_name,'사용자가 수정한 회사');
+    await h.investigation.previewApply([did1]);assert.equal(h.state.conditions[0].status,'candidate');await h.messages.command('적용');assert.equal(h.state.reviews[did1][0].target.company_name,'사용자가 수정한 회사');
     assert.deepEqual(h.state.reviews[did2],[item]);
-    h.excel.sheets[1].cells[4][3]='150mm 이상';await h.investigation.apply(did2);
+    h.excel.sheets[1].cells[4][3]='150mm 이상';await h.investigation.previewApply([did2]);await h.messages.command('적용');
     assert.equal(h.state.reviews[did2][0].target.requirements,'150mm 이상');assert.equal(h.state.reviews[did1][0].target.company_name,'사용자가 수정한 회사');
 });
 test('one file selection processes both PDFs into separate sheets; reattaching does not overwrite either',async()=>{
@@ -66,10 +66,10 @@ test('Excel failure offers only retry until its sheet exists, including after re
     const h=await setup(),sheet=h.window.investigationSheet,ensure=sheet.ensure;
     sheet.ensure=async()=>{throw Error('Excel 연결 실패');};await h.upload('거래처.pdf');
     const labels=()=>h.node('documents-list').querySelectorAll('button').map(b=>b.textContent);
-    assert.deepEqual(labels(),['추출 다시 시도']);assert.match(h.node('documents-status').textContent,/Excel 연결 실패/);
-    await h.investigation.load('conversation');assert.deepEqual(labels(),['추출 다시 시도']);
-    sheet.ensure=ensure;await h.node('documents-list').querySelector('button').emit('click');
-    assert.deepEqual(labels(),['전처리','수정 내용 반영']);assert.equal(h.excel.sheets.length,1);
-    await h.investigation.load('conversation');assert.deepEqual(labels(),['전처리','수정 내용 반영']);
+    assert.deepEqual(labels(),[]);assert.match(h.node('documents-status').textContent,/Excel 연결 실패/);
+    await h.investigation.load('conversation');assert.deepEqual(labels(),[]);
+    sheet.ensure=ensure;await h.investigation.extract(h.documents.items()[0].document_id,h.documents.items()[0].filename);
+    assert.deepEqual(labels(),[]);assert.equal(h.excel.sheets.length,1);
+    await h.investigation.load('conversation');assert.deepEqual(labels(),[]);
     assert.equal(h.calls.filter(c=>c.url.includes('/extractions/')).length,1);
 });

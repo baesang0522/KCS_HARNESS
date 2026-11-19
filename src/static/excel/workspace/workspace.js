@@ -12,7 +12,7 @@
     profiles.investigation = {name: "통합 조사", prefix: "조사", roles: profiles.counterparty_cleanup.roles.concat(profiles.model_normalization.roles)};
     window.workspaceProfiles = profiles;
     window.createWorkspaceController = function (options) {
-        var ui = window.createWorkspaceUI(), type = "investigation";
+        var ui = window.createWorkspaceUI(options.messages), type = "investigation";
         var source = null, workspace = null, target = null, creationName = null, ready = false;
         var lastResults = [], finalized = null, lastFormula = null, groupReview = null;
         var dependencies = window.resultDependencies;
@@ -29,7 +29,7 @@
             captureResults: function (baseline, plan, result, selection, ids) { return dependencies.formulaResults(workspace, baseline, plan, result, selection, ids); }
         });
         var operations = window.createOperations({
-            api: options.api, recovery: options.recovery,
+            api: options.api, recovery: options.recovery, messages: options.messages,
             jobs: jobs,
             isBusy: options.isBusy,
             setBusy: options.setBusy, status: ui.status, complete: options.complete, refresh: refresh,
@@ -61,7 +61,7 @@
             }
         });
         var similarity = window.createSimilarityController({
-            api: options.api, isBusy: options.isBusy, setBusy: options.setBusy,
+            api: options.api, messages: options.messages, isBusy: options.isBusy, setBusy: options.setBusy,
             status: ui.status, complete: options.complete,
             getInput: async function () {
                 if (!workspace || !target) throw new Error(window.errorMessages.WORKSPACE_REQUIRED);
@@ -75,7 +75,7 @@
         //         if (!workspace) throw new Error("먼저 작업표를 만들거나 저장된 작업을 이어가세요.");
         //         if (options.showWorkspace) options.showWorkspace();
         //         if (!groupReview) groupReview = window.createGroupReview({
-        //             api: options.api, isBusy: options.isBusy, setBusy: options.setBusy,
+        //             api: options.api, messages: options.messages, isBusy: options.isBusy, setBusy: options.setBusy,
         //             getInput: async function () {
         //                 await refresh();
         //                 var whole = await Excel.run(async function (context) {
@@ -213,10 +213,7 @@
                 }), true);
                 await save();
 
-                ui.status(
-                    "작업 시트를 만들었습니다. 원본은 유지됩니다. " +
-                    "처리할 열과 기능을 선택하세요."
-                );
+                ui.hide(); options.complete("작업표를 만들었어. 필요한 정제·수식·범위 변경을 채팅으로 요청해 줘.");
             } catch (error) { ui.status(error.message); }
             finally { options.setBusy(false); }
         }
@@ -410,17 +407,17 @@
             ui.status(message);
             return message;
         }
-        async function manage(action) {
+        async function manage(action, settings) {
             if (options.isBusy() || !workspace) return;
             options.setBusy(true);
-            var imported = 0;
+            var imported = 0, previousRoles = null;
             try {
                 if (action === "sources" || action === "scope") {
                     if (options.showWorkspace) options.showWorkspace();
                     ui.open(type); ui.mode(action === "sources" ? "import" : "scope");
                 }
                 // Read form values before refresh repaints the current settings.
-                var role = ui.role(), sourceColumns = ui.importSelection(), filter = ui.scope();
+                var role = settings, sourceColumns = ui.importSelection(), filter = settings;
                 var importPolicy = ui.importPolicy();
                 await refresh(); operations.invalidate(); similarity.reset(); lastFormula = null;
                 if (action === "scope") {
@@ -437,6 +434,7 @@
                         profiles[workspace.task_type].roles.some(function (r) { return r.key === column.role; })) {
                         throw new Error("이전 작업표의 필수 역할은 유지해야 합니다. 자유롭게 구성하려면 새 통합 조사를 시작하세요.");
                     }
+                    previousRoles = new Map(workspace.columns.map(function (c) { return [String(c.column_id), c.role]; }));
                     if (role.role !== "reference") workspace.columns.forEach(function (c) { if (c.role === role.role) c.role = "reference"; });
                     column.role = role.role;
                 } else if (action === "sources") {
@@ -460,7 +458,9 @@
                 }
                 await save(); display(operations.targets());
                 ui.status(action === "import" ? imported + "개 열을 추가했습니다." : "현재 열과 설정으로 작업을 이어갑니다.");
+                if (action === "role") options.complete("‘" + column.header + "’ 열의 역할을 변경했어. 셀 값은 그대로야.");
             } catch (error) {
+                if (previousRoles) workspace.columns.forEach(function (c) { c.role = previousRoles.get(String(c.column_id)); });
                 if (action === "import") {
                     try { ui.importColumns(await window.sourceColumns.list(workspace)); display(operations.targets()); }
                     catch (_) { ui.importColumns([]); }
@@ -520,9 +520,12 @@
         return {
             open: open,
             changeScope: changeScope,
-            openScope: function () { return manage("scope"); },
+            assignRole: function (settings) { return manage("role", settings); },
+            cancelPending: operations.cancel,
+            isProcessing: operations.isProcessing,
+            recordFinal: operations.finalize,
             openSourceColumns: function () { return manage("sources"); },
-            dismiss: function () { operations.invalidate(); similarity.reset(); ui.hide(); if (groupReview) groupReview.dismiss(); },
+            dismiss: function () { ui.hide(); },
             reset: function () { if (groupReview) groupReview.dismiss(); similarity.reset(); source = workspace = target = null; lastResults = []; lastFormula = null; ready = false; finalized = null; showFinal(); operations.reset(); ui.reset(); },
             setBusy: function (busy) { ui.busy(busy, ready); operations.busy(busy); similarity.busy(); if (groupReview) groupReview.busy(busy); },
             referenceTarget: referenceTarget,
@@ -535,7 +538,7 @@
                 if (!workspace) return null;
                 await refresh();
                 var sampleRows = await operations.sampleRows();
-                return {workspace_id: workspace.workspace_id,
+                return {workspace_id: workspace.workspace_id, pending_operation: operations.pending(),
                     review_required_column_ids: dependencies.required(workspace),
                     row_filter: workspace.row_filter || null, advice_subject: workspace.advice_subject || (workspace.task_type === "model_normalization" ? "model" : "company"),
                     task_type: workspace.task_type, worksheet_id: workspace.worksheet_id,
@@ -556,16 +559,15 @@
             // openGroups: openGroups, // 묶음 검토 보류(2026-11-18): 재사용 여부 검토 후 불필요하면 삭제. 기존 저장 정보는 보존.
             configureSimilarity: async function (settings) {
                 if (!workspace) throw new Error(window.errorMessages.WORKSPACE_SETUP_REQUIRED);
-                await refresh(); ui.open(workspace.task_type); display([settings.column_id]);
-                similarity.show(workspace, target, settings);
-                ui.status("검사 대상을 확인하고 실행하세요. 결과는 새 시트에 작성합니다.");
+                await refresh();
+                await similarity.run(settings);
             },
             previewOperation: function () { return operations.preview(); },
             recommendExtraction: function () { return operations.recommendExtraction(); },
             configure: async function (operation) {
                 if (!workspace) throw new Error(window.errorMessages.WORKSPACE_SETUP_REQUIRED);
-                await refresh(); ui.open(workspace.task_type); display(operation.column_ids); operations.configure(operation);
-                ui.status(operation.condition ? "현재 데이터에서 조건에 맞는 행을 확인합니다…" : "요청한 설정을 채웠습니다. 대상·조건을 확인하고 ‘변경 내용 확인’을 누르세요.");
+                await refresh(); display(operation.column_ids); operations.configure(operation); ui.hide();
+                ui.status(operation.condition ? "현재 데이터에서 조건에 맞는 행을 확인합니다…" : "현재 데이터로 변경 내용을 계산하고 있어요…");
             },
             recoveryWorkspace: function () { return workspace; },
             recovered: async function (receipt) {
@@ -575,6 +577,7 @@
                 dependencies.register(workspace, {input_ids: [], output_ids: ids, needs_review: true, full: false, scope_key: null});
                 lastResults = ids; finalized = null; ui.review(workspace); await save();
             },
+            resolveFormulaOutput: formula.resolveOutput,
             formulaTarget: formula.formulaTarget,
             validateFormulaSource: formula.validateFormulaSource,
             prepareFormulaOutput: formula.prepareFormulaOutput,

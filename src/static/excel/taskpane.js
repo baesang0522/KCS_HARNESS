@@ -1,38 +1,24 @@
 "use strict";
 (function () {
-    var api = window.apiClient;
-    var workspace = null, formula = null, help = null, documents = null, investigation = null, reviewPreprocess = null;
+    var api = window.apiClient, workspace = null, formula = null, documents = null, investigation = null, reviewPreprocess = null;
+    var agent = null, recovery = null, messages = null, ready = false;
     var connection = document.getElementById('connection');
-    var diagnostic = document.getElementById('diagnostic');
-    var agent = null, recovery = null;
-    var ready = false;
-    var build = (document.querySelector('meta[name="kcs-ui-version"]') || {}).content || "확인 필요";
-    diagnostic.textContent = 'Office 초기화 대기 · ' + navigator.userAgent;
-    if (typeof Office !== 'undefined') {
-        Office.onReady(function (info) {
-            ready = info.host === Office.HostType.Excel;
-            connection.textContent = ready ? 'Excel 연결됨' : '브라우저 미리보기';
-            if (ready) {
-                connection.classList.add('connected');
-            }
-            diagnostic.textContent = '화면 버전: ' + build + '\nHost: ' + info.host + ' / Platform: ' + info.platform + '\n' + navigator.userAgent;
-        });
-    }
-    window.setTimeout(function () {
-        if (!ready) {
-            connection.textContent = 'Excel 연결 미확인 · 화면 사용 가능';
-            diagnostic.textContent += '\nExcel 안에서 이 상태가 지속되면 Office.js 경로·인증서·추가 기능 정책을 확인하세요.';
-        }
-    }, 8000);
+    if (typeof Office !== 'undefined') Office.onReady(function (info) {
+        ready = info.host === Office.HostType.Excel;
+        connection.textContent = ready ? 'Excel 연결됨' : '브라우저 미리보기';
+        if (ready) connection.classList.add('connected');
+    });
     var chat = window.createChatController({
-        api: api,
-        getWorkspace: function () { return workspace; },
-        closeTaskCards: closeTaskCards,
-        resetTasks: function () { workspace.reset(); formula.reset(); updateWorkspaceButton(); },
-        handleUIAction: handleUIAction,
-        runAgent: function (action, request) { return agent.run(action, request); },
+        api: api, getWorkspace: function () { return workspace; }, closeTaskCards: function () { if (workspace) workspace.dismiss(); },
+        resetTasks: function () { if (messages) messages.reset(); if (workspace) workspace.reset(); if (formula) formula.reset(); updateWorkspaceButton(); },
+        handleUIAction: handleAction, runAgent: function (action, request) { return agent.run(action, request); },
         beforeManualAction: function () { if (agent) agent.detach(); },
-        beforeSend: function () { return investigation && investigation.ensureSynced(); },
+        beforeAction: function (action) {
+            if (action && !['document_action', 'open_investigation'].includes(action.type)) return investigation.ensureSynced();
+        },
+        localCommand: localCommand,
+        canStopTask: function () { return workspace && workspace.isProcessing(); },
+        stopTask: function () { if (workspace) workspace.cancelPending(); },
         onConversationChanged: async function (id) {
             if (reviewPreprocess) reviewPreprocess.reset();
             if (recovery) { recovery.reset(); await recovery.refresh(); }
@@ -41,163 +27,103 @@
         onBusy: function (value) {
             if (!value && agent) agent.flush();
             if (documents) documents.updateControls();
-            if (reviewPreprocess) reviewPreprocess.updateControls();
-            if (help) help.updateControls();
             if (workspace) workspace.setBusy(value);
             if (formula) formula.setBusy(value);
+            if (messages) messages.busy();
             updateWorkspaceButton();
         }
     });
+    messages = window.createTaskMessages(chat);
     function updateWorkspaceButton() {
-        var hasWorkspace = workspace && workspace.referenceTarget();
-        var button = document.getElementById("open-workspace");
-        document.getElementById("open-scope").hidden = !hasWorkspace;
-        button.textContent = hasWorkspace ? "열 추가" : "작업 준비";
-        button.title = hasWorkspace ? "원본 열을 현재 작업표에 추가" : "작업표 만들기 또는 저장된 작업 이어가기";
-    }
-    function closeTaskCards() {
-        if (help) help.dismiss();
-        if (workspace) workspace.dismiss();
-        if (formula) formula.dismiss();
+        var hasWorkspace = workspace && workspace.referenceTarget(), button = document.getElementById('open-workspace');
+        button.textContent = hasWorkspace ? '열 추가' : '작업 준비';
+        button.title = hasWorkspace ? '원본 열을 현재 작업표에 추가' : '작업표 만들기 또는 저장된 작업 이어가기';
     }
     function completeTask(text, outcome) {
         if (agent && outcome) agent.complete(outcome, text);
-        closeTaskCards();
-        chat.enterConversation();
-        chat.appendMessage('assistant', text);
+        if (workspace) workspace.dismiss();
+        messages.say(text);
         if (recovery && outcome) recovery.refresh();
     }
-    async function handleUIAction(action, instruction) {
-        closeTaskCards();
-        if (!action) return;
-
-        if (action.type === "change_scope") {
-            completeTask(await workspace.changeScope(action.request, action));
-            return;
+    async function localCommand(text) {
+        if (await messages.command(text)) return true;
+        if (/^(새 조사|새 조사 시작)[.!]?$/.test(text)) {
+            if (agent) await agent.pause();
+            chat.setBusy(true);
+            try { await chat.newConversation(); } finally { chat.setBusy(false); }
+            await workspace.open(); return true;
         }
-        if (action.type === "open_investigation") { await investigation.open(); return; }
-        if (action.type === "open_cleaning_help") {
-            await help.open(action.column_ids);
-            return;
+        if (/^(PDF\s*)?수정 내용 반영[.!]?$/i.test(text)) {
+            messages.reset(); workspace.cancelPending(); formula.dismiss();
+            chat.appendMessage('user', text); await investigation.previewApply(); return true;
         }
-        if (action.type === "open_group_review") {
-            // 묶음 검토 보류: 저장된 예전 응답도 다시 열거나 셀을 쓰지 않는다.
-            // await workspace.openGroups(action.column_ids && action.column_ids[0], action.request);
-            throw new Error("묶음 검토는 현재 사용하지 않습니다. 작업 범위는 상단 ‘작업 범위’에서 지정하세요.");
-        }
-        if (action.type === "configure_similarity") {
-            await workspace.configureSimilarity(action.similarity);
-            return;
-        }
-        if (action.type === "configure_operation") {
-            if (action.operation.kind === "set" && !action.operation.condition) {
-                // await workspace.openGroups(action.operation.column_ids[0], {assigned_value: action.operation.assigned_value});
-                throw new Error("후보를 선택해 표시하는 기능은 보류 중입니다. 조건을 생략한 전체 행 변경은 실행하지 않습니다.");
-            }
-            await workspace.configure(action.operation);
-            return;
-        }
-        if (action.type !== "confirm_selection") throw new Error("지원하지 않는 화면 요청입니다.");
-        if (action.task_type === "formula") {
-            formula.openAndSelect(action.instruction || instruction, {workspace_id: action.workspace_id, column_ids: action.column_ids});
-        } else {
-            await workspace.open(action.task_type);
-        }
+        if (/^최종 결과 기록[.!]?$/.test(text)) { chat.appendMessage('user', text); await workspace.recordFinal(); return true; }
+        if (/^쓰기 결과 확인[.!]?$/.test(text)) { chat.appendMessage('user', text); await recovery.refresh(); return true; }
+        return false;
     }
-
-    document.querySelectorAll('[data-prompt], [data-task]').forEach(function (button) {
-        button.addEventListener('click', async function () {
-            if (chat.isBusy()) return;
-            var task = button.getAttribute('data-task');
-            if (task) { if (agent) await agent.pause(); closeTaskCards(); await workspace.open(task); return; }
-            document.getElementById('message').value = button.getAttribute('data-prompt') || '';
-            await chat.sendMessage();
-        });
+    async function handleAction(action, instruction) {
+        if (!action) return;
+        if (action.type === 'open_investigation') { await investigation.open(); return; }
+        if (action.type === 'open_cleaning_help') { messages.say('정제할 열과 원하는 결과를 채팅으로 알려줘. 데이터에 맞는 방법을 찾으려면 AI 정제 의견을 요청해 줘.'); return; }
+        if (action.type === 'open_group_review') throw new Error('묶음 검토는 보류 중이야. 작업 범위는 채팅으로 지정할 수 있어.');
+        messages.reset();
+        if (action.type === 'formula_output') { await formula.changeOutput(action); return; }
+        workspace.cancelPending(); formula.dismiss();
+        if (action.type === 'document_action') {
+            if (action.action === 'preprocess') await reviewPreprocess.run(action);
+            else if (action.action === 'apply') await investigation.previewApply([action.document_id]);
+            else { var doc = documents.items().find(function (item) { return item.document_id === action.document_id; }); if (!doc) throw new Error('첨부한 PDF를 찾지 못했어.'); await investigation.extract(doc.document_id, doc.filename); }
+            return;
+        }
+        if (action.type === 'workspace_action') { await workspace.assignRole(action); return; }
+        if (action.type === 'change_scope') { completeTask(await workspace.changeScope(action.request, action)); return; }
+        if (action.type === 'configure_similarity') { await workspace.configureSimilarity(action.similarity); return; }
+        if (action.type === 'configure_operation') {
+            if (action.operation.kind === 'set' && !action.operation.condition) throw new Error('후보를 선택해 표시하는 기능은 보류 중이야. 조건 없는 전체 행 변경은 실행하지 않아.');
+            chat.setBusy(true);
+            try { await workspace.configure(action.operation); } finally { chat.setBusy(false); }
+            if (action.operation.kind === 'extract' && !action.operation.extraction_mode) await workspace.recommendExtraction();
+            else await workspace.previewOperation();
+            return;
+        }
+        if (action.type !== 'confirm_selection') throw new Error('지원하지 않는 작업 요청이야.');
+        if (action.task_type === 'formula') formula.openAndSelect(action.instruction || instruction, {workspace_id: action.workspace_id, column_ids: action.column_ids, output: action.output});
+        else await workspace.open(action.task_type);
+    }
+    document.querySelectorAll('[data-task]').forEach(function (button) {
+        button.addEventListener('click', async function () { if (!chat.isBusy()) { if (agent) await agent.pause(); await workspace.open(); } });
     });
-    document.getElementById("open-workspace").addEventListener("click", async function () {
+    document.getElementById('open-workspace').addEventListener('click', async function () {
         if (chat.isBusy()) return;
         if (agent) await agent.pause();
-        if (workspace.referenceTarget()) await workspace.openSourceColumns();
-        else { closeTaskCards(); await workspace.open(); }
+        if (workspace.referenceTarget()) await workspace.openSourceColumns(); else await workspace.open();
     });
-    document.getElementById("open-scope").addEventListener("click", async function () {
-        if (!chat.isBusy() && workspace.referenceTarget()) { if (agent) await agent.pause(); await workspace.openScope(); }
-    });
-    document.querySelectorAll('[data-close-task]').forEach(function (button) {
-        button.addEventListener('click', async function () { if (!chat.isBusy()) { if (agent) await agent.pause(); closeTaskCards(); } });
-    });
-
-    recovery = window.createWriteRecovery({api: api, getConversationId: chat.getConversationId, getWorkspace: function () { return workspace && workspace.referenceTarget(); },
-        isBusy: chat.isBusy, setBusy: chat.setBusy, onRecovered: function (receipt) { return workspace.recovered(receipt); }});
-    workspace = window.createWorkspaceController({
-        recovery: recovery,
-        api: api,
-        enterConversation: chat.enterConversation,
-        showWorkspace: closeTaskCards,
-        complete: completeTask,
-        onJobCreated: function (kind, id) { return agent && agent.bind(kind, id); },
-        isBusy: chat.isBusy,
-        setBusy: chat.setBusy,
-        getConversationId: chat.getConversationId,
-        newInvestigation: chat.newConversation,
+    document.querySelectorAll('[data-close-task]').forEach(function (button) { button.addEventListener('click', function () { if (!chat.isBusy()) workspace.dismiss(); }); });
+    recovery = window.createWriteRecovery({messages: messages, api: api, getConversationId: chat.getConversationId,
+        getWorkspace: function () { return workspace && workspace.referenceTarget(); }, isBusy: chat.isBusy, setBusy: chat.setBusy,
+        onRecovered: function (receipt) { return workspace.recovered(receipt); }});
+    workspace = window.createWorkspaceController({messages: messages, recovery: recovery, api: api,
+        enterConversation: chat.enterConversation, showWorkspace: function () { workspace.dismiss(); }, complete: completeTask,
+        onJobCreated: function (kind, id) { return agent && agent.bind(kind, id); }, isBusy: chat.isBusy, setBusy: chat.setBusy,
+        getConversationId: chat.getConversationId, newInvestigation: chat.newConversation,
         beforeWorkspaceChange: function (target) { if (investigation) investigation.validateWorkspace(target); },
-        onWorkspaceReady: async function (target) {
-            updateWorkspaceButton();
-            if (investigation) await investigation.bind(target);
-            if (recovery) await recovery.refresh();
-        }
+        onWorkspaceReady: async function (target) { updateWorkspaceButton(); if (investigation) await investigation.bind(target); if (recovery) await recovery.refresh(); }
     });
-    formula = window.createFormulaController({
-        recovery: recovery, recoveryWorkspace: workspace.recoveryWorkspace,
-        ui: window.createFormulaUI({
-            conversation: document.getElementById('conversation'),
-            scrollArea: document.querySelector('main'),
-            enterConversation: chat.enterConversation,
-            appendMessage: chat.appendMessage
-        }),
-        api: api,
-        excel: window.formulaSheet,
-        beginRequest: chat.beginRequest,
-        endRequest: chat.endRequest,
-        checkRequest: chat.checkRequest,
-        reportStop: chat.reportStop,
-        getTarget: workspace.formulaTarget,
-        prepareOutput: workspace.prepareFormulaOutput,
-        validateSource: workspace.validateFormulaSource,
-        getResultColumns: workspace.formulaResultColumns,
-        onResult: workspace.formulaResult,
-        complete: completeTask,
-        onJobCreated: function (kind, id) { return agent && agent.bind(kind, id); },
-        isReady: function () { return ready; },
-        isBusy: chat.isBusy,
-        setBusy: chat.setBusy,
-        getConversationId: chat.getConversationId
+    formula = window.createFormulaController({recovery: recovery, recoveryWorkspace: workspace.recoveryWorkspace,
+        ui: window.createFormulaUI(messages), api: api, excel: window.formulaSheet,
+        beginRequest: chat.beginRequest, endRequest: chat.endRequest, checkRequest: chat.checkRequest, reportStop: chat.reportStop,
+        getTarget: workspace.formulaTarget, prepareOutput: workspace.prepareFormulaOutput, validateSource: workspace.validateFormulaSource,
+        getResultColumns: workspace.formulaResultColumns, onResult: workspace.formulaResult, resolveOutput: workspace.resolveFormulaOutput,
+        complete: completeTask, onJobCreated: function (kind, id) { return agent && agent.bind(kind, id); },
+        isReady: function () { return ready; }, isBusy: chat.isBusy, setBusy: chat.setBusy, getConversationId: chat.getConversationId
     });
-    help = window.createCleaningHelp({
-        workspace: workspace, isBusy: chat.isBusy, setBusy: chat.setBusy,
-        closeTaskCards: closeTaskCards, enterConversation: chat.enterConversation,
-        sendMessage: chat.sendMessage
-    });
-    investigation = window.createInvestigationController({
-        api: api, getWorkspace: workspace.referenceTarget,
-        onChanged: function () { if (documents) documents.render(); },
-        isBusy: chat.isBusy, setBusy: chat.setBusy,
-        beginRequest: chat.beginRequest, endRequest: chat.endRequest,
-        checkRequest: chat.checkRequest, reportStop: chat.reportStop
-    });
-    reviewPreprocess = window.createReviewPreprocess({
-        api: api, getConversationId: chat.getConversationId, isBusy: chat.isBusy, setBusy: chat.setBusy,
-        closeTaskCards: closeTaskCards
-    });
-    documents = window.createDocumentsController({
-        readConditions: investigation.extract, preprocessReview: reviewPreprocess.open,
-        beforeUpload: investigation.prepare, reviewInfo: investigation.info, applyReview: investigation.apply,
-        api: api, getWorkspace: workspace.referenceTarget,
-        isBusy: chat.isBusy, setBusy: chat.setBusy,
-        beginRequest: chat.beginRequest, endRequest: chat.endRequest,
-        checkRequest: chat.checkRequest, reportStop: chat.reportStop
-    });
-    agent = window.createAgentController({api: api, chat: chat, getWorkspace: function () { return workspace; },
-        beforeRead: function () { return investigation.ensureSynced(); }, handleUIAction: handleUIAction});
+    investigation = window.createInvestigationController({messages: messages, api: api, getWorkspace: workspace.referenceTarget,
+        onChanged: function () { if (documents) documents.render(); }, isBusy: chat.isBusy, setBusy: chat.setBusy,
+        beginRequest: chat.beginRequest, endRequest: chat.endRequest, checkRequest: chat.checkRequest, reportStop: chat.reportStop});
+    reviewPreprocess = window.createReviewPreprocess({messages: messages, api: api, getConversationId: chat.getConversationId, isBusy: chat.isBusy, setBusy: chat.setBusy});
+    documents = window.createDocumentsController({readConditions: investigation.extract, beforeUpload: investigation.prepare, reviewInfo: investigation.info,
+        api: api, getWorkspace: workspace.referenceTarget, isBusy: chat.isBusy, setBusy: chat.setBusy,
+        beginRequest: chat.beginRequest, endRequest: chat.endRequest, checkRequest: chat.checkRequest, reportStop: chat.reportStop});
+    agent = window.createAgentController({api: api, chat: chat, getWorkspace: function () { return workspace; }, beforeRead: investigation.ensureSynced, handleUIAction: handleAction});
     chat.initialize();
 })();

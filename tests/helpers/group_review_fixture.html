@@ -1,0 +1,46 @@
+<script id="server-error-messages" type="application/json"></script>
+<div id="conversation"></div>
+<section class="normalization-panel" id="gr-panel" aria-labelledby="gr-title" hidden>
+        <h2 id="gr-title" tabindex="-1">묶음 검토 · 기업 / 모델 / 직접 만든 열</h2>
+        <button type="button" data-close-task>카드 닫기</button>
+        <p>필요한 기능만 골라 진행하세요. 묶음 저장·확정은 셀을 바꾸지 않습니다.</p>
+        <label>저장된 묶음 기준 <select id="gr-saved"></select></label>
+        <label>묶을 열 <select id="gr-column"></select></label>
+        <details><summary>판단에 참고할 열 선택</summary><div id="gr-references"></div></details>
+        <label>후보를 찾을 범위 <select id="gr-scope"><option value="all">작업표 전체 · 대상 확대</option><option value="current">현재 작업 조건에 맞는 행</option></select></label>
+        <button type="button" id="gr-load">현재 값 불러오기 / 변경 확인</button>
+        <div id="gr-work" hidden>
+          <p id="gr-count"></p>
+          <label>값·참고 정보 검색 <input type="text" id="gr-search" maxlength="200"></label>
+          <div id="gr-values" class="gr-list"></div>
+          <p id="gr-selection" role="status"></p>
+          <button type="button" id="gr-clear">선택 해제 · 새 묶음</button>
+          <details id="gr-comparison"><summary>선택한 기준값과 후보 비교</summary>
+            <label>찾을 기준값 <input type="text" id="gr-query" maxlength="200" placeholder="예: JIANGSU SHAGANG INTL TRADE"></label>
+            <p id="gr-base">값 목록의 ‘비교 기준’을 선택하세요.</p>
+            <label><input type="checkbox" id="gr-normalize"> 비교할 때만 공백·대소문자 정리</label>
+            <label><input type="checkbox" id="gr-same"> 참고 열 값이 모두 같은 후보만</label>
+            <label>비교 방식 <select id="gr-method"><option value="levenshtein">철자 차이</option><option value="sequence">공통 문자열</option></select></label>
+            <button type="button" id="gr-compare">유사 후보 찾기</button>
+            <div id="gr-candidates" class="gr-list"></div>
+            <button type="button" id="gr-reset-rejected">‘다른 대상’ 판단 지우고 다시 검토</button>
+          </details>
+          <label>대표명 <input type="text" id="gr-name" maxlength="200"></label>
+          <button type="button" id="gr-save">선택한 값으로 묶음 저장</button>
+          <p>수정 중인 묶음에서 체크를 풀고 저장하면 해당 값이 빠집니다. 묶음 해제도 기존 셀 값은 되돌리지 않습니다.</p>
+          <div id="gr-groups"></div>
+          <button type="button" id="gr-output-open">선택한 확정 묶음의 반영 설정</button>
+          <section id="gr-output" hidden>
+            <label>반영 내용 <select id="gr-output-kind"><option value="name">묶음 대표명</option><option value="mark">조사 대상 표시값</option></select></label>
+            <p>표시값을 비우면 선택한 행의 대상 셀을 비웁니다.</p>
+            <label>표시할 값 <input type="text" id="gr-mark" value="Y" maxlength="32767"></label>
+            <label>저장할 열 <select id="gr-destination"></select></label>
+            <label>새 열 이름 <input type="text" id="gr-output-name" value="검토 묶음" maxlength="200"></label>
+            <button type="button" id="gr-preview">변경 내용 확인</button>
+            <p id="gr-preview-text" role="status"></p>
+            <button type="button" id="gr-apply" disabled>확인한 내용 반영</button>
+            <button type="button" id="gr-filter" disabled>방금 표시한 값으로 후속 작업 범위 설정</button>
+          </section>
+        </div>
+        <p id="gr-status" role="status" aria-live="polite"></p>
+      </section>

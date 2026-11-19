@@ -106,7 +106,26 @@ class ScopeRequest(StrictModel):
         return self
 
 
+class OperationOutput(StrictModel):
+    mode: Literal["new", "existing"] = "new"
+    column_id: ColumnId | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    anchor: ColumnId | None = None
+    side: Literal["before", "after"] = "after"
+
+    @model_validator(mode="after")
+    def validate_output(self):
+        if self.mode == "existing" and not self.column_id:
+            raise ValueError("반영할 기존 열 ID를 지정하세요.")
+        if self.mode == "new" and self.column_id is not None:
+            raise ValueError("새 열에는 기존 대상 열 ID를 지정하지 마세요.")
+        if self.name is not None and not self.name.strip():
+            raise ValueError("결과 열 이름은 비어 있을 수 없습니다.")
+        return self
+
+
 class Operation(StrictModel):
+    output: OperationOutput | None = None
     kind: Literal["preprocess", "split", "group", "replace", "map", "extract", "set"]
     column_ids: list[ColumnId] = Field(min_length=1, max_length=20)
     rules: list[Rule] = Field(default_factory=list, max_length=10)
@@ -252,6 +271,7 @@ class SampleRow(StrictModel):
 
 
 class WorkspaceContext(StrictModel):
+    pending_operation: Operation | None = None
     row_start: int | None = Field(default=None, ge=0, lt=1048576)
     workspace_id: UUID
     worksheet_id: str = Field(min_length=1, max_length=256)
