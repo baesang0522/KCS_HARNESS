@@ -19,7 +19,7 @@
                 });
             }
         }
-        function complete(text) { invalidate(); options.complete(text); }
+        function complete(text, outcome) { invalidate(); options.complete(text, outcome); }
         async function sampleRows() {
             if (!workspace || !target) return [];
             if (!ui.targets().length) return [];
@@ -118,7 +118,8 @@
                     await options.jobs.status(job, "NO_CHANGE");
                     complete(
                         snapshot.rows.length.toLocaleString() +
-                        "행을 확인했습니다. 적용 조건에 따른 변경이 없어 작업을 마쳤습니다."
+                        "행을 확인했습니다. 적용 조건에 따른 변경이 없어 작업을 마쳤습니다.",
+                        {kind: "operation", job_id: job.source.operation_job_id, status: "SUCCEEDED"}
                     );
                     return;
                 }
@@ -151,7 +152,7 @@
 
                 console.error("[operations.build]", error);
 
-                complete(error.message || String(error));
+                complete(error.message || String(error), job && {kind: "operation", job_id: job.source.operation_job_id, status: "FAILED"});
             } finally {
                 processing = false;
                 abort = null;
@@ -264,7 +265,8 @@
 
                 complete(
                     result.row_count.toLocaleString() +
-                    "행의 결과를 작성하고 실행 기록을 저장했습니다."
+                    "행의 결과를 작성하고 실행 기록을 저장했습니다.",
+                    {kind: "operation", job_id: data.job.source.operation_job_id, status: "SUCCEEDED"}
                 );
             } catch (error) {
                 if (!applyRequested) {
@@ -288,7 +290,7 @@
                         ? "결과가 일부 작성됐을 수 있습니다. 시트를 확인하세요. "
                         : "적용 시작을 확인하지 못해 Excel 쓰기를 진행하지 않았습니다. ";
 
-                complete(message + error.message + recordMessage);
+                complete(message + error.message + recordMessage, {kind: "operation", job_id: data.job.source.operation_job_id, status: "UNKNOWN"});
             } finally {
                 options.setBusy(false);
             }

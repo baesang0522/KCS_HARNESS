@@ -324,6 +324,10 @@
                 }
 
                 checkChat(run);
+                if (reply.ui_action && reply.ui_action.type === "agent_run" && options.runAgent) {
+                    reply = await options.runAgent(reply.ui_action, run);
+                    checkChat(run);
+                } else if (options.beforeManualAction) options.beforeManualAction();
                 activeRequest = null;
                 setBusy(true);
                 pendingRequest = null;

@@ -54,6 +54,36 @@ def build_task_context(state, formula_jobs: dict, *, operation_jobs: dict,
     }
 
 
+def decision_action(decision, workspace):
+    action = None
+    answer = decision.answer
+    if decision.intent == "start_task":
+        action = {"type": "confirm_selection", "task_type": decision.task_type}
+        if decision.formula_instruction:
+            action["instruction"] = decision.formula_instruction
+        if decision.task_type == "formula" and workspace:
+            action.update(workspace_id=str(workspace["workspace_id"]), column_ids=decision.formula_column_ids)
+    elif decision.intent == "scope":
+        action = {"type": "change_scope", "workspace_id": str(workspace["workspace_id"]),
+                  "request": decision.scope_change.model_dump(), "expected_filter": workspace.get("row_filter")}
+    elif decision.intent == "operation":
+        action = {"type": "configure_operation", "operation": decision.operation.model_dump()}
+    elif decision.intent == "similarity":
+        action = {"type": "configure_similarity", "similarity": decision.similarity.model_dump()}
+    elif decision.intent == "group_review":
+        # 묶음 검토 보류: 재사용 여부 검토 후 아래 연결과 보관 코드를 삭제한다.
+        # action = {"type": "open_group_review", "column_ids": decision.analysis_column_ids,
+        #           "request": decision.group_review_request.model_dump() if decision.group_review_request else None}
+        answer = "묶음 검토는 현재 사용하지 않습니다. 작업 범위는 상단 ‘작업 범위’에서 지정하세요."
+    elif decision.intent == "cleaning_help":
+        action = {"type": "open_cleaning_help", "column_ids": decision.analysis_column_ids}
+    elif decision.intent == "investigation":
+        action = {"type": "open_investigation"}
+    elif decision.intent == "recommendation":
+        action = {"type": "analyze_data", "column_ids": decision.analysis_column_ids}
+    return action, answer
+
+
 async def process_chat(*, runtime, repository, formula_jobs: dict, operation_jobs: dict, conversation_id: str,
                        request_id: str, message: str, workspace=None, advice_requested: bool = False) -> dict:
     async with repository.edit(conversation_id) as conversation:
@@ -80,6 +110,8 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
             context = build_task_context(state, formula_jobs, operation_jobs=operation_jobs,
                                          conversation_id=conversation_id, workspace=workspace,
                                          investigation=investigation_context(conversation, workspace))
+            from services.agent_runs import active_context
+            context["agent_run"] = active_context(conversation, workspace)
             if advice_requested:
                 decision = RequestDecision(
                     intent="recommendation",
@@ -89,28 +121,16 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
             else:
                 decision, reasoning = await route_request(runtime, messages, task_context=context)
             answer = decision.answer
-            if decision.intent == "start_task":
-                action = {"type": "confirm_selection", "task_type": decision.task_type}
-                if decision.task_type == "formula" and workspace:
-                    action.update(workspace_id=str(workspace["workspace_id"]), column_ids=decision.formula_column_ids)
-            elif decision.intent == "scope":
-                action = {"type": "change_scope", "workspace_id": str(workspace["workspace_id"]),
-                          "request": decision.scope_change.model_dump(), "expected_filter": workspace.get("row_filter")}
-            elif decision.intent == "operation":
-                action = {"type": "configure_operation", "operation": decision.operation.model_dump()}
-            elif decision.intent == "similarity":
-                action = {"type": "configure_similarity", "similarity": decision.similarity.model_dump()}
-            elif decision.intent == "group_review":
-                # 묶음 검토 보류: 재사용 여부 검토 후 아래 연결과 보관 코드를 삭제한다.
-                # action = {"type": "open_group_review", "column_ids": decision.analysis_column_ids,
-                #           "request": decision.group_review_request.model_dump() if decision.group_review_request else None}
-                answer = "묶음 검토는 현재 사용하지 않습니다. 작업 범위는 상단 ‘작업 범위’에서 지정하세요."
-            elif decision.intent == "cleaning_help":
-                action = {"type": "open_cleaning_help", "column_ids": decision.analysis_column_ids}
-            elif decision.intent == "investigation":
-                action = {"type": "open_investigation"}
-            elif decision.intent == "recommendation":
-                action = {"type": "analyze_data", "column_ids": decision.analysis_column_ids}
+            if decision.intent == "agent":
+                from services.agent_runs import start_run
+                run = start_run(conversation, decision, workspace, message, operation_jobs, formula_jobs, request_id)
+                action = {"type": "agent_run", "run_id": run.id}
+            else:
+                from services.agent_runs import pause_active
+                pause_active(conversation)
+                action, answer = decision_action(decision, workspace)
+        except ConflictError:
+            raise
         except Exception as error:
             logger.exception("채팅 처리 실패: conversation_id=%s", conversation_id)
             raise ModelProcessingError(MODEL_RESPONSE_ERROR) from error

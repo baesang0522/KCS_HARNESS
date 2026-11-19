@@ -252,6 +252,7 @@ class SampleRow(StrictModel):
 
 
 class WorkspaceContext(StrictModel):
+    row_start: int | None = Field(default=None, ge=0, lt=1048576)
     workspace_id: UUID
     worksheet_id: str = Field(min_length=1, max_length=256)
     table_id: str = Field(min_length=1, max_length=256)

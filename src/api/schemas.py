@@ -25,6 +25,7 @@ class ChatRequest(BaseModel):
 
 
 class ConfirmSelectionAction(BaseModel):
+    instruction: str | None = None
     type: Literal["confirm_selection"]
     task_type: Literal[
         "investigation", "model_normalization",
@@ -72,6 +73,11 @@ class OpenInvestigationAction(BaseModel):
     type: Literal["open_investigation"]
 
 
+class AgentAction(BaseModel):
+    type: Literal["agent_run"]
+    run_id: UUID
+
+
 UIAction = Annotated[
     ConfirmSelectionAction
     | ConfigureOperationAction
@@ -80,7 +86,8 @@ UIAction = Annotated[
     | OpenCleaningHelpAction
     | OpenGroupReviewAction
     | OpenInvestigationAction
-    | ChangeScopeAction,
+    | ChangeScopeAction
+    | AgentAction,
     Field(discriminator="type"),
 ]
 

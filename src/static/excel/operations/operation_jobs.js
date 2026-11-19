@@ -1,7 +1,7 @@
 "use strict";
 
 (function () {
-    window.createOperationJobs = function (api, getConversationId) {
+    window.createOperationJobs = function (api, getConversationId, onJobCreated) {
         function post(path, body, signal) {
             return api.requestJson(path, {
                 method: "POST",
@@ -20,9 +20,9 @@
         }
 
         return {
-            create: function (workspace, target, operation) {
+            create: async function (workspace, target, operation) {
                 var models = workspace.columns.filter(function (column) { return column.role === "model_spec"; });
-                return post("/operation-jobs", {
+                var job = await post("/operation-jobs", {
                     operation_job_id: api.newRequestId(),
                     conversation_id: getConversationId(),
                     workspace_id: workspace.workspace_id,
@@ -35,6 +35,8 @@
                     row_count: target.row_count,
                     operation: operation
                 });
+                if (onJobCreated) await onJobCreated("operation", job.source.operation_job_id);
+                return job;
             },
 
             preview: function (job, rows, signal, selectedCount) {

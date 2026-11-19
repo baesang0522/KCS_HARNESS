@@ -18,7 +18,8 @@
         var dependencies = window.resultDependencies;
         var jobs = window.createOperationJobs(
             options.api,
-            options.getConversationId
+            options.getConversationId,
+            options.onJobCreated
         );
         var formula = window.createWorkspaceFormula({
             getWorkspace: function () { return workspace; },
@@ -356,13 +357,16 @@
                 options.setBusy(wasBusy);
             }
         }
-        async function changeScope(request, expected) {
+        async function changeScope(request, expected, check) {
+            check = check || function () {};
+            check();
             if (!workspace) throw new Error("먼저 작업 시트를 준비하세요.");
             var sheet = window.operationsSheet;
             if (expected && (expected.workspace_id !== workspace.workspace_id || sheet.filterKey(expected.expected_filter) !== sheet.filterKey(workspace.row_filter))) {
                 throw new Error("작업표나 범위가 바뀌었습니다. 범위 변경을 다시 요청하세요.");
             }
             await refresh();
+            check();
             if (!["replace", "include", "exclude", "clear"].includes(request.mode)) throw new Error("지원하지 않는 범위 변경입니다.");
             var filter = request.condition;
             if (request.mode !== "clear") {
@@ -374,7 +378,7 @@
             var previous = workspace.row_filter || null, previousTarget = target;
             var next = request.mode === "clear" ? null : filter, nextTarget = target;
             if (["include", "exclude"].includes(request.mode)) {
-                var current = await sheet.read(workspace, target, [], function () {}, function () {}, null, null, null, null, true);
+                var current = await sheet.read(workspace, target, [], function () {}, check, null, null, null, null, true);
                 next = previous && previous.steps && !current.range_ids ? JSON.parse(JSON.stringify(previous)) : {base: previous, steps: [], base_ids: current.range_ids};
                 // 정렬 후에도 기존 선택 행을 유지하고, 추가 조건은 전체 작업표에서 찾는다.
                 next.steps.push({mode: request.mode, condition: filter});
@@ -386,7 +390,8 @@
                 });
                 nextTarget = Object.assign({}, target, whole);
             }
-            var selected = await sheet.read(Object.assign({}, workspace, {row_filter: next}), nextTarget, [], function () {}, function () {}, null, null, null, null, true);
+            var selected = await sheet.read(Object.assign({}, workspace, {row_filter: next}), nextTarget, [], function () {}, check, null, null, null, null, true);
+            check();
             operations.invalidate(); lastFormula = finalized = null;
             workspace.row_filter = next; target = nextTarget;
             try { await save(); } catch (error) { workspace.row_filter = previous; target = previousTarget; workspace.target = previousTarget; throw error; }
@@ -511,6 +516,11 @@
             reset: function () { if (groupReview) groupReview.dismiss(); similarity.reset(); source = workspace = target = null; lastResults = []; lastFormula = null; ready = false; finalized = null; operations.reset(); ui.reset(); },
             setBusy: function (busy) { ui.busy(busy, ready); operations.busy(busy); similarity.busy(); if (groupReview) groupReview.busy(busy); },
             referenceTarget: referenceTarget,
+            agentInput: async function () {
+                if (!workspace || !target) throw new Error("먼저 작업표를 준비하세요.");
+                await refresh();
+                return {workspace: workspace, target: target};
+            },
             context: async function () {
                 if (!workspace) return null;
                 await refresh();
@@ -519,7 +529,7 @@
                     review_required_column_ids: dependencies.required(workspace),
                     row_filter: workspace.row_filter || null, advice_subject: workspace.advice_subject || (workspace.task_type === "model_normalization" ? "model" : "company"),
                     task_type: workspace.task_type, worksheet_id: workspace.worksheet_id,
-                    table_id: String(workspace.table_id), sheet_name: workspace.sheet_name, row_count: target.row_count,
+                    table_id: String(workspace.table_id), sheet_name: workspace.sheet_name, row_count: target.row_count, row_start: target.row_start,
                     columns: workspace.columns.map(function (c) { return {column_id: String(c.column_id), header: c.header,
                         role: c.role, description: c.description || ""}; }),
                     target_column_ids: operations.targets(), last_result_column_ids: lastResults,

@@ -18,7 +18,7 @@ async function run(failedReport) {
     vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../src/static/excel/operations/operations.js'),'utf8'),{window,console,AbortController});
     const controller=window.createOperations({api:{},isBusy:()=>false,setBusy(){},refresh:async()=>false,
         status(){},complete(){},changed(){},result:async()=>events.push('register'),
-        jobs:{create:async()=>({}),preview:async(job,rows)=>({headers:['결과'],changed_count:1,
+        jobs:{create:async()=>({source:{operation_job_id:"job"}}),preview:async(job,rows)=>({headers:['결과'],changed_count:1,
             rows:rows.map(row=>({...row,values:[row.values[0].replace('X','Y')]}))}),
             beginApply:async()=>events.push('APPLYING'),status:async(job,status)=>{
                 events.push(status);if(status==='APPLIED'&&failedReport)throw new Error('lost report');

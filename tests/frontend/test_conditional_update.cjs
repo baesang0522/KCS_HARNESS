@@ -158,3 +158,12 @@ test('current scope processes beyond 10,000 rows including the last matching row
     assert.equal(f.sheet.cells.slice(1).filter(r=>r[2]==='재확인').length,5001);
     assert.equal(f.sheet.cells.slice(1).filter(r=>r[2]==='keep').length,5001);
 });
+
+test('agent scope cancellation leaves the saved filter and all cells unchanged',async()=>{
+    const f=await fixture(),before=structuredClone(f.sheet.cells),scope=structuredClone(f.getStored().row_filter);
+    let checks=0;
+    await assert.rejects(f.controller.changeScope({mode:'clear',condition:null},null,()=>{
+        if(++checks===3)throw new Error('cancel scope');
+    }),/cancel scope/);
+    assert.deepEqual(f.getStored().row_filter,scope);assert.deepEqual(f.sheet.cells,before);
+});
