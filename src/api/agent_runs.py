@@ -1,4 +1,6 @@
 from uuid import UUID
+from time import perf_counter
+from services.debug_log import log_event
 from fastapi import APIRouter, Request
 from services import agent_runs as service
 
@@ -16,10 +18,22 @@ async def current_run(conversation_id: UUID, request: Request):
 async def advance(conversation_id: UUID, run_id: UUID, payload: service.Advance, request: Request):
     state = request.app.state
     cid = str(conversation_id)
-    async with state.conversations.request(cid, str(payload.request_id)):
-        async with state.conversations.edit(cid) as conversation:
-            return await service.advance(conversation=conversation, conversation_id=cid, run_id=run_id,
-                payload=payload, runtime=state.runtime, operation_jobs=state.operation_jobs, formula_jobs=state.formula_jobs)
+    ids = {"conversation_id": cid, "request_id": str(payload.request_id), "run_id": str(run_id)}
+    started = perf_counter()
+    log_event("agent.advance.received", **ids, payload=payload.model_dump(mode="json"))
+    try:
+        async with state.conversations.request(cid, str(payload.request_id)):
+            async with state.conversations.edit(cid) as conversation:
+                result = await service.advance(conversation=conversation, conversation_id=cid, run_id=run_id,
+                    payload=payload, runtime=state.runtime, operation_jobs=state.operation_jobs, formula_jobs=state.formula_jobs)
+    except Exception as error:
+        log_event("agent.advance.failed", level="ERROR", **ids,
+                  error_type=type(error).__name__, error_message=str(error),
+                  elapsed_ms=round((perf_counter() - started) * 1000))
+        raise
+    log_event("agent.advance.completed", **ids, result=result,
+              elapsed_ms=round((perf_counter() - started) * 1000))
+    return result
 
 
 @router.post("/{run_id}/bind")

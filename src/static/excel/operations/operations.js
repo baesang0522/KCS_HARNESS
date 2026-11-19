@@ -40,13 +40,19 @@
         }
         function check() { if (cancelled) throw new Error("처리를 취소했습니다. 시트는 변경하지 않았습니다."); }
         function progress(phase, done, total) { options.status(phase + " · " + done.toLocaleString() + "/" + total.toLocaleString() + "행. 완료 전에는 편집·정렬을 기다려 주세요."); }
-        async function build() {
+        async function build(automatic, verify) {
+            automatic = automatic === true;
             if (options.isBusy() || !target) return;
             options.setBusy(true);
             var job = null;
             try {
                 if (await options.refresh()) { complete("삭제된 대상 열을 제외했습니다. 채팅으로 다음 처리할 열을 알려주세요."); return; }
                 var operation = ui.operation(); invalidate(); processing = true; cancelled = false;
+                if (automatic && (!operation || operation.kind !== "set" || !operation.condition ||
+                    operation.condition.operator !== "equals" || operation.condition_scope !== "current" ||
+                    !operation.destination_column_id || typeof verify !== "function")) {
+                    throw new Error("대표 부호 연결만 바로 반영할 수 있습니다.");
+                }
                 if (!operation) { complete("선택한 전처리 규칙이 없어 변경 없이 작업을 마쳤습니다."); return; }
                 var cancellationError = await retirement; if (cancellationError) throw cancellationError;
                 abort = new AbortController();
@@ -140,9 +146,9 @@
                     unique_count: operation.kind === "match_suppliers" ? comparisonRows.filter(function (row) { return row.values[0].trim(); }).length : null
                 };
                 if (ui.output().mode === "existing" && operation.kind === "split" && headers.length !== 1) throw new Error("여러 열로 분리하는 결과는 새 열에 저장해야 해요. 새 열로 다시 요청해 주세요.");
-                ui.preview(preview); options.status(operation.condition
+                if (!automatic) { ui.preview(preview); options.status(operation.condition
                     ? "변경 내용을 확인하고 적용하세요. 조건을 바꾸려면 채팅으로 요청하세요."
-                    : "변경 내용과 결과 위치를 확인하세요. 기존 열을 선택하면 해당 열의 대상 셀 값이 바뀝니다.");
+                    : "변경 내용과 결과 위치를 확인하세요. 기존 열을 선택하면 해당 열의 대상 셀 값이 바뀝니다."); }
             } catch (error) {
                 if (job) {
                     try {
@@ -166,6 +172,7 @@
                 abort = null;
                 options.setBusy(false);
             }
+            if (automatic && preview) await apply(verify, true);
         }
         function resultDescription(data, index) {
             var operation = data.operation;
@@ -225,7 +232,7 @@
                 " / 생성 시 처리: " + short(action, 450) +
                 " / 원본 설명: " + short(previous && previous.description || "미입력", 250);
         }
-        async function apply() {
+        async function apply(verify, automatic) {
             if (options.isBusy() || !preview) return;
 
             var data = preview;
@@ -235,6 +242,8 @@
             var writeStarted = false;
 
             try {
+                options.setBusy(true);
+                if (automatic) { check(); await verify(); check(); }
                 if (data.operation.kind === "match_suppliers" && options.beforeApply) await options.beforeApply();
                 var output = ui.output();
                 var writeValues = data.values, writeSnapshot = data.snapshot;
@@ -266,6 +275,7 @@
 
                 if (output.mode === "existing") names = [output.column_id].concat(output.score_column_id ? [output.score_column_id] : []).map(function (id) { return data.snapshot.output_columns.find(function (c) { return String(c.column_id) === id; }).header; });
                 var dependencyRecord = options.prepareResult ? await options.prepareResult(data.snapshot, output) : null;
+                if (automatic) check();
                 invalidate(true);
                 applyRequested = true;
                 await options.jobs.beginApply(data.job, output);
@@ -297,7 +307,12 @@
                 );
             } catch (error) {
                 if (!applyRequested) {
-                    options.status(error.message);
+                    if (automatic) {
+                        invalidate(true);
+                        try { await options.jobs.status(data.job, cancelled ? "CANCELLED" : "FAILED"); }
+                        catch (recordError) { error.message += " · 실행 상태 기록 실패: " + recordError.message; }
+                        complete(error.message, {kind: "operation", job_id: data.job.source.operation_job_id, status: "FAILED"});
+                    } else options.status(error.message);
                     return;
                 }
 

@@ -4,6 +4,7 @@ import json
 import unittest
 from types import SimpleNamespace
 from uuid import uuid4
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -77,7 +78,7 @@ class AgentTests(unittest.TestCase):
 
     def create_job(self,state):
         source=dict(operation_job_id=str(uuid4()),conversation_id=self.cid,workspace_id=self.workspace['workspace_id'],
-            worksheet_id='sheet',table_id='table',task_type='investigation',row_start=1,row_count=3,
+            worksheet_id='sheet',table_id='table',task_type='investigation',row_start=1,row_count=self.workspace['row_count'],row_filter=self.workspace.get('row_filter'),
             operation=state['step']['action']['operation'])
         response=self.client.post('/operation-jobs',json=source)
         self.assertEqual(response.status_code,200,response.text)
@@ -88,6 +89,22 @@ class AgentTests(unittest.TestCase):
 
     def write_step(self):
         return self.advance('update_matching_rows',dict(condition_column_id='name',operator='equals',value='AA',destination_column_id='flag',assigned_value='Y'))
+
+    def test_console_logs_link_tools_to_excel_receipts(self):
+        with patch("builtins.print") as output:
+            self.start()
+            first = self.read()
+            self.advance('answer_question', dict(answer='실제 결과 확인 완료'), self.receipt(first, rows=self.rows))
+        events = [json.loads(call.args[0]) for call in output.call_args_list]
+        received = [item for item in events if item['event'] == 'agent.advance.received'][-1]
+        self.assertEqual(received['payload']['receipt']['rows'], self.rows)
+        self.assertEqual(received['payload']['receipt']['step_id'], first['step']['step_id'])
+        tool = next(item for item in events if item['event'] == 'tool.started' and item['tool_name'] == 'answer_question')
+        self.assertEqual(tool['conversation_id'], self.cid)
+        self.assertEqual(tool['request_id'], received['request_id'])
+        self.assertEqual(tool['run_id'], self.rid)
+        completed = [item for item in events if item['event'] == 'agent.advance.completed'][-1]
+        self.assertEqual(completed['result']['status'], 'COMPLETED')
 
     def test_full_read_compare_result_loop_and_duplicate_receipt(self):
         self.start();first=self.read()
@@ -179,8 +196,10 @@ class AgentTests(unittest.TestCase):
 
     def test_repeat_and_iteration_guards_pause_without_claiming_completion(self):
         self.start();state=self.read()
+        self.queue.append(('read_workspace',dict(column_ids=['name'])))
         again=self.advance('read_workspace',dict(column_ids=['name']),self.receipt(state,rows=self.rows))
-        self.assertEqual(again['status'],'PAUSED');self.assertIn('반복',again['answer'])
+        self.assertEqual(again['status'],'PAUSED');self.assertIn('중복 조회',again['answer'])
+        self.assertIsNone(again['step']);self.assertEqual(len(self.agent_run.read_results),1)
         self.start();self.agent_run.steps=MAX_STEPS
         limited=self.advance();self.assertEqual(limited['status'],'PAUSED')
 
@@ -265,3 +284,115 @@ class AgentTests(unittest.TestCase):
         self.start();state=self.read()
         result=self.advance(receipt=self.receipt(state,rows=[dict(identity=1,excel_row=100,values=['AA'])]))
         self.assertEqual(result['status'],'FAILED');self.assertIn('범위 밖',result['answer'])
+
+    def test_repeated_read_is_corrected_before_excel_and_keeps_previous_evidence(self):
+        self.start();first=self.read()
+        second=self.advance('read_workspace',dict(column_ids=['flag']),self.receipt(first,rows=self.rows))
+        self.queue.append(('read_workspace',dict(column_ids=['name'])))
+        flags=[dict(identity=i,excel_row=i+1,values=['Y']) for i in range(1,4)]
+        state=self.advance('update_matching_rows',dict(condition_column_id='name',operator='equals',value='AA',
+            destination_column_id='flag',assigned_value='confirmed'),self.receipt(second,rows=flags))
+        self.assertEqual(state['status'],'WAITING_USER')
+        self.assertEqual(state['step']['action']['operation']['condition']['value'],'AA')
+        self.assertEqual(len(self.calls[-1]['agent_run']['read_results']),2)
+        self.assertEqual(self.calls[-1]['agent_run']['read_results'][0]['result']['groups'][0]['count'],2)
+        self.assertEqual(self.app.state.operation_jobs,{})
+
+    def test_scope_change_invalidates_read_evidence_and_allows_same_columns_again(self):
+        self.start();first=self.read()
+        scope=self.advance('change_scope',dict(mode='replace',column_id='flag',operator='equals',value='Y'),self.receipt(first,rows=self.rows))
+        self.workspace['row_filter']=dict(column_id='flag',operator='equals',value='Y')
+        again=self.advance('read_workspace',dict(column_ids=['name']),self.receipt(scope,message='조건 변경'))
+        self.assertEqual(again['status'],'WAITING_EXCEL')
+        self.assertEqual(self.calls[-1]['agent_run']['read_results'],[])
+
+    def test_resume_discards_reads_before_using_manually_changed_values(self):
+        self.start();first=self.read()
+        self.advance('ask_user',dict(question='값을 확인해 주세요.'),self.receipt(first,rows=self.rows))
+        self.assertTrue(self.agent_run.read_results)
+        self.chat('resume_agent',{},'값을 직접 수정했어. 이어가줘')
+        state=self.read()
+        self.assertEqual(state['status'],'WAITING_EXCEL')
+        self.assertEqual(self.calls[-1]['agent_run']['read_results'],[])
+
+    def test_representative_codes_continue_automatically_with_validated_evidence(self):
+        pairs=[('CNJIANGY0321L','장인 싱청'),('CNJIANGS5000A','장수 사강 국제'),('CNHUNANV0013P','샹탄 스틸')]
+        self.workspace.update(row_count=7,columns=[dict(column_id=key,header=header,role='reference') for key,header in
+            [('code','해외공급자부호'),('group','해외공급자상호 그룹'),('score','해외공급자상호 그룹 유사도 점수')]],target_column_ids=['group'])
+        data=[]
+        for code,group in pairs:data.extend([[code,group,'100'],[code,'기존 다른 그룹','30']])
+        data.append(['OTHER','보존할 그룹','20'])
+        self.start()
+        read=dict(column_ids=['code','group','score'],condition=dict(column_id='score',operator='equals',value='100'))
+        state=self.advance('read_workspace',read)
+        for index,(code,group) in enumerate(pairs):
+            rows=[dict(identity=i+1,excel_row=i+2,values=values) for i,values in enumerate(data) if values[2]=='100']
+            if index==0:self.queue.append(('read_workspace',read))
+            state=self.advance('apply_group_by_code',dict(code_column_id='code',group_column_id='group',score_column_id='score',
+                code=code,group=group),self.receipt(state,rows=rows))
+            self.assertTrue(state['step']['action']['auto_apply'])
+            self.assertEqual(state['status'],'WAITING_USER',state)
+            operation=state['step']['action']['operation']
+            self.assertEqual(operation['condition'],dict(column_id='code',operator='equals',value=code))
+            self.assertEqual(operation['condition_scope'],'current')
+            # The UI resolves the existing output header before creating the job.
+            operation['output']=dict(mode='existing',column_id='group',name='해외공급자상호 그룹')
+            jid=self.create_job(state);url=f'/operation-jobs/{jid}'
+            selected=[dict(excel_row=i+2,values=[values[0]]) for i,values in enumerate(data) if values[0]==code]
+            preview=self.client.post(url+'/preview',params={'conversation_id':self.cid},json={'rows':selected,'selected_count':2})
+            self.assertEqual(preview.status_code,200,preview.text)
+            self.assertEqual([r['excel_row'] for r in preview.json()['rows']],[index*2+2,index*2+3])
+            for suffix,payload in [('status',{'status':'PREVIEW_READY'}),('apply',{'mode':'existing','column_id':'group','name':'공급자 그룹'}),
+                                   ('status',{'status':'APPLIED','result_column_ids':['group']})]:
+                response=self.client.post(url+'/'+suffix,params={'conversation_id':self.cid},json=payload)
+                self.assertEqual(response.status_code,200,response.text)
+            data[index*2+1][1]=group
+            if index<2:
+                state=self.advance('read_workspace',read,self.receipt(state))
+                self.assertEqual(state['status'],'WAITING_EXCEL')
+                self.assertEqual(self.calls[-1]['agent_run']['read_results'],[])
+                self.assertEqual(len(self.calls[-1]['agent_run']['completed_jobs']),index+1)
+            else:
+                state=self.advance('answer_question',{'answer':'세 부호의 그룹 변경 적용이 완료됐습니다.'},self.receipt(state))
+        self.assertEqual(state['status'],'COMPLETED')
+        self.assertEqual(data[-1],['OTHER','보존할 그룹','20'])
+        self.assertEqual(len(self.app.state.operation_jobs),3)
+        self.assertEqual(self.agent_run.steps,7)
+
+    def test_automatic_group_requires_unambiguous_real_100_point_evidence(self):
+        args=dict(code_column_id='code',group_column_id='group',score_column_id='score',code='A',group='그룹 A')
+        for case in ['missing','conflict','blank','wrong_value','wrong_score','same_column']:
+            with self.subTest(case=case):
+                self.workspace.update(columns=[dict(column_id=key,header=key,role='reference') for key in ['code','group','score']],target_column_ids=['group'])
+                self.start()
+                if case!='missing':
+                    state=self.advance('read_workspace',dict(column_ids=['code','group','score'],condition=dict(column_id='score',operator='equals',value='100')))
+                    rows=[dict(identity=1,excel_row=2,values=['A','그룹 A','100'])]
+                    if case=='conflict': rows.append(dict(identity=2,excel_row=3,values=['A','다른 그룹','100']))
+                    if case=='blank': rows[0]['values'][1]=''
+                    if case=='wrong_score': rows[0]['values'][2]='90'
+                    receipt=self.receipt(state,rows=rows)
+                else: receipt=None
+                supplied={**args,'group':'추측한 그룹'} if case=='wrong_value' else {**args,'score_column_id':'group'} if case=='same_column' else args
+                self.queue.append(('apply_group_by_code',supplied))
+                result=self.advance('ask_user',dict(question='대표값을 확인해줘'),receipt)
+                self.assertEqual(result['status'],'WAITING_USER')
+                self.assertIsNone(result['step'])
+                self.assertEqual(self.app.state.operation_jobs,{})
+
+    def test_automatic_group_cannot_bind_a_different_change(self):
+        self.start()
+        self.agent_run.status='WAITING_USER'
+        self.agent_run.step=dict(step_id=str(uuid4()),job=None,action=dict(type='configure_operation',auto_apply=True,
+            operation=dict(kind='set',column_ids=['name'],condition=dict(column_id='name',operator='equals',value='AA'),
+                           destination_column_id='flag',assigned_value='Y',condition_scope='current')))
+        state={'step':self.agent_run.step}
+        operation={**state['step']['action']['operation'],'assigned_value':'UNEXPECTED'}
+        jid=str(uuid4())
+        response=self.client.post('/operation-jobs',json=dict(operation_job_id=jid,conversation_id=self.cid,
+            workspace_id=self.workspace['workspace_id'],worksheet_id='sheet',table_id='table',task_type='investigation',
+            row_start=1,row_count=3,operation=operation))
+        self.assertEqual(response.status_code,200,response.text)
+        response=self.client.post(self.base+'/bind',json=dict(step_id=state['step']['step_id'],job_id=jid,kind='operation'))
+        self.assertEqual(response.status_code,409,response.text)
+        self.assertIsNone(self.agent_run.step['job'])

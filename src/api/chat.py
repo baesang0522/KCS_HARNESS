@@ -1,5 +1,4 @@
 import time
-import json
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
@@ -7,26 +6,12 @@ from fastapi import APIRouter, HTTPException, Request
 from api.schemas import ChatRequest, ChatResponse
 from repositories.conversation_repository import to_messages
 from services.chat import process_chat, workflow_snapshot
+from services.debug_log import log_event as log_chat
 from services.recommendation.schemas import AdviceRequest
 from services.recommendation.service import process_recommendation
 
 router = APIRouter()
 
-
-def log_chat(event: str, *, level="INFO", **fields) -> None:
-    print(
-        json.dumps(
-            {
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "level": level,
-                "event": event,
-                **fields,
-            },
-            ensure_ascii=False,
-            default=str,
-        ),
-        flush=True,
-    )
 
 @router.get("/health")
 async def health() -> dict[str, str]:
