@@ -83,7 +83,7 @@
             chat.setBusy(true);
             try { await workspace.configure(action.operation); } finally { chat.setBusy(false); }
             if (action.operation.kind === 'extract' && !action.operation.extraction_mode) await workspace.recommendExtraction();
-            else await workspace.previewOperation();
+            else await workspace.previewOperation(action.auto_apply === true, action.auto_apply ? agent.verifyWrite : null);
             return;
         }
         if (action.type !== 'confirm_selection') throw new Error('지원하지 않는 작업 요청이야.');

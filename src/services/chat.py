@@ -131,7 +131,8 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
                         answer="대상 열의 전체 데이터를 읽어 조언을 준비하겠습니다.",
                     )
             else:
-                decision, reasoning = await route_request(runtime, messages, task_context=context)
+                decision, reasoning = await route_request(runtime, messages, task_context=context,
+                    log_context={"conversation_id": conversation_id, "request_id": request_id})
             answer = decision.answer
             if decision.intent == "agent":
                 from services.agent_runs import start_run

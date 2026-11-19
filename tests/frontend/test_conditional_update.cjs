@@ -15,6 +15,7 @@ async function fixture(rows, scopeRows = 1) {
     h.window.createSimilarityController=()=>({reset(){},show(){},busy(){}});
     const api={newRequestId:()=> 'job',requestJson:async(url,options)=>{
         const body=JSON.parse(options.body);requests.push({url,body});
+        if (h.beforeResponse) await h.beforeResponse(url,body);
         if(url==='/operation-jobs'){job={source:body};return job;}
         if(url.includes('/preview') && job.source.operation.kind==='preprocess')return {headers:['정제'],changed_count:body.rows.filter(r=>r.values[0]!==r.values[0].trim().replace(/\s+/g,' ')).length,rows:body.rows.map(r=>({...r,values:[r.values[0].trim().replace(/\s+/g,' ')]}))};
         if(url.includes('/preview'))return {headers:['지정값'],changed_count:body.rows.length,
@@ -194,4 +195,63 @@ test('chat cancel records cancellation and cannot write afterwards',async()=>{
  const f=await fixture();await f.controller.configure(f.operation);await f.controller.previewOperation();const before=structuredClone(f.sheet.cells);
  await f.h.messages.command('취소');await f.h.messages.command('적용');assert.deepEqual(f.sheet.cells,before);
  assert(f.requests.some(r=>r.body.status==='CANCELLED'));assert.equal((await f.controller.context()).pending_operation,null);
+});
+
+
+test('representative group writes immediately without a preview card or approval and preserves the saved scope',async()=>{
+    const f=await fixture([[1,'CODE-A','old'],[2,'OTHER','old'],[3,'CODE-A','keep'],[4,'CODE-A','old']],4);
+    const operation={...f.operation,condition_scope:'current',condition:{...f.operation.condition,operator:'equals',value:'CODE-A'}};
+    let verified=0;
+    await f.controller.configure(operation);
+    await f.controller.previewOperation(true,async()=>{verified++;});
+    assert.equal(verified,1);
+    assert.deepEqual(f.sheet.cells.slice(1).map(r=>r[2]),['재확인','old','keep','재확인']);
+    assert.equal(f.h.action('적용'),undefined);
+    assert(!f.h.chatText().includes('변경 미리보기'));
+    assert(f.requests.some(r=>r.body.status==='APPLIED'));
+    assert.equal(f.getStored().row_filter.value,'old');
+    assert.equal(f.table.columns.items.length,3);
+});
+test('automatic group propagation stops before writing if representative evidence changed or verification is unavailable',async()=>{
+    for(const verify of [undefined,async()=>{throw new Error('대표 부호가 바뀌었습니다.');}]) {
+        const f=await fixture([[1,'CODE-A','old']],1),before=structuredClone(f.sheet.cells);
+        await f.controller.configure({...f.operation,condition_scope:'current',condition:{...f.operation.condition,operator:'equals',value:'CODE-A'}});
+        await f.controller.previewOperation(true,verify);
+        assert.deepEqual(f.sheet.cells,before);
+        assert(!f.requests.some(r=>r.url.includes('/apply')));
+        assert.match(f.completed.at(-1),/대표 부호/);
+        assert.equal(f.h.action('적용'),undefined);
+    }
+});
+test('automatic group propagation retains destination conflict checks and never retries an unconfirmed write',async()=>{
+    for(const scenario of ['edited','lost_reply']) {
+        const f=await fixture([[1,'CODE-A','old']],1);
+        await f.controller.configure({...f.operation,condition_scope:'current',condition:{...f.operation.condition,operator:'equals',value:'CODE-A'}});
+        f.h.beforeResponse=async(url,body)=>{
+            if(scenario==='edited'&&body.status==='PREVIEW_READY')f.sheet.cells[1][2]='직접 수정';
+            if(scenario==='lost_reply'&&body.status==='APPLIED')throw new Error('회신 유실');
+        };
+        await f.controller.previewOperation(true,async()=>{});
+        assert.equal(f.sheet.cells[1][2],scenario==='edited'?'직접 수정':'재확인');
+        assert.equal(f.requests.filter(r=>r.url.includes('/apply')).length,1);
+        assert(f.requests.some(r=>r.body.status==='UNKNOWN'));
+        assert.equal(f.h.action('적용'),undefined);
+    }
+});
+test('automatic group propagation with unchanged values finishes without a write or approval',async()=>{
+    const f=await fixture([[1,'CODE-A','old']],1);
+    await f.controller.configure({...f.operation,assigned_value:'old',condition_scope:'current',condition:{...f.operation.condition,operator:'equals',value:'CODE-A'}});
+    await f.controller.previewOperation(true,async()=>{});
+    assert(f.requests.some(r=>r.body.status==='NO_CHANGE'));
+    assert(!f.requests.some(r=>r.url.includes('/apply')));
+    assert.equal(f.h.action('적용'),undefined);
+});
+
+test('stopping automatic grouping during final verification prevents the write',async()=>{
+    const f=await fixture([[1,'CODE-A','old']],1),before=structuredClone(f.sheet.cells);
+    await f.controller.configure({...f.operation,condition_scope:'current',condition:{...f.operation.condition,operator:'equals',value:'CODE-A'}});
+    await f.controller.previewOperation(true,async()=>{f.controller.cancelPending();});
+    assert.deepEqual(f.sheet.cells,before);
+    assert(!f.requests.some(r=>r.url.includes('/apply')));
+    assert.match(f.completed.at(-1),/취소/);
 });

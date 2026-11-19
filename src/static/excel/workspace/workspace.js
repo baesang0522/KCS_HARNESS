@@ -562,7 +562,7 @@
                 await refresh();
                 await similarity.run(settings);
             },
-            previewOperation: function () { return operations.preview(); },
+            previewOperation: function (automatic, verify) { return operations.preview(automatic, verify); },
             recommendExtraction: function () { return operations.recommendExtraction(); },
             configure: async function (operation) {
                 if (!workspace) throw new Error(window.errorMessages.WORKSPACE_SETUP_REQUIRED);

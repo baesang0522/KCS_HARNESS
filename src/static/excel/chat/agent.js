@@ -2,7 +2,7 @@
 (function () {
     window.createAgentController = function (options) {
         var api = options.api, chat = options.chat, current = null, pending = null;
-        var attached = false, shown = new Set(), pendingSend = null;
+        var attached = false, shown = new Set(), pendingSend = null, writeVerification = null;
         var notice = document.getElementById("notice");
         function path(id) {
             return "/conversations/" + encodeURIComponent(chat.getConversationId()) + "/agent-runs" + (id ? "/" + encodeURIComponent(id) : "");
@@ -87,6 +87,7 @@
                     notice.textContent = state.answer;
                     if (state.status !== "WAITING_EXCEL") {
                         var handoff = state.status === "WAITING_USER" && state.step && !state.step.job ? state.step.action : null;
+                        writeVerification = handoff && handoff.auto_apply ? verify : null;
                         return {answer: state.answer, ui_action: handoff || null};
                     }
                     var step = state.step;
@@ -149,6 +150,13 @@
         }
         return {
             run: drive, bind: bind, complete: complete, flush: flush, pause: pause,
+            verifyWrite: async function () {
+                if (!attached || !current || !current.step || !current.step.action.auto_apply || !writeVerification) {
+                    throw new Error("대표 부호의 최신 조회를 확인할 수 없습니다. 다시 요청하세요.");
+                }
+                await writeVerification();
+                if (!attached) throw new Error("그룹 연결을 중지했습니다.");
+            },
             detach: function () { attached = false; pending = null; pendingSend = null; },
             load: async function () {
                 attached = false; pending = pendingSend = null; shown.clear();

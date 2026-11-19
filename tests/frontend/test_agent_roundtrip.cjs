@@ -64,13 +64,13 @@ async function setup() {
         const body=options.body?JSON.parse(options.body):null;requests.push({url,body,signal:options.signal});return h.respond(url,body,options);
     }};
     const chat=h.window.createChatController({api,getWorkspace:()=>workspace,closeTaskCards(){},resetTasks(){},
-        handleUIAction:async action=>{if(action)actions.push(action);},runAgent:(action,run)=>agent.run(action,run),
+        handleUIAction:async action=>{if(action)actions.push(action);if(h.onAction)await h.onAction(action);},runAgent:(action,run)=>agent.run(action,run),
         beforeManualAction:()=>agent.detach(),onBusy:value=>{if(!value&&agent)agent.flush();}});
-    agent=h.window.createAgentController({api,chat,getWorkspace:()=>workspace,handleUIAction:async action=>{if(action)actions.push(action);}});
+    agent=h.window.createAgentController({api,chat,getWorkspace:()=>workspace,handleUIAction:async action=>{if(action)actions.push(action);if(h.onAction)await h.onAction(action);}});
     h.window.readAgentData=async()=>({rows:[{identity:1,excel_row:2,values:['AA']},{identity:3,excel_row:4,values:['AA']}],verify:async()=>{}});
     await chat.initialize();
     h.document.getElementById('message').value='값을 확인해줘';
-    return {...h,chat,agent,context,requests,actions,state,workspace,setRespond:fn=>{h.respond=fn;},getRespond:()=>h.respond};
+    return {...h,chat,agent,context,requests,actions,state,workspace,setRespond:fn=>{h.respond=fn;},getRespond:()=>h.respond,setAction:fn=>{h.onAction=fn;}};
 }
 test('one chat request drives read-result-final and exposes exact data without writing',async()=>{
     const h=await setup();await h.chat.sendMessage();
@@ -169,4 +169,49 @@ test('opening manual panels after completion never pauses the completed run or r
  await h.agent.pause();
  assert(!h.requests.some(r=>r.url.endsWith('/pause')));
  assert.equal(h.document.getElementById('conversation').textContent,before);
+});
+
+
+test('automatic group handoff rechecks read evidence at write time and rejects detached execution',async()=>{
+    const h=await setup(),original=h.getRespond();let advances=0,changed=false,verified=0;
+    h.window.readAgentData=async()=>({rows:[],verify:async()=>{verified++;if(changed)throw new Error('대표값 변경');}});
+    h.setRespond(async(url,body,options)=>{
+        if(url.endsWith('/advance')&&++advances===2)return h.state('WAITING_USER',{
+            type:'configure_operation',auto_apply:true,operation:{kind:'set'}},'auto-step');
+        return original(url,body,options);
+    });
+    await h.chat.sendMessage();
+    assert.equal(h.actions[0].auto_apply,true);
+    await h.agent.bind('operation','job');
+    await h.agent.verifyWrite();assert.equal(verified,2);
+    changed=true;await assert.rejects(h.agent.verifyWrite,/대표값 변경/);
+    h.agent.detach();await assert.rejects(h.agent.verifyWrite,/최신 조회/);
+});
+
+
+test('three automatic group handoffs continue to completion without any apply click',async()=>{
+    const h=await setup(),original=h.getRespond();let stage=0,writes=0,finished;
+    const done=new Promise(resolve=>{finished=resolve;});
+    h.setRespond(async(url,body,options)=>{
+        if(url.endsWith('/advance')) {
+            stage++;
+            if(stage===7){assert.equal(writes,3);finished();return h.state('COMPLETED',null,null);}
+            if(stage%2)return h.state('WAITING_EXCEL',{type:'agent_read',read:{column_ids:['name']}},'read-'+stage);
+            return h.state('WAITING_USER',{type:'configure_operation',auto_apply:true,operation:{kind:'set'}},'write-'+stage);
+        }
+        return original(url,body,options);
+    });
+    h.setAction(async action=>{
+        if(!action)return;
+        assert.equal(action.auto_apply,true);
+        h.chat.setBusy(true);
+        await h.agent.verifyWrite();
+        await h.agent.bind('operation','job-'+(++writes));
+        h.agent.complete({job_id:'job-'+writes,status:'SUCCEEDED'},'자동 반영');
+        h.chat.setBusy(false);
+    });
+    await h.chat.sendMessage();
+    await Promise.race([done,new Promise((_,reject)=>{setTimeout(()=>reject(new Error('automatic progression stalled')),1000).unref();})]);
+    assert.equal(h.actions.length,3);
+    assert.equal(h.document.getElementById('conversation').querySelectorAll('button').length,0);
 });
