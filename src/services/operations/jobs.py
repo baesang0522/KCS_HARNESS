@@ -107,6 +107,7 @@ class JobPreview(StrictModel):
 
 
 class OperationJob(StrictModel):
+    supplier_references: list[dict] | None = None
     write_evidence: dict | None = None
     write_checks: list[dict] = Field(default_factory=list)
     source: CreateOperationJob
@@ -128,17 +129,19 @@ def find_job(jobs: dict, job_id:UUID, conversation_id: UUID) -> OperationJob:
     return job
 
 
-def create_job(source: CreateOperationJob, jobs: dict) -> OperationJob:
+def create_job(source: CreateOperationJob, jobs: dict, supplier_references=None) -> OperationJob:
+    if source.operation.kind == "match_suppliers" and not supplier_references:
+        raise ConflictError("확인한 기준 거래처 목록이 필요합니다.")
     key = str(source.operation_job_id)
     if key in jobs:
-        if jobs[key].source != source:
+        if jobs[key].source != source or jobs[key].supplier_references != supplier_references:
             raise ConflictError("같은 실행 ID에 다른 설정이 전달됐습니다.")
         return jobs[key]
 
     if len(jobs) >= 100:
         raise ConflictError("서버의 정제 실행 기록 100개 제한에 도달했습니다.")
 
-    jobs[key] = OperationJob(source=source.model_copy(deep=True))
+    jobs[key] = OperationJob(source=source.model_copy(deep=True), supplier_references=supplier_references)
     return jobs[key]
 
 
@@ -166,7 +169,11 @@ def preview_job(job: OperationJob, payload: JobPreview):
         raise ValueError("그룹 작업은 등록한 범위 전체를 한번에 전달하세요.")
     if job.selected_count is not None and payload.selected_count != job.selected_count:
         raise ValueError("분석 대상 행 수가 바뀌었습니다. 새 미리보기를 만드세요.")
-    result = execute(request)
+    if request.operation.kind == "match_suppliers":
+        from services.supplier_matching import compare
+        result = compare(request.rows, job.supplier_references)
+    else:
+        result = execute(request)
     job.selected_count = payload.selected_count
     return result
 

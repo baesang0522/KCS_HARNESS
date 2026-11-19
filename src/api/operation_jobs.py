@@ -15,6 +15,7 @@ from services.operations.jobs import (
     OutputPlacement,
 )
 from services.operations.schemas import OperationResponse
+from services.supplier_matching import references, validate_references
 
 router = APIRouter(prefix="/operation-jobs", tags=["Operations"])
 
@@ -23,8 +24,9 @@ router = APIRouter(prefix="/operation-jobs", tags=["Operations"])
 async def create_job(payload: CreateOperationJob, request: Request):
     async with request.app.state.conversations.edit(
         str(payload.conversation_id)
-    ):
-        return service.create_job(payload, request.app.state.operation_jobs)
+    ) as conversation:
+        suppliers = references(conversation, payload) if payload.operation.kind == "match_suppliers" else None
+        return service.create_job(payload, request.app.state.operation_jobs, suppliers)
 
 
 @router.get("", response_model=list[OperationJob])
@@ -40,9 +42,10 @@ async def list_jobs(conversation_id: UUID, workspace_id:UUID, request: Request):
 
 @router.post("/{job_id}/preview", response_model=OperationResponse)
 async def preview_job(job_id: UUID, conversation_id: UUID, payload: JobPreview, request: Request):
-    async with request.app.state.conversations.edit(str(conversation_id)):
+    async with request.app.state.conversations.edit(str(conversation_id)) as conversation:
         job = service.find_job(request.app.state.operation_jobs, job_id, conversation_id)
 
+        validate_references(job, conversation)
         try:
             return service.preview_job(job, payload)
         except ValueError as error:
@@ -51,8 +54,9 @@ async def preview_job(job_id: UUID, conversation_id: UUID, payload: JobPreview, 
 
 @router.post("/{job_id}/apply", response_model=OperationJob)
 async def begin_apply(job_id: UUID, conversation_id: UUID, payload: OutputPlacement, request: Request):
-    async with request.app.state.conversations.edit(str(conversation_id)):
+    async with request.app.state.conversations.edit(str(conversation_id)) as conversation:
         job = service.find_job(request.app.state.operation_jobs, job_id, conversation_id)
+        validate_references(job, conversation)
         from services.write_recovery import ensure_resolved
         ensure_resolved(request.app.state, job.source, str(job_id))
         return service.begin_apply(job, payload)
@@ -60,7 +64,7 @@ async def begin_apply(job_id: UUID, conversation_id: UUID, payload: OutputPlacem
 
 @router.post("/{job_id}/status", response_model=OperationJob)
 async def update_job(job_id: UUID, conversation_id:UUID, payload: JobUpdate, request: Request):
-    async with request.app.state.conversations.edit(str(conversation_id)):
+    async with request.app.state.conversations.edit(str(conversation_id)) as conversation:
         job = service.find_job(request.app.state.operation_jobs, job_id, conversation_id)
         return service.update_job(job, payload)
 

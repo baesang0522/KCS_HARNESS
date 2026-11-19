@@ -5,6 +5,7 @@ const {createDOM} = require('../helpers/taskpane_dom.cjs');
 async function setup() {
     const h = createDOM();
     h.node = id => h.document.getElementById(id);
+    h.ready=false; h.reflected=0; h.reflect=async()=>{h.reflected++;};
     h.extracted=[]; h.context = null; h.requests = []; h.storage = new Map(); h.serial = 0;
     h.reply = async (url, options) => {
         if (url === '/conversations') return {conversation_id: 'conv-' + ++h.serial};
@@ -31,7 +32,7 @@ async function setup() {
         closeTaskCards() {}, resetTasks() {}, handleUIAction() {},
         onConversationChanged: id => h.documents.load(id),
         onBusy: () => { if (h.documents) h.documents.updateControls(); }});
-    h.documents = h.window.createDocumentsController({api: h.api, getWorkspace: () => h.context,
+    h.documents = h.window.createDocumentsController({applyReview:()=>h.reflect(),reviewInfo:()=>({ready:h.ready,count:1,warnings:[]}),api: h.api, getWorkspace: () => h.context,
         beforeUpload:async()=>{h.prepared=true;},readConditions:async(id,name)=>{h.extracted.push({id,name});return true;},
         isBusy: h.chat.isBusy, setBusy: h.chat.setBusy, beginRequest: h.chat.beginRequest,
         endRequest: h.chat.endRequest, checkRequest: h.chat.checkRequest, reportStop: h.chat.reportStop});
@@ -124,4 +125,32 @@ test('stopping the first upload stops the remaining dropped-file queue',async()=
     await started;await h.node('composer').emit('submit');release();await pending;
     assert.equal(h.requests.filter(r=>r.options.method==='POST'&&r.url.includes('/documents/')).length,1);
     assert.equal(h.extracted.length,0);
+});
+
+test('drawer sits outside chat immediately above footer and closes without changing scroll or draft',async()=>{
+ const h=await setup(),main=h.document.querySelector('main'),panel=h.node('documents-panel');
+ assert.equal(main.contains(panel),false);assert.equal(panel.parentNode.nextSibling.tagName,'footer');
+ main.scrollTop=460;h.node('message').value='작성 중인 질문';
+ await h.node('documents-toggle').emit('click');assert.equal(panel.hidden,false);
+ assert.equal(h.node('documents-toggle').getAttribute('aria-expanded'),'true');assert.equal(main.scrollTop,460);
+ h.node('documents-content').scrollTop=100;await panel.emit('keydown',{key:'Escape'});
+ assert.equal(panel.hidden,true);assert.equal(h.node('documents-toggle').focused,true);assert.equal(main.scrollTop,460);
+ await h.node('documents-toggle').emit('click');assert.equal(h.node('documents-content').scrollTop,100);
+ await h.node('documents-toggle').emit('keydown',{key:'Escape'});assert.equal(panel.hidden,true);
+ await h.node('documents-toggle').emit('click');
+ await h.node('documents-close').emit('click');assert.equal(main.scrollTop,460);assert.equal(h.node('message').value,'작성 중인 질문');
+});
+test('reflection button requires ready review data and blocks duplicate or busy requests',async()=>{
+ const h=await setup(),button=h.node('documents-apply');assert.equal(button.disabled,true);await button.emit('click');assert.equal(h.reflected,0);
+ await h.upload();assert.equal(button.disabled,true);h.ready=true;h.documents.render();assert.equal(button.disabled,false);
+ h.chat.setBusy(true);await button.emit('click');assert.equal(h.reflected,0);h.chat.setBusy(false);
+ let finish;h.reflect=()=>{h.reflected++;return new Promise(resolve=>finish=resolve);};
+ const pending=button.emit('click');await button.emit('click');assert.equal(h.reflected,1);assert.equal(button.disabled,true);
+ assert.equal(h.node('documents-panel').hidden,true);finish();await pending;assert.equal(button.disabled,false);
+ assert.equal(h.requests.some(r=>r.url==='/chat'),false);
+});
+test('failed reflection request reopens the drawer with its error and permits retry',async()=>{
+ const h=await setup();await h.upload();h.ready=true;h.documents.render();h.reflect=async()=>{throw Error('검토 시트를 다시 확인하세요.');};
+ await h.node('documents-apply').emit('click');assert.equal(h.node('documents-panel').hidden,false);
+ assert.match(h.node('documents-status').textContent,/검토 시트를 다시 확인/);assert.equal(h.node('documents-apply').disabled,false);
 });

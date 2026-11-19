@@ -103,6 +103,7 @@
         getWorkspace: function () { return workspace && workspace.referenceTarget(); }, isBusy: chat.isBusy, setBusy: chat.setBusy,
         onRecovered: function (receipt) { return workspace.recovered(receipt); }});
     workspace = window.createWorkspaceController({messages: messages, recovery: recovery, api: api,
+        beforeApply: function () { return investigation.ensureSynced(); },
         enterConversation: chat.enterConversation, showWorkspace: function () { workspace.dismiss(); }, complete: completeTask,
         onJobCreated: function (kind, id) { return agent && agent.bind(kind, id); }, isBusy: chat.isBusy, setBusy: chat.setBusy,
         getConversationId: chat.getConversationId, newInvestigation: chat.newConversation,
@@ -121,7 +122,7 @@
         onChanged: function () { if (documents) documents.render(); }, isBusy: chat.isBusy, setBusy: chat.setBusy,
         beginRequest: chat.beginRequest, endRequest: chat.endRequest, checkRequest: chat.checkRequest, reportStop: chat.reportStop});
     reviewPreprocess = window.createReviewPreprocess({messages: messages, api: api, getConversationId: chat.getConversationId, isBusy: chat.isBusy, setBusy: chat.setBusy});
-    documents = window.createDocumentsController({readConditions: investigation.extract, beforeUpload: investigation.prepare, reviewInfo: investigation.info,
+    documents = window.createDocumentsController({applyReview: function () { if (agent) agent.detach(); return localCommand('PDF 수정 내용 반영'); }, readConditions: investigation.extract, beforeUpload: investigation.prepare, reviewInfo: investigation.info,
         api: api, getWorkspace: workspace.referenceTarget, isBusy: chat.isBusy, setBusy: chat.setBusy,
         beginRequest: chat.beginRequest, endRequest: chat.endRequest, checkRequest: chat.checkRequest, reportStop: chat.reportStop});
     agent = window.createAgentController({api: api, chat: chat, getWorkspace: function () { return workspace; }, beforeRead: investigation.ensureSynced, handleUIAction: handleAction});

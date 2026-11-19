@@ -58,16 +58,6 @@
     </header>
 
     <main>
-      <section class="normalization-panel" id="documents-panel" aria-labelledby="documents-title" hidden>
-        <h2 id="documents-title" tabindex="-1">PDF 추출내용</h2>
-        <button type="button" id="documents-close">접기</button>
-        <p>Excel 시트 탭에서 검토 시트를 확인·수정하고 채팅으로 ‘PDF 수정 내용 반영’이라고 요청하세요.</p>
-        <p id="investigation-workspace"></p>
-        <p>서버 재시작 시 자료를 다시 첨부해야 해요. Excel 검토 시트는 남아요.</p>
-        <p id="documents-status" role="status" aria-live="polite"></p>
-        <div id="documents-list"></div>
-
-      </section>
 
       <div id="welcome-content">
       <div class="eyebrow"><span class="dot"></span> EXCEL ASSISTANT <span class="badge">미리보기</span></div>
@@ -115,6 +105,24 @@
       </section>
 
     </main>
+    <div class="documents-dock">
+      <section class="normalization-panel" id="documents-panel" aria-labelledby="documents-title" hidden>
+        <div class="documents-heading">
+          <h2 id="documents-title">PDF 추출내용</h2>
+          <button type="button" id="documents-close">닫기</button>
+        </div>
+        <div id="documents-content" role="region" aria-label="PDF 추출내용 목록" tabindex="0">
+          <p>Excel 검토 시트에서 수정한 뒤 아래 ‘수정 내용 반영’을 누르세요. 채팅으로도 요청할 수 있어요.</p>
+          <p id="investigation-workspace"></p>
+          <p>서버 재시작 시 자료를 다시 첨부해야 해요. Excel 검토 시트는 남아요.</p>
+          <p id="documents-status" role="status" aria-live="polite"></p>
+          <div id="documents-list"></div>
+        </div>
+        <div class="document-actions">
+          <button type="button" id="documents-apply" disabled>수정 내용 반영</button>
+        </div>
+      </section>
+    </div>
     <footer>
       <p id="notice" class="notice" role="status" aria-live="polite"></p>
       <form id="composer" class="composer">

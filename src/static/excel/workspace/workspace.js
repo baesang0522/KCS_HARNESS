@@ -30,7 +30,7 @@
         });
         var operations = window.createOperations({
             api: options.api, recovery: options.recovery, messages: options.messages,
-            jobs: jobs,
+            jobs: jobs, beforeApply: options.beforeApply,
             isBusy: options.isBusy,
             setBusy: options.setBusy, status: ui.status, complete: options.complete, refresh: refresh,
             changed: function () { lastFormula = null; },

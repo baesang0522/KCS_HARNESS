@@ -44,5 +44,5 @@ def execution_tools(context, manual_tools):
     # Keep the existing preview/approval path; unsupported domain tools are not invented here.
     names = {"ask_user", "answer_question", "change_scope", "update_matching_rows",
              "remove_words", "preprocess", "replace_text", "split_text", "map_values", "group_values",
-             "find_model_candidates"}
+             "find_model_candidates", "match_suppliers"}
     return [item for item in manual_tools if item.name in names] + [read_workspace, compare_values, calculate_formula]

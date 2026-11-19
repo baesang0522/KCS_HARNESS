@@ -37,7 +37,8 @@ test('extracts once, opens editable sheet and reopens without overwriting user c
 test('new rows, deleted rows and reorder are read from the sheet, never row-position IDs',async()=>{
     const h=await setup();await h.controller.extract('doc','파일.pdf');h.drafts.doc.rows=[row('추가 기업'),row('다른 기업')];
     await h.controller.apply('doc');assert.equal(h.saved.rows.length,2);
-    h.drafts.doc.rows.reverse();await h.controller.ensureSynced();
+    h.drafts.doc.rows.reverse();await assert.rejects(h.controller.ensureSynced(),/수정 내용 반영/);
+    await h.controller.apply('doc');assert.equal(h.saved.rows[0].target.company_name,'다른 기업');await h.controller.ensureSynced();
     h.drafts.doc.rows=[];await h.controller.apply('doc');assert.deepEqual(h.saved.rows,[]);
 });
 test('first confirmation saves unchanged rows; response-metadata failure can be retried',async()=>{

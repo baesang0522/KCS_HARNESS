@@ -126,7 +126,7 @@ class OperationOutput(StrictModel):
 
 class Operation(StrictModel):
     output: OperationOutput | None = None
-    kind: Literal["preprocess", "split", "group", "replace", "map", "extract", "set"]
+    kind: Literal["preprocess", "split", "group", "replace", "map", "extract", "set", "match_suppliers"]
     column_ids: list[ColumnId] = Field(min_length=1, max_length=20)
     rules: list[Rule] = Field(default_factory=list, max_length=10)
     delimiter: str | None = Field(default=None, min_length=1, max_length=100)
@@ -150,6 +150,8 @@ class Operation(StrictModel):
 
     @model_validator(mode="after")
     def validate_operation(self):
+        if self.kind == "match_suppliers" and len(self.column_ids) != 1:
+            raise ValueError("비교할 해외거래처 열 하나를 지정하세요.")
         if self.condition is not None or self.destination_column_id is not None:
             if self.kind != "set" or self.condition is None or self.destination_column_id is None:
                 raise ValueError("조건부 값 변경에는 조건과 반영할 기존 열을 함께 지정하세요.")

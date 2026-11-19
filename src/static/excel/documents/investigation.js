@@ -7,7 +7,7 @@
         function status(text) { document.getElementById('documents-status').textContent = text; if (options.messages) options.messages.say(text); }
         function show() {
             document.getElementById('documents-panel').hidden = false;
-            document.getElementById('documents-toggle').textContent = '추출내용 접기';
+            document.getElementById('documents-toggle').textContent = '추출내용 닫기';
             document.getElementById('documents-toggle').setAttribute('aria-expanded', 'true');
         }
         function render() {
@@ -82,7 +82,7 @@
                 await sheet.ensure(cid, documentId, filename, state.reviews[documentId] || []);
                 if (expected === version) {
                     readySheets.add(documentId);
-                    status(filename + ' · 검토 시트를 만들었어요. Excel 시트 탭에서 확인·수정한 뒤 채팅으로 ‘PDF 수정 내용 반영’이라고 요청해 주세요.');
+                    status(filename + ' · 검토 시트를 만들었어요. Excel 시트 탭에서 확인·수정한 뒤 ‘수정 내용 반영’을 눌러 주세요.');
                 }
                 return true;
             } catch (error) {
@@ -96,7 +96,7 @@
         async function apply(documentId, approvedDraft) {
             if (options.isBusy() || !cid) return;
             var expected = version, conversationId = cid, url = endpoint();
-            options.setBusy(true); show();
+            options.setBusy(true);
             try {
                 await prepare();
                 var draft = await sheet.read(conversationId, documentId);
@@ -125,7 +125,7 @@
             for (var did of Object.keys(state.reviews || {})) {
                 var draft = await sheet.read(cid, did);
                 if (draft && sheet.canonical(draft.rows) !== sheet.canonical(state.reviews[did])) {
-                    show(); throw new Error('검토 시트에 반영하지 않은 수정이 있어요. 채팅으로 ‘PDF 수정 내용 반영’이라고 요청해 주세요.');
+                    show(); throw new Error('검토 시트에 반영하지 않은 수정이 있어요. 추출내용의 ‘수정 내용 반영’을 눌러 주세요. 채팅으로도 요청할 수 있어요.');
                 }
             }
         }
