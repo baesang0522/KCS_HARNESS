@@ -4,6 +4,7 @@
     var workspace = null, formula = null, help = null, documents = null, investigation = null, reviewPreprocess = null;
     var connection = document.getElementById('connection');
     var diagnostic = document.getElementById('diagnostic');
+    var agent = null;
     var ready = false;
     var build = (document.querySelector('meta[name="kcs-ui-version"]') || {}).content || "확인 필요";
     diagnostic.textContent = 'Office 초기화 대기 · ' + navigator.userAgent;
@@ -29,12 +30,15 @@
         closeTaskCards: closeTaskCards,
         resetTasks: function () { workspace.reset(); formula.reset(); updateWorkspaceButton(); },
         handleUIAction: handleUIAction,
+        runAgent: function (action, request) { return agent.run(action, request); },
+        beforeManualAction: function () { if (agent) agent.detach(); },
         beforeSend: function () { return investigation && investigation.ensureSynced(); },
         onConversationChanged: async function (id) {
             if (reviewPreprocess) reviewPreprocess.reset();
-            await Promise.all([documents && documents.load(id), investigation && investigation.load(id)]);
+            await Promise.all([documents && documents.load(id), investigation && investigation.load(id), agent && agent.load(id)]);
         },
         onBusy: function (value) {
+            if (!value && agent) agent.flush();
             if (documents) documents.updateControls();
             if (reviewPreprocess) reviewPreprocess.updateControls();
             if (help) help.updateControls();
@@ -55,7 +59,8 @@
         if (workspace) workspace.dismiss();
         if (formula) formula.dismiss();
     }
-    function completeTask(text) {
+    function completeTask(text, outcome) {
+        if (agent && outcome) agent.complete(outcome, text);
         closeTaskCards();
         chat.enterConversation();
         chat.appendMessage('assistant', text);
@@ -92,7 +97,7 @@
         }
         if (action.type !== "confirm_selection") throw new Error("지원하지 않는 화면 요청입니다.");
         if (action.task_type === "formula") {
-            formula.openAndSelect(instruction, {workspace_id: action.workspace_id, column_ids: action.column_ids});
+            formula.openAndSelect(action.instruction || instruction, {workspace_id: action.workspace_id, column_ids: action.column_ids});
         } else {
             await workspace.open(action.task_type);
         }
@@ -102,21 +107,22 @@
         button.addEventListener('click', async function () {
             if (chat.isBusy()) return;
             var task = button.getAttribute('data-task');
-            if (task) { closeTaskCards(); await workspace.open(task); return; }
+            if (task) { if (agent) await agent.pause(); closeTaskCards(); await workspace.open(task); return; }
             document.getElementById('message').value = button.getAttribute('data-prompt') || '';
             await chat.sendMessage();
         });
     });
     document.getElementById("open-workspace").addEventListener("click", async function () {
         if (chat.isBusy()) return;
+        if (agent) await agent.pause();
         if (workspace.referenceTarget()) await workspace.openSourceColumns();
         else { closeTaskCards(); await workspace.open(); }
     });
     document.getElementById("open-scope").addEventListener("click", async function () {
-        if (!chat.isBusy() && workspace.referenceTarget()) await workspace.openScope();
+        if (!chat.isBusy() && workspace.referenceTarget()) { if (agent) await agent.pause(); await workspace.openScope(); }
     });
     document.querySelectorAll('[data-close-task]').forEach(function (button) {
-        button.addEventListener('click', function () { if (!chat.isBusy()) closeTaskCards(); });
+        button.addEventListener('click', async function () { if (!chat.isBusy()) { if (agent) await agent.pause(); closeTaskCards(); } });
     });
 
     workspace = window.createWorkspaceController({
@@ -124,6 +130,7 @@
         enterConversation: chat.enterConversation,
         showWorkspace: closeTaskCards,
         complete: completeTask,
+        onJobCreated: function (kind, id) { return agent && agent.bind(kind, id); },
         isBusy: chat.isBusy,
         setBusy: chat.setBusy,
         getConversationId: chat.getConversationId,
@@ -152,6 +159,7 @@
         getResultColumns: workspace.formulaResultColumns,
         onResult: workspace.formulaResult,
         complete: completeTask,
+        onJobCreated: function (kind, id) { return agent && agent.bind(kind, id); },
         isReady: function () { return ready; },
         isBusy: chat.isBusy,
         setBusy: chat.setBusy,
@@ -181,5 +189,7 @@
         beginRequest: chat.beginRequest, endRequest: chat.endRequest,
         checkRequest: chat.checkRequest, reportStop: chat.reportStop
     });
+    agent = window.createAgentController({api: api, chat: chat, getWorkspace: function () { return workspace; },
+        beforeRead: function () { return investigation.ensureSynced(); }, handleUIAction: handleUIAction});
     chat.initialize();
 })();

@@ -26,6 +26,8 @@ class StoredTurn:
 
 @dataclass
 class MemoryConversation:
+    agent_runs: dict = field(default_factory=dict)
+    active_agent_run_id: str | None = None
     documents: dict = field(default_factory=dict)
     investigation: InvestigationState = field(default_factory=InvestigationState)
     turns: list[StoredTurn] = field(default_factory=list)
@@ -91,6 +93,10 @@ class MemoryConversationRepository:
             conversation.cancelled_requests.add(request_id)
 
         conversation.documents.pop(request_id, None)
+        for run in conversation.agent_runs.values():
+            if run.request_id == request_id and run.status not in {"COMPLETED", "CANCELLED"}:
+                run.status = "CANCELLED"
+                run.answer = "조사 실행을 중지했습니다. 이미 시작한 쓰기는 결과 확인이 필요합니다."
 
         # 처리 중인 요청이 대화 잠금을 잡고 있으므로 취소 경로에서는 잠금을 기다리지 않는다.
         task = conversation.active_requests.get(request_id)

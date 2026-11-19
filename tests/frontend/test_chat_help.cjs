@@ -26,7 +26,7 @@ async function setup(saved) {
     h.reply = async () => ({answer: '완료', ui_action: null});
     h.progress = async () => ({message: 'AI 분석을 준비하고 있습니다…'});
     if (saved) h.localStorage.setItem('kcs-chat-session-v1', JSON.stringify(saved));
-    h.load('chat/chat.js'); h.load('cleaning_help/cleaning_help.js');
+    h.load('chat/chat.js'); h.load('chat/agent.js'); h.load('cleaning_help/cleaning_help.js');
     const close = () => { if (h.help) h.help.dismiss(); h.workspace.dismiss(); };
     h.chat = h.window.createChatController({api: h.api, getWorkspace: () => h.workspace,
         closeTaskCards: close, resetTasks: () => h.workspace.reset(),
@@ -163,11 +163,11 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
         openGroups:async(column,request)=>{reviewRequest={column,request};},
         configure:async()=>{throw Error("unscoped set action reached ordinary operation");},
         formulaTarget() {}, validateFormulaSource() {}, prepareFormulaOutput() {}, formulaResultColumns() {}, formulaResult() {}};
-    h.window.apiClient = {requestJson: async url => url.endsWith('/documents') ? {documents: []} : url.endsWith('/investigation') ? {revision:0,goal:'목표',conditions:[],document_notes:{},columns:[]} : {conversation_id: 'conversation'}, newRequestId: () => 'id'};
+    h.window.apiClient = {requestJson: async url => url.endsWith('/agent-runs') ? {run: null} : url.endsWith('/documents') ? {documents: []} : url.endsWith('/investigation') ? {revision:0,goal:'목표',conditions:[],document_notes:{},columns:[]} : {conversation_id: 'conversation'}, newRequestId: () => 'id'};
     h.window.createWorkspaceController = options => { workspaceOptions = options; return stub; };
     h.window.createFormulaController = options => { formulaOptions = options; return stub; };
     h.window.createFormulaUI = () => ({});
-    h.load('chat/chat.js'); h.load('cleaning_help/cleaning_help.js'); h.load('documents/documents.js'); h.load('documents/investigation.js'); h.load('documents/review_preprocess.js'); h.load('taskpane.js');
+    h.load('chat/chat.js'); h.load('chat/agent.js'); h.load('cleaning_help/cleaning_help.js'); h.load('documents/documents.js'); h.load('documents/investigation.js'); h.load('documents/review_preprocess.js'); h.load('taskpane.js');
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(workspaceOptions.isBusy(), false); assert.equal(workspaceOptions.getConversationId(), 'conversation');
     assert.equal(formulaOptions.validateSource, stub.validateFormulaSource);
@@ -219,14 +219,14 @@ test('all application scripts load in HTML order and the real controllers initia
     h.sandbox.fetch = async (url, options) => {
         requests.push({url, options});
         return {ok: true, json: async () => url === '/conversations' ? {conversation_id: 'conversation'}
-            : url.endsWith('/documents') ? {documents: []} : url.endsWith('/investigation') ? {revision:0,goal:'목표',conditions:[],document_notes:{},columns:[]} : {answer: '도움 카드를 열었어.', ui_action: {type: 'open_cleaning_help'}}};
+            : url.endsWith('/agent-runs') ? {run: null} : url.endsWith('/documents') ? {documents: []} : url.endsWith('/investigation') ? {revision:0,goal:'목표',conditions:[],document_notes:{},columns:[]} : {answer: '도움 카드를 열었어.', ui_action: {type: 'open_cleaning_help'}}};
     };
     const scripts = h.document.querySelectorAll('script').map(node => node.getAttribute('src')).filter(Boolean);
     assert.equal(scripts.some(file=>file.startsWith('group_review/')),false);
     assert.equal(h.document.getElementById('work-groups'),null);assert.equal(h.document.getElementById('gr-panel'),null);
     scripts.filter(file => !file.startsWith('vendor/')).forEach(file => h.load(file));
     await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(requests.map(r => r.url), ['/conversations', '/conversations/conversation/documents', '/conversations/conversation/investigation']);
+    assert.deepEqual(requests.map(r => r.url), ['/conversations', '/conversations/conversation/documents', '/conversations/conversation/investigation', '/conversations/conversation/agent-runs']);
     assert.equal(h.document.querySelector('.send').disabled, false);
     assert.equal(h.document.getElementById('notice').textContent, '');
     await h.document.getElementById('open-workspace').emit('click');

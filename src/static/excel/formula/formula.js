@@ -64,6 +64,7 @@
                     signal: run.controller.signal
                 });
                 options.checkRequest(run);
+                if (options.onJobCreated) await options.onJobCreated("formula", formulaJob.formula_job_id);
                 formulaJob = await api.requestJson("/formula-jobs/" + formulaJob.formula_job_id + "/analyze", {
                     method: "POST", signal: run.controller.signal
                 });
@@ -86,7 +87,7 @@
                     options.complete("수식 계획 생성을 중지했습니다. 셀은 변경하지 않았습니다.");
                 } else {
                     if (!targetSnapshot) preview = null;
-                    options.complete(error.message);
+                    options.complete(error.message, formulaJob && {kind: "formula", job_id: formulaJob.formula_job_id, status: "FAILED"});
                 }
             } finally {
                 options.endRequest(run);
@@ -157,7 +158,8 @@
                 recorded = true;
                 ui.setApplied(result);
                 if (options.onResult) await options.onResult(result, selection, ids);
-                options.complete(result.address + " · " + result.row_count + "행에 계산 결과를 값으로 저장했습니다.");
+                options.complete(result.address + " · " + result.row_count + "행에 계산 결과를 값으로 저장했습니다.",
+                    {kind: "formula", job_id: formulaJob.formula_job_id, status: "SUCCEEDED"});
             } catch (error) {
                 if (approvalRequested && !recorded) {
                     try {
@@ -167,7 +169,8 @@
                         error.message += " · 서버의 적용 상태를 확인하지 못했습니다. 다시 적용하지 마세요.";
                     }
                 }
-                options.complete((applied ? "결과값은 저장됐지만 완료 정보 처리에 실패했습니다. 다시 쓰지 마세요. " : "") + error.message);
+                options.complete((applied ? "결과값은 저장됐지만 완료 정보 처리에 실패했습니다. 다시 쓰지 마세요. " : "") + error.message,
+                    {kind: "formula", job_id: formulaJob.formula_job_id, status: approvalRequested ? "UNKNOWN" : "FAILED"});
             } finally {
                 options.setBusy(false);
             }

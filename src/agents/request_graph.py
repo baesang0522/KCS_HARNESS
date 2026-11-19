@@ -34,6 +34,13 @@ def clarification(answer: str) -> dict:
 
 async def run_request_graph(runtime, messages, task_context: dict) -> dict:
     tools = build_request_tools(task_context)
+    prompt = runtime.tools_prompt
+    if task_context.get("agent_execution"):
+        from pathlib import Path
+        from prompts.loader import load_agent_prompt
+        from agents.execution_tools import execution_tools
+        prompt = load_agent_prompt(Path(__file__).resolve().parents[1] / "prompts/execution.yml").render()
+        tools = execution_tools(task_context, tools)
     tools_by_name = {item.name: item for item in tools}
     model = runtime.model.bind_tools(
         tools,
@@ -133,7 +140,7 @@ async def run_request_graph(runtime, messages, task_context: dict) -> dict:
     result = await graph.compile().ainvoke(
         {
             "messages": [
-                SystemMessage(content=runtime.tools_prompt),
+                SystemMessage(content=prompt),
                 HumanMessage(
                     content=json.dumps(
                         {"task_context": task_context},
