@@ -109,7 +109,7 @@ async def route_request(runtime, messages, *, task_context: dict):
         }
         referenced = decision.operation.input_column_ids + ([decision.operation.destination_column_id] if decision.operation.destination_column_id else [])
         if decision.operation.output:
-            referenced += [value for value in [decision.operation.output.column_id, decision.operation.output.anchor] if value]
+            referenced += [value for value in [decision.operation.output.column_id, decision.operation.output.score_column_id, decision.operation.output.anchor] if value]
         if not set(referenced) <= columns:
             raise ValueError("현재 작업 시트에 없는 열을 요청했습니다.")
         if decision.operation.kind == "extract" and decision.operation.column_ids != [extraction_column_id(workspace)]:

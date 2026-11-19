@@ -85,12 +85,14 @@ def validate_evidence(job, kind, evidence):
         if not job.output:
             raise ConflictError("승인된 저장 위치가 없습니다.")
         if job.output.mode == "existing":
-            if ids != [job.output.column_id]:
+            if ids != [job.output.column_id] + ([job.output.score_column_id] if job.output.score_column_id else []):
                 raise ConflictError("승인한 기존 결과 열과 다릅니다.")
         elif set(ids) & set(source.operation.input_column_ids):
             raise ConflictError("새 결과는 입력과 다른 열이어야 합니다.")
         count = job.selected_count or source.row_count
-        if any(sum(b.row_count for b in blocks) != count for blocks in groups.values()):
+        counts = [sum(b.row_count for b in blocks) for blocks in groups.values()]
+        partial_match = source.operation.kind == "match_suppliers" and job.output.mode == "existing"
+        if any(not (0 < size <= count) if partial_match else size != count for size in counts):
             raise ConflictError("미리보기와 쓰기 행 수가 다릅니다.")
         scopes = {tuple((b.row_start, b.row_count, b.identities) for b in blocks) for blocks in groups.values()}
         if len(scopes) != 1:

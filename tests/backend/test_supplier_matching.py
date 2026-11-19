@@ -11,7 +11,10 @@ from repositories.conversation_repository import MemoryConversation, MemoryConve
 from services.documents.schemas import DocumentWorkspace
 from services.errors import ServiceError
 from services.investigation import Condition, SupplierTarget
-from services.operations.schemas import Row
+from services.operations.schemas import Row, Operation
+from pydantic import ValidationError
+from services.errors import ConflictError
+from services.write_recovery import WriteEvidence, WriteObservation, save_evidence, recover, validate_evidence
 from services.supplier_matching import compare
 from services.similarity import score
 from agents.request_tools import build_request_tools
@@ -22,7 +25,7 @@ class SupplierMatchingTests(unittest.TestCase):
     def test_threshold_normalization_and_later_tie(self):
         refs = [dict(group='앞 회사', company_name='ABCDEFGHIJ'), dict(group='뒤 회사', company_name='ABCDEFGHIJ')]
         rows = [Row(excel_row=i+2, values=[value]) for i, value in enumerate(['abcdefghij', 'ABCDEFGHIx', 'ABCDEFGHxx', '', '  ABCDEFGHIJ  '])]
-        result = compare(rows, refs)
+        result = compare(rows, refs, "levenshtein")
         self.assertEqual([row.values for row in result.rows], [['뒤 회사','100'],['뒤 회사','90'],['','80'],['',''],['뒤 회사','100']])
         self.assertEqual(compare(rows[:1], list(reversed(refs))).rows[0].values[0], '앞 회사')
         self.assertEqual(compare([Row(excel_row=2, values=['  Acme   steel  '])], [dict(group='회사',company_name='ACME STEEL')]).rows[0].values, ['회사','100'])
@@ -31,7 +34,7 @@ class SupplierMatchingTests(unittest.TestCase):
         refs = [dict(group=str(i), company_name=f'COMPANY {i:04}') for i in range(20)]
         rows = [Row(excel_row=i+2, values=[f'COMPANY {i%3000:04}']) for i in range(6000)]
         with patch('services.supplier_matching.score', wraps=score) as calculate:
-            result = compare(rows, refs)
+            result = compare(rows, refs, "levenshtein")
             self.assertEqual(calculate.call_count, 60000)
         self.assertEqual(len(result.rows),6000)
         self.assertEqual(result.rows[0].values,result.rows[3000].values)
@@ -97,5 +100,94 @@ class SupplierMatchingTests(unittest.TestCase):
         self.assertEqual(decision['intent'],'operation');self.assertEqual(decision['operation']['kind'],'match_suppliers')
         self.assertEqual(decision['operation']['mappings'],[])
         self.assertIn('match_suppliers',{t.name for t in execution_tools(context,tools)})
+
+
+    def test_sequence_uses_shared_bidirectional_score_with_same_threshold_and_tie_rule(self):
+        refs = [dict(group='앞 회사', company_name='ABCDEFGHIJ'), dict(group='뒤 회사', company_name='ABCDEFGHIJ')]
+        rows = [Row(excel_row=i+2, values=[v]) for i,v in enumerate(['ABCDEFGHIx','ABCDEFGHxx'])]
+        result = compare(rows,refs,'sequence')
+        self.assertEqual([r.values for r in result.rows],[['뒤 회사','90'],['','80']])
+        self.assertEqual(compare(rows,list(reversed(refs)),'sequence').rows[0].values[0],'앞 회사')
+        self.assertEqual(compare([Row(excel_row=2,values=['TIDE'])],[dict(group='회사',company_name='DIET')],'sequence').rows[0].values,['','37.5'])
+        with self.assertRaises(ValueError): compare(rows,refs,'unknown')
+
+    def test_api_passes_requested_sequence_method_through_job_preview(self):
+        self.conversation.investigation.conditions[0].target.company_name='JIANGSU SHAGANG INTERNATIONAL TRADE CO., LTD.'
+        self.source['operation']['similarity_method']='sequence'
+        self.create()
+        result=self.client.post(self.url('preview'),json={'rows':[{'excel_row':2,'values':['JIANGSU SHANGANG INTERNATIONALTRADE CO LTD']}]})
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual(result.json()['rows'][0]['values'],['바오 스틸','94.252874'])
+        self.assertEqual(compare([Row(excel_row=2,values=['JIANGSU SHANGANG INTERNATIONALTRADE CO LTD'])],
+            [dict(group='회사',company_name='JIANGSU SHAGANG INTERNATIONAL TRADE CO., LTD.')], 'levenshtein').rows[0].values,['','88.888889'])
+
+    def test_existing_pair_always_selects_blank_groups_and_validates_method_and_destinations(self):
+        output=dict(mode='existing',column_id='group',score_column_id='score')
+        operation=Operation(kind='match_suppliers',column_ids=['company'],output=output,similarity_method='sequence')
+        self.assertEqual(operation.condition.column_id,'group');self.assertEqual(operation.condition.operator,'blank')
+        for changes in [dict(similarity_method='unknown'),dict(condition=dict(column_id='group',operator='not_blank')),
+                        dict(output={**output,'score_column_id':'company'}),dict(output={**output,'score_column_id':'group'})]:
+            with self.assertRaises(ValidationError): Operation.model_validate({**operation.model_dump(),**changes})
+        with self.assertRaises(ValidationError): Operation(kind='set',column_ids=['company'],assigned_value='A',similarity_method='sequence')
+
+    def test_tool_preserves_requested_method_and_both_existing_output_ids(self):
+        columns=[dict(column_id=id,header=id,role='reference') for id in ['company','group','score']]
+        context={'workspace':{**self.workspace,'columns':columns,'target_column_ids':['company']}}
+        tool=next(t for t in build_request_tools(context) if t.name=='match_suppliers')
+        result=tool.invoke(dict(method='sequence',output=dict(mode='existing',column_id='group',score_column_id='score')))
+        self.assertEqual(result['operation']['similarity_method'],'sequence')
+        self.assertEqual(result['operation']['output']['score_column_id'],'score')
+        self.assertEqual(result['operation']['condition']['operator'],'blank')
+        with self.assertRaises(ValueError): tool.invoke(dict(output=dict(mode='existing',column_id='group',score_column_id='missing')))
+
+    def test_partial_paired_write_recovery_is_bound_to_approved_columns_and_scope(self):
+        self.source['operation'].update(similarity_method='sequence',output=dict(mode='existing',column_id='group',score_column_id='score'))
+        self.create()
+        preview=self.client.post(self.url('preview'),json={'selected_count':3,'rows':[{'excel_row':2,'values':['BAOSHAN']}]})
+        self.assertEqual(preview.status_code,200,preview.text)
+        self.client.post(self.url('status'),json={'status':'PREVIEW_READY'})
+        wrong=self.client.post(self.url('apply'),json={'mode':'existing','column_id':'group','score_column_id':'other'})
+        self.assertEqual(wrong.status_code,409)
+        response=self.client.post(self.url('apply'),json={'mode':'existing','column_id':'group','score_column_id':'score'})
+        self.assertEqual(response.status_code,200,response.text)
+        job=self.app.state.operation_jobs[self.source['operation_job_id']]
+        evidence=WriteEvidence(worksheet_id='sheet',table_id='table',identity_column_id='id',blocks=[
+            dict(row_start=1,row_count=2,column_start=i+2,column_id=cid,before='a'*64,expected='b'*64,identities='c'*64)
+            for i,cid in enumerate(['group','score'])])
+        invalid=evidence.model_copy(deep=True);invalid.blocks[1].column_id='other'
+        with self.assertRaises(ConflictError): validate_evidence(job,'operation',invalid)
+        invalid=evidence.model_copy(deep=True);invalid.blocks[1].row_count=1
+        with self.assertRaises(ConflictError): validate_evidence(job,'operation',invalid)
+        invalid=evidence.model_copy(deep=True)
+        for block in invalid.blocks:block.row_count=4
+        with self.assertRaises(ConflictError): validate_evidence(job,'operation',invalid)
+        save_evidence(job,'operation',evidence);job.status='UNKNOWN'
+        result=recover(job,'operation',WriteObservation(values=['b'*64]*2,identities=['c'*64]*2,formulas=[False]*2))
+        self.assertEqual(result['status'],'APPLIED');self.assertEqual(job.result_column_ids,['group','score'])
+
+
+    def test_auto_keeps_first_pass_matches_and_only_runs_fallback_for_unmatched_unique_names(self):
+        refs=[dict(group='앞',company_name='A'),dict(group='뒤',company_name='B')]
+        values=['first','fallback','none','fallback','']
+        rows=[Row(excel_row=i+2,values=[v]) for i,v in enumerate(values)]
+        scores={'FIRST':{'levenshtein':[90,90],'sequence':[100,0]},
+                'FALLBACK':{'levenshtein':[80,80],'sequence':[95,95]},
+                'NONE':{'levenshtein':[70,80],'sequence':[60,65]}}
+        with patch('services.supplier_matching.score',side_effect=lambda a,b,m:scores[a][m][['A','B'].index(b)]) as calculate:
+            result=compare(rows,refs)
+        self.assertEqual([r.values for r in result.rows],[['뒤','90'],['뒤','95'],['','65'],['뒤','95'],['','']])
+        self.assertEqual(calculate.call_count,10)
+        self.assertFalse(any(c.args[0]=='FIRST' and c.args[2]=='sequence' for c in calculate.call_args_list))
+
+    def test_unspecified_job_method_and_tool_default_use_auto(self):
+        self.conversation.investigation.conditions[0].target.company_name='JIANGSU SHAGANG INTERNATIONAL TRADE CO., LTD.'
+        self.create()
+        result=self.client.post(self.url('preview'),json={'rows':[{'excel_row':2,'values':['JIANGSU SHANGANG INTERNATIONALTRADE CO LTD']}]})
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual(result.json()['rows'][0]['values'],['바오 스틸','94.252874'])
+        context={'workspace':{**self.workspace,'columns':[dict(column_id='company',header='상호',role='reference')],'target_column_ids':['company']}}
+        tool=next(t for t in build_request_tools(context) if t.name=='match_suppliers')
+        self.assertEqual(tool.invoke({})['operation']['similarity_method'],'auto')
+        self.assertEqual(tool.invoke({'method':'levenshtein'})['operation']['similarity_method'],'levenshtein')
 
 if __name__=='__main__': unittest.main()

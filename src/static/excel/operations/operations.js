@@ -53,7 +53,7 @@
                 options.setBusy(true);
 
                 var readWorkspace = workspace, readTarget = target;
-                if (operation.condition && operation.condition_scope === "all") {
+                if (operation.kind === "set" && operation.condition && operation.condition_scope === "all") {
                     readWorkspace = Object.assign({}, workspace, {row_filter: null});
                     readTarget = await Excel.run(async function (context) {
                         var info = await window.workspaceTable.layout(context, workspace);
@@ -68,7 +68,13 @@
                 check();
                 var ids = operation.column_ids.concat(operation.kind === "group" ? [operation.value_column_id] : []);
                 var destination = ui.destination ? ui.destination() : null;
-                var snapshot = await sheet.read(readWorkspace, readTarget, ids, progress, check, destination, null, null, operation.condition);
+                var snapshot = await sheet.read(readWorkspace, readTarget, ids, progress, check, destination, null, null, operation.condition, operation.kind === "match_suppliers");
+                if (!snapshot.rows.length) {
+                    await options.jobs.status(job, "NO_CHANGE");
+                    complete(destination ? "현재 범위에 그룹이 빈 행이 없어. 기존 그룹과 점수는 그대로 유지했어." : "현재 작업 범위에 비교할 행이 없어. 셀은 변경하지 않았어.",
+                        {kind: "operation", job_id: job.source.operation_job_id, status: "SUCCEEDED"});
+                    return;
+                }
                 var values = [], changed = 0, headers = [];
                 var comparisonRows = snapshot.rows;
                 if (operation.kind === "match_suppliers") {
@@ -109,7 +115,7 @@
                 values.forEach(function (row) { while (row.length < headers.length) row.push(""); });
                 if (destination) changed = values.filter(function (row, i) { return row[0] !== snapshot.rows[i].destination; }).length;
                 if (!changed && destination && !["group", "extract"].includes(operation.kind)) {
-                    if (destination && options.reviewed) {
+                    if (destination && options.reviewed && operation.kind !== "match_suppliers") {
                         var current = await sheet.read(readWorkspace, readTarget, ids, progress, check, destination, null, null, operation.condition);
                         if (current.stamp !== snapshot.stamp || JSON.stringify(current.rows) !== JSON.stringify(snapshot.rows) || JSON.stringify(current.scope_rows) !== JSON.stringify(snapshot.scope_rows)) throw new Error("확인 중 값이 바뀌었습니다. 다시 요청하세요.");
                         await options.reviewed(snapshot, destination);
@@ -187,7 +193,7 @@
             } else if (operation.kind === "replace") {
                 action = "문자열 치환 " + JSON.stringify(operation.find) + " → " + JSON.stringify(operation.replacement);
             } else if (operation.kind === "match_suppliers") {
-                action = "PDF 기준 거래처와 비교 / 최고 점수 90 이상 / 동점은 기준 목록 뒤 항목 / 공백·대소문자 통일";
+                action = (operation.similarity_method === "sequence" ? "SequenceMatcher 양방향 평균" : operation.similarity_method === "levenshtein" ? "Levenshtein" : "자동 매칭: Levenshtein 후 미분류만 SequenceMatcher") + " / PDF 기준 거래처와 비교 / 최고 점수 90 이상 / 동점은 기준 목록 뒤 항목 / 공백·대소문자 통일";
                 if (index === 1) action += " / 최고 유사도 점수";
             } else if (operation.kind === "map") {
                 action = "공백·대소문자 정리 기준 매핑 " + operation.mappings.length + "개 적용";
@@ -234,15 +240,15 @@
                 var writeValues = data.values, writeSnapshot = data.snapshot;
                 if (output.mode === "existing") {
                     if (data.operation.kind === "split" && data.names.length !== 1) throw new Error("여러 열로 분리하는 결과는 새 열로 저장하세요.");
-                    writeValues = data.values.map(function (row) { return [row[0]]; });
+                    writeValues = data.values.map(function (row) { return output.score_column_id ? row.slice() : [row[0]]; });
                 }
                 options.setBusy(true);
                 if (data.operation.kind === "match_suppliers" && output.mode === "existing") {
                     var current = await sheet.read(data.snapshot.workspace, data.snapshot.target, data.operation.column_ids,
-                        progress, function () {}, output.column_id);
+                        progress, function () {}, data.snapshot.output_column_ids || output.column_id, null, null, data.operation.condition, true);
                     if (current.stamp !== data.snapshot.stamp || JSON.stringify(current.rows) !== JSON.stringify(data.snapshot.rows) ||
                         JSON.stringify(current.scope_rows) !== JSON.stringify(data.snapshot.scope_rows)) throw new Error("비교 후 데이터가 바뀌었습니다. 새 미리보기를 확인하세요.");
-                    var matched = data.values.map(function (row, i) { return row[1] !== "" && Number(row[1]) >= 90 ? i : -1; }).filter(function (i) { return i >= 0; });
+                    var matched = data.values.map(function (row, i) { return row[0].trim() && row[1] !== "" && Number(row[1]) >= 90 ? i : -1; }).filter(function (i) { return i >= 0; });
                     writeValues = matched.map(function (i) { return writeValues[i]; });
                     writeSnapshot = Object.assign({}, data.snapshot, {
                         rows: matched.map(function (i) { return data.snapshot.rows[i]; }),
@@ -258,7 +264,7 @@
                             (data.names.length > 1 ? " " + (i + 1) : "");
                     });
 
-                if (output.mode === "existing") names = [data.snapshot.output_columns.find(function (c) { return String(c.column_id) === output.column_id; }).header];
+                if (output.mode === "existing") names = [output.column_id].concat(output.score_column_id ? [output.score_column_id] : []).map(function (id) { return data.snapshot.output_columns.find(function (c) { return String(c.column_id) === id; }).header; });
                 var dependencyRecord = options.prepareResult ? await options.prepareResult(data.snapshot, output) : null;
                 invalidate(true);
                 applyRequested = true;

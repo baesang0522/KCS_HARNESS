@@ -34,7 +34,7 @@
             isBusy: options.isBusy,
             setBusy: options.setBusy, status: ui.status, complete: options.complete, refresh: refresh,
             changed: function () { lastFormula = null; },
-            prepareResult: function (snapshot, output) { return dependencies.fromSnapshot(snapshot, output.mode === "existing" ? [output.column_id] : []); },
+            prepareResult: function (snapshot, output) { return dependencies.fromSnapshot(snapshot, output.mode === "existing" ? [output.column_id].concat(output.score_column_id ? [output.score_column_id] : []) : []); },
             result: async function (result, job, snapshot, record) {
                 workspace.columns = workspace.columns.filter(function (c) { return !result.columns.some(function (r) { return String(r.column_id) === String(c.column_id); }); }).concat(result.columns);
                 lastResults = result.columns.map(function (c) { return String(c.column_id); });
