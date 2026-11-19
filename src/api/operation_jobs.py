@@ -53,6 +53,8 @@ async def preview_job(job_id: UUID, conversation_id: UUID, payload: JobPreview, 
 async def begin_apply(job_id: UUID, conversation_id: UUID, payload: OutputPlacement, request: Request):
     async with request.app.state.conversations.edit(str(conversation_id)):
         job = service.find_job(request.app.state.operation_jobs, job_id, conversation_id)
+        from services.write_recovery import ensure_resolved
+        ensure_resolved(request.app.state, job.source, str(job_id))
         return service.begin_apply(job, payload)
 
 

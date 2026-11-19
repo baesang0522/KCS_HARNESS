@@ -205,7 +205,7 @@
         }
     }
 
-    async function applyFormulaPreview(preview, selection, progress) {
+    async function applyFormulaPreview(preview, selection, progress, evidence) {
         await validateFormulaPreview(preview, selection);
         var actions = preview.plan.actions;
         var completed = 0, frozen = 0, attempted = false, activeRange = "", expectedFormulas = [];
@@ -218,6 +218,7 @@
                     return target;
                 });
                 await context.sync();
+                if (evidence) await evidence(context, sheet, targets, false);
                 var total = targets.reduce(function (sum, target) { return sum + target.rowCount; }, 0);
                 // 뒤 결과가 앞 결과를 참조할 수 있으므로 결과 열 순서대로 완료한다.
                 for (var index = 0; index < targets.length; index++) {
@@ -274,6 +275,7 @@
                         if (progress) progress("수식 계산 확인", completed, total);
                     }
                 }
+                if (evidence) await evidence(context, sheet, targets, true);
                 // 모든 결과 계산을 마친 뒤 고정해야 뒤 수식이 앞 결과를 참조할 수 있다.
                 for (var index = 0; index < targets.length; index++) {
                     var target = targets[index];

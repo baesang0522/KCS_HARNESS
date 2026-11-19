@@ -146,9 +146,10 @@
                 if (options.prepareOutput) await options.prepareOutput(approved, selection);
                 var result = await excel.applyFormulaPreview(approved, selection, function (label, done, total) {
                     ui.setStatus(label + " · " + done.toLocaleString() + "/" + total.toLocaleString() + "셀");
-                });
+                }, options.recovery ? options.recovery.formula(formulaJob.formula_job_id, selection, selection.workspace_id ? options.recoveryWorkspace() : null) : null);
                 applied = true;
                 var ids = options.getResultColumns ? await options.getResultColumns(result, selection) : [];
+                if (options.recovery && options.onResult) options.recovery.remember(formulaJob.formula_job_id, function () { return options.onResult(result, selection, ids); });
                 await api.requestJson(
                     "/formula-jobs/" + formulaJob.formula_job_id + "/previews/" +
                     preview.preview_id + "/complete",
@@ -158,6 +159,7 @@
                 recorded = true;
                 ui.setApplied(result);
                 if (options.onResult) await options.onResult(result, selection, ids);
+                if (options.recovery) options.recovery.completed(formulaJob.formula_job_id);
                 options.complete(result.address + " · " + result.row_count + "행에 계산 결과를 값으로 저장했습니다.",
                     {kind: "formula", job_id: formulaJob.formula_job_id, status: "SUCCEEDED"});
             } catch (error) {

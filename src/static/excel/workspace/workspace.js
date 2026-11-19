@@ -25,14 +25,15 @@
             getWorkspace: function () { return workspace; },
             getLastFormula: function () { return lastFormula; },
             refresh: refresh, newRequestId: options.api.newRequestId,
-            captureDependencies: function (selection) { return dependencies.formula(workspace, selection); }
+            captureDependencies: function (selection) { return dependencies.formula(workspace, selection); },
+            captureResults: function (baseline, plan, result, selection, ids) { return dependencies.formulaResults(workspace, baseline, plan, result, selection, ids); }
         });
         var operations = window.createOperations({
-            api: options.api,
+            api: options.api, recovery: options.recovery,
             jobs: jobs,
             isBusy: options.isBusy,
             setBusy: options.setBusy, status: ui.status, complete: options.complete, refresh: refresh,
-            changed: function () { lastFormula = null; finalized = null; },
+            changed: function () { lastFormula = null; },
             prepareResult: function (snapshot, output) { return dependencies.fromSnapshot(snapshot, output.mode === "existing" ? [output.column_id] : []); },
             result: async function (result, job, snapshot, record) {
                 workspace.columns = workspace.columns.filter(function (c) { return !result.columns.some(function (r) { return String(r.column_id) === String(c.column_id); }); }).concat(result.columns);
@@ -51,10 +52,12 @@
                 dependencies.register(workspace, await dependencies.fromSnapshot(snapshot, [columnId]));
                 await dependencies.reconcile(workspace); ui.review(workspace); await save();
             },
-            finalized: async function (ids, count) {
+            finalized: async function (ids, count, snapshot) {
                 await refresh();
                 if (dependencies.required(workspace).some(function (id) { return ids.includes(id); })) throw new Error("입력이나 범위가 바뀐 결과입니다. 재처리한 뒤 다시 확정하세요.");
-                finalized = {column_ids: ids, row_count: count, at: new Date().toISOString()}; await save();
+                var record = await dependencies.fromSnapshot(snapshot, []);
+                finalized = {column_ids: ids, row_count: count, at: new Date().toISOString(), evidence: record}; await save();
+                showFinal();
             }
         });
         var similarity = window.createSimilarityController({
@@ -140,7 +143,7 @@
                 });
                 target.sheet_name = workspace.sheet_name;
                 // 수식 대상은 위치 번호이므로 열 삽입·삭제 후 재선택한다.
-                lastFormula = null; finalized = null;
+                lastFormula = null;
                 var role = workspace.task_type === "model_normalization" ? "model_spec" : "company_name";
                 var fallback = lastResults.length ? lastResults.slice(0, 1) : workspace.columns.filter(function (c) { return c.role === role; }).map(function (c) { return String(c.column_id); });
                 lostTarget = operations.reconcile(workspace, target, fallback);
@@ -153,9 +156,15 @@
                 if (finalized && finalized.column_ids.some(function (id) { return dependencies.required(workspace).includes(id); })) finalized = null;
                 await save();
             }
-            ui.review(workspace);
+            if (finalized && (!finalized.evidence || finalized.column_ids.some(function (id) { return !workspace.columns.some(function (c) { return String(c.column_id) === id; }); }) ||
+                (finalized.evidence.scope_key !== null && finalized.evidence.scope_key !== window.operationsSheet.filterKey(workspace.row_filter)) ||
+                (await dependencies.read(workspace, finalized.evidence)).digest !== finalized.evidence.digest)) {
+                finalized = null; await save();
+            }
+            showFinal(); ui.review(workspace);
             return lostTarget;
         }
+        function showFinal() { ui.finalRecord(finalized, workspace); }
         function display(preferred, resetMode) {
             similarity.reset();
             var ids = (preferred || lastResults).filter(function (id) { return workspace.columns.some(function (c) { return String(c.column_id) === String(id); }); });
@@ -328,7 +337,7 @@
             similarity.reset();
             source = null; ready = false; creationName = null;
             workspace = target = null; lastResults = []; lastFormula = null; finalized = null;
-            operations.reset(); ui.setup();
+            showFinal(); operations.reset(); ui.setup();
         }
         async function open(nextType) {
             var wasBusy = options.isBusy();
@@ -413,7 +422,7 @@
                 // Read form values before refresh repaints the current settings.
                 var role = ui.role(), sourceColumns = ui.importSelection(), filter = ui.scope();
                 var importPolicy = ui.importPolicy();
-                await refresh(); operations.invalidate(); similarity.reset(); finalized = lastFormula = null;
+                await refresh(); operations.invalidate(); similarity.reset(); lastFormula = null;
                 if (action === "scope") {
                     ui.current(workspace, target); ui.status("조건 열과 값을 선택하고 ‘범위 적용’을 누르세요.");
                     return;
@@ -489,7 +498,8 @@
 
                 try {
                     await save();
-                    if (options.beforeWorkspaceChange) options.beforeWorkspaceChange(null);
+                    await options.newInvestigation();
+                    ui.open(type);
                     newSource();
 
 
@@ -513,7 +523,7 @@
             openScope: function () { return manage("scope"); },
             openSourceColumns: function () { return manage("sources"); },
             dismiss: function () { operations.invalidate(); similarity.reset(); ui.hide(); if (groupReview) groupReview.dismiss(); },
-            reset: function () { if (groupReview) groupReview.dismiss(); similarity.reset(); source = workspace = target = null; lastResults = []; lastFormula = null; ready = false; finalized = null; operations.reset(); ui.reset(); },
+            reset: function () { if (groupReview) groupReview.dismiss(); similarity.reset(); source = workspace = target = null; lastResults = []; lastFormula = null; ready = false; finalized = null; showFinal(); operations.reset(); ui.reset(); },
             setBusy: function (busy) { ui.busy(busy, ready); operations.busy(busy); similarity.busy(); if (groupReview) groupReview.busy(busy); },
             referenceTarget: referenceTarget,
             agentInput: async function () {
@@ -557,6 +567,14 @@
                 await refresh(); ui.open(workspace.task_type); display(operation.column_ids); operations.configure(operation);
                 ui.status(operation.condition ? "현재 데이터에서 조건에 맞는 행을 확인합니다…" : "요청한 설정을 채웠습니다. 대상·조건을 확인하고 ‘변경 내용 확인’을 누르세요.");
             },
+            recoveryWorkspace: function () { return workspace; },
+            recovered: async function (receipt) {
+                if (!workspace || workspace.worksheet_id !== receipt.worksheet_id || !receipt.evidence || String(workspace.table_id) !== receipt.evidence.table_id) return;
+                await refresh();
+                var ids = Array.from(new Set(receipt.evidence.blocks.map(function (b) { return b.column_id; })));
+                dependencies.register(workspace, {input_ids: [], output_ids: ids, needs_review: true, full: false, scope_key: null});
+                lastResults = ids; finalized = null; ui.review(workspace); await save();
+            },
             formulaTarget: formula.formulaTarget,
             validateFormulaSource: formula.validateFormulaSource,
             prepareFormulaOutput: formula.prepareFormulaOutput,
@@ -576,10 +594,8 @@
                 });
                 var record = formula.dependencies();
                 if (record && ids.length) {
-                    record.output_ids = ids;
-                    record.full = record.full && result.targets.every(function (range) { return range.row_start === selection.row_start && range.row_count === selection.row_count; });
-                    record.coverage = null;
-                    dependencies.register(workspace, record);
+                    var records = formula.resultDependencies() || await dependencies.formulaResults(workspace, record, formula.plan(), result, selection, ids);
+                    records.forEach(function (item) { dependencies.register(workspace, item); });
                     await dependencies.reconcile(workspace);
                 }
                 lastResults = ids; finalized = null;

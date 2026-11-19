@@ -3,7 +3,7 @@ import logging
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agents.request_router import RequestDecision, route_request
-from services.recommendation.service import resolve_advice_columns
+from services.recommendation.service import resolve_advice_columns, resolve_advice_subject
 from repositories.conversation_repository import StoredTurn
 from services.errors import MODEL_RESPONSE_ERROR, ConflictError, ModelProcessingError
 from services.investigation import investigation_context
@@ -80,7 +80,7 @@ def decision_action(decision, workspace):
     elif decision.intent == "investigation":
         action = {"type": "open_investigation"}
     elif decision.intent == "recommendation":
-        action = {"type": "analyze_data", "column_ids": decision.analysis_column_ids}
+        action = {"type": "analyze_data", "column_ids": decision.analysis_column_ids, "advice_subject": decision.advice_subject}
     return action, answer
 
 
@@ -113,11 +113,15 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
             from services.agent_runs import active_context
             context["agent_run"] = active_context(conversation, workspace)
             if advice_requested:
-                decision = RequestDecision(
-                    intent="recommendation",
-                    analysis_column_ids=resolve_advice_columns(workspace, None),
-                    answer="대상 열의 전체 데이터를 읽어 조언을 준비하겠습니다.",
-                )
+                subject = resolve_advice_subject(workspace)
+                if subject is None:
+                    decision = RequestDecision(intent="clarify", answer="기업·거래처와 모델규격 중 어느 쪽의 AI 의견이 필요한가요?")
+                else:
+                    decision = RequestDecision(
+                        intent="recommendation", advice_subject=subject,
+                        analysis_column_ids=resolve_advice_columns({**workspace, "advice_subject": subject}, None),
+                        answer="대상 열의 전체 데이터를 읽어 조언을 준비하겠습니다.",
+                    )
             else:
                 decision, reasoning = await route_request(runtime, messages, task_context=context)
             answer = decision.answer

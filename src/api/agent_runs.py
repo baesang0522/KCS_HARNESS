@@ -35,7 +35,7 @@ async def pause(conversation_id: UUID, run_id: UUID, request: Request, payload: 
         service.find_run(conversation, run_id)
         if conversation.active_agent_run_id == str(run_id):
             run = service.find_run(conversation, run_id)
-            if run.status not in {"UNKNOWN", "CANCELLED"}:
+            if run.status not in {"UNKNOWN", "CANCELLED", "COMPLETED"}:
                 run.status = "PAUSED"
                 run.answer = payload.message if payload and payload.message else "실행을 보류했습니다. 최신 값을 확인하고 채팅으로 이어가세요."
         return service.public(service.find_run(conversation, run_id))

@@ -72,7 +72,7 @@
                 if (!mode) return;
                 var current = await currentHelpContext();
                 document.getElementById("cleaning-help-scope").textContent = current.sheet_name +
-                    (mode === "advice" ? ((current.task_type === "model_normalization" || current.advice_subject === "model")
+                    (mode === "advice" ? ((current.task_type === "model_normalization" || (current.task_type === "investigation" && current.columns.some(function (c) { return c.column_id === helpPreferredId && ["declared_name", "trade_name", "model_spec"].includes(c.role); })))
                         ? " · 대문자 기준 빈도 상위 100개 조합" : " · 현재 조건에 맞는 행·열 설명")
                         : " · 현재 대상 " + current.row_count.toLocaleString() + "행");
                 if (mode === "advice") return;
@@ -119,7 +119,7 @@
             try {
                 var current = await currentHelpContext();
                 options.setBusy(false);
-                await options.sendMessage({workspace_id: current.workspace_id});
+                await options.sendMessage({workspace_id: current.workspace_id, column_ids: helpPreferredId ? [helpPreferredId] : current.target_column_ids});
             } catch (error) {
                 notice.textContent = error.message;
             } finally {

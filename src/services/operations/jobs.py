@@ -27,6 +27,7 @@ JobStatus = Literal[
     "CANCELLED",
     "FAILED",
     "UNKNOWN",
+    "NOT_APPLIED",
 ]
 
 
@@ -106,6 +107,8 @@ class JobPreview(StrictModel):
 
 
 class OperationJob(StrictModel):
+    write_evidence: dict | None = None
+    write_checks: list[dict] = Field(default_factory=list)
     source: CreateOperationJob
     selected_count: int | None = Field(default=None, ge=1, le=400000)
     status: JobStatus = "CREATED"

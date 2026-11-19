@@ -228,18 +228,27 @@ test('initial setup allows a user column without any business role',async()=>{
     assert.equal(ui.extras().length,1);assert.equal(ui.extras()[0].source_index,0);
 });
 
-test('source column import preserves numeric and boolean values and number formats after sorting',async()=>{
+for (const numericId of [false, true]) test(`source column import preserves values, formats and links after sorting; numeric ID=${numericId}`,async()=>{
     const h=createInvestigationHost(),original=h.addSheet('원본',[['이름','금액'],['A',123.45],['B',0],['C',true]]);
     original.formats=[[],['General','0.00'],['General','0.00'],['General','General']];
     const work=await h.window.workspaceCopy.create({worksheet_id:original.id,task_type:'investigation',
         roles:[],mapping:{},reference_columns:[{source_index:0}],column_count:2,column_indexes:[0,1],
         row_start:0,row_count:4,headers:['이름','금액'],address:'A1:B4'},'조사_002',noop);
+    if(numericId){
+        const backup=h.sheets.find(s=>s.id===work.source_snapshot.worksheet_id);
+        backup.tables.items[0].columns.items.find(c=>c.name==='금액').id=0;
+        work.source_snapshot.columns.find(c=>c.header==='금액').column_id=0;
+    }
     const sheet=h.sheets.find(s=>s.id===work.worksheet_id);sheet.cells.splice(1,3,...sheet.cells.slice(1).reverse());
     const candidates=await h.window.sourceColumns.list(work);
-    const result=await h.window.sourceColumns.append(work,String(candidates[0].column_id),noop);
+    assert.equal(typeof candidates[0].column_id,numericId?'number':'string');
+    const result=await h.window.sourceColumns.append(work,candidates[0].column_id,noop);
     const c=result.columns[0].column_index;
     assert.deepEqual(sheet.cells.slice(1).map(r=>r[c]),[true,0,123.45]);
     assert.deepEqual(sheet.formats.slice(1).map(r=>r[c]),['General','0.00','0.00']);
+    assert.equal(result.columns[0].source_column_id,String(candidates[0].column_id));
+    work.columns.push(...result.columns);
+    assert.equal((await h.window.sourceColumns.list(work)).length,0);
 });
 
 test('chat samples stop after ten matching rows without scanning the entire table',async()=>{

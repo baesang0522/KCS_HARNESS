@@ -9,7 +9,10 @@ from api.operations import router as operations_router
 from api.taskpane import router as taskpane_router
 from api.operation_jobs import router as operation_jobs_router
 
+from api.write_recovery import router as recovery_router
+
 router = APIRouter()
+router.include_router(recovery_router)
 router.include_router(chat_router)
 router.include_router(agent_router)
 router.include_router(formula_jobs_router)

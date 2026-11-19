@@ -163,7 +163,7 @@
             snapshot.output_column_id, progress, function () {});
         if (JSON.stringify(rows) !== JSON.stringify(expected)) throw new Error('입력값 또는 기존 결과값이 바뀌었습니다. 미리보기를 다시 만드세요.');
     }
-    async function write(snapshot, values, names, output, progress, formats) {
+    async function write(snapshot, values, names, output, progress, formats, beforeWrite) {
         if (values.length !== snapshot.rows.length || !names.length || names.length > 100 ||
             values.some(function (row) { return row.length !== names.length || row.some(function (v) {
                 return typeof v === 'string' ? v.length > 32767 : !formats || !(typeof v === 'boolean' || typeof v === 'number' && Number.isFinite(v));
@@ -222,6 +222,7 @@
                     info = await table.layout(context, snapshot.workspace);
                     outputs = table.selectedColumns(info, added.map(function (c) { return String(c.id); }));
                 }
+                if (beforeWrite) await beforeWrite(context, info, outputs);
                 var stamp = info.stamp;
                 for (var run of blocks(snapshot.rows, Math.max(1, Math.min(batchSize, Math.floor(20000 / names.length))))) {
                     info = await table.layout(context, snapshot.workspace);

@@ -292,9 +292,11 @@ class FormulaCompletion(BaseModel):
 
 
 class FormulaJob(BaseModel):
+    write_evidence: dict | None = None
+    write_checks: list[dict] = Field(default_factory=list)
     task_type: Literal["formula"] = "formula"
     status: Literal[
-        "CREATED", "PLANNING", "PREVIEW_READY", "NEEDS_INPUT", "FAILED", "APPLYING", "UNKNOWN", "APPLIED"
+        "CREATED", "PLANNING", "PREVIEW_READY", "NEEDS_INPUT", "FAILED", "APPLYING", "UNKNOWN", "APPLIED", "NOT_APPLIED"
     ] = "CREATED"
     source: CreateFormulaJobRequest
     preview: FormulaPreview | None = None

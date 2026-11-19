@@ -36,8 +36,12 @@ async def analyze_formula_job(formula_job_id: UUID, request: Request):
 @router.post("/{formula_job_id}/previews/{preview_id}/approve", response_model=FormulaPreview)
 async def approve_preview(formula_job_id: UUID, preview_id: UUID, request: Request,
                           payload: FormulaApprovalRequest | None = None):
+    from services.write_recovery import ensure_resolved
+    job = service.find_formula_job(request.app.state.formula_jobs, formula_job_id)
     try:
-        return service.approve_preview(formula_job_id, preview_id, payload, request.app.state.formula_jobs)
+        async with request.app.state.conversations.edit(str(job.source.conversation_id)):
+            ensure_resolved(request.app.state, job.source, str(formula_job_id))
+            return service.approve_preview(formula_job_id, preview_id, payload, request.app.state.formula_jobs)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=validation_message(error)) from error
 

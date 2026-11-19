@@ -99,6 +99,8 @@ class AgentTests(unittest.TestCase):
         completed=self.advance('answer_question',dict(answer='AA 2행, AB 1행이며 유사도는 50점입니다.'),self.receipt(second,rows=self.rows))
         self.assertEqual(completed['status'],'COMPLETED')
         self.assertEqual(completed['observation']['rows'][0]['score'],50)
+        paused=self.client.post(self.base+'/pause',json={'message':'수동 화면 열기'}).json()
+        self.assertEqual(paused,completed)
         count=len(self.calls)
         again=self.client.post(self.base+'/advance',json=self.last_payload)
         self.assertEqual(again.json()['status'],'COMPLETED');self.assertEqual(len(self.calls),count)

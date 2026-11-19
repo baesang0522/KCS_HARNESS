@@ -29,6 +29,7 @@
   <script defer src="operations/operations_mapping.js"></script>
   <script defer src="operations/operations_ui.js"></script>
   <script defer src="operations/extraction_suggestions.js"></script>
+  <script defer src="operations/write_recovery.js"></script>
   <script defer src="operations/operations.js"></script>
   <script defer src="similarity/similarity_sheet.js"></script>
   <script defer src="similarity/similarity.js"></script>
@@ -59,13 +60,15 @@
       <button type="button" class="workspace-launch" id="open-workspace">작업 준비</button>
       <button type="button" class="workspace-launch" id="open-scope" hidden>작업 범위</button>
       <button type="button" class="icon-button" id="new-chat"
-              aria-label="홈으로 · 새 대화" title="홈으로 · 새 대화">
+              aria-label="새 조사" title="새 조사">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="m3 10 9-7 9 7M5 9v12h5v-7h4v7h5V9"/>
         </svg>
       </button>
     </header>
+    <p id="work-final-record" hidden role="status"></p>
     <p id="work-review-warning" class="notice" role="status" hidden></p>
+    <section id="write-recovery" class="notice" aria-label="쓰기 결과 확인" hidden></section>
     <main>
       <section class="normalization-panel" id="documents-panel" aria-labelledby="documents-title" hidden>
         <h2 id="documents-title" tabindex="-1">PDF 추출내용</h2>
@@ -170,7 +173,7 @@
 <!-- GROUP_REVIEW_PAUSED: 묶음 검토 보류(2026-11-18): 재사용 여부 검토 후 불필요하면 삭제. 기존 저장 정보는 보존.
             <button type="button" id="work-groups">묶음 검토</button>
 -->
-            <button type="button" id="work-new">새 원본으로 시작</button>
+            <button type="button" id="work-new">새 조사 시작</button>
           </div>
           <details><summary>열 구성 보기</summary><pre id="work-column-summary"></pre></details>
           <details><summary>열 역할 지정</summary>
@@ -297,11 +300,11 @@
               <button type="button" class="primary" id="op-apply" disabled>확인한 결과를 새 열로 만들기</button>
               <button type="button" id="op-edit">설정 다시 보기</button>
             </section>
-            <button type="button" id="op-finalize">현재 대상 열의 최종 결과 확인</button>
+            <button type="button" id="op-finalize">최종 결과로 기록 (선택)</button>
             <section id="op-final-review" hidden aria-label="최종 결과 확인">
               <p id="op-final-summary"></p>
-              <p>현재 값을 최종 결과로 채택합니다. 원본은 유지되며 후속 작업도 계속할 수 있습니다.</p>
-              <button type="button" class="primary" id="op-confirm-final">이 결과로 확정</button>
+              <p>조사를 마칠 때 선택적으로 남기는 기록입니다. 정제나 다음 작업을 진행하기 위한 승인은 아닙니다.</p>
+              <button type="button" class="primary" id="op-confirm-final">현재 결과 기록</button>
               <button type="button" id="op-cancel-final">돌아가기</button>
             </section>
           </section>

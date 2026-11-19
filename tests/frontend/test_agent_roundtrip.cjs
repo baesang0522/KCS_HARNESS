@@ -91,10 +91,10 @@ test('stop while Excel is reading cancels the exact server step and ignores late
     assert.equal(h.requests.filter(r=>r.url.endsWith('/advance')).length,1);
     assert.equal(h.actions.length,0);assert.equal(h.chat.isBusy(),false);
 });
-test('sheet changed during model response pauses even a completed answer before displaying it',async()=>{
+test('sheet changed during model response suppresses stale completion without rewriting its server receipt',async()=>{
     const h=await setup();h.window.readAgentData=async()=>({rows:[],verify:async()=>{throw new Error('입력값이 바뀌었습니다.');}});
     await h.chat.sendMessage();
-    assert(h.requests.some(r=>r.url.endsWith('/pause')));
+    assert(!h.requests.some(r=>r.url.endsWith('/pause')));
     assert(!h.document.getElementById('conversation').textContent.includes('실제 2행 확인'));
     assert.match(h.document.getElementById('conversation').textContent,/입력값이 바뀌었습니다/);
 });
@@ -161,4 +161,12 @@ test('result pagination keeps all rows and renders cell strings as text',async()
     await details.querySelectorAll('button')[1].emit('click');
     assert.match(details.textContent,/101–101 \/ 101/);assert.match(details.textContent,/<script>last<\/script>/);
     assert.equal(details.querySelectorAll('script').length,0);
+});
+
+test('opening manual panels after completion never pauses the completed run or replaces its answer',async()=>{
+ const h=await setup();await h.chat.sendMessage();
+ const before=h.document.getElementById('conversation').textContent;
+ await h.agent.pause();
+ assert(!h.requests.some(r=>r.url.endsWith('/pause')));
+ assert.equal(h.document.getElementById('conversation').textContent,before);
 });

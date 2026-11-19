@@ -4,7 +4,7 @@
     var workspace = null, formula = null, help = null, documents = null, investigation = null, reviewPreprocess = null;
     var connection = document.getElementById('connection');
     var diagnostic = document.getElementById('diagnostic');
-    var agent = null;
+    var agent = null, recovery = null;
     var ready = false;
     var build = (document.querySelector('meta[name="kcs-ui-version"]') || {}).content || "확인 필요";
     diagnostic.textContent = 'Office 초기화 대기 · ' + navigator.userAgent;
@@ -35,6 +35,7 @@
         beforeSend: function () { return investigation && investigation.ensureSynced(); },
         onConversationChanged: async function (id) {
             if (reviewPreprocess) reviewPreprocess.reset();
+            if (recovery) { recovery.reset(); await recovery.refresh(); }
             await Promise.all([documents && documents.load(id), investigation && investigation.load(id), agent && agent.load(id)]);
         },
         onBusy: function (value) {
@@ -64,6 +65,7 @@
         closeTaskCards();
         chat.enterConversation();
         chat.appendMessage('assistant', text);
+        if (recovery && outcome) recovery.refresh();
     }
     async function handleUIAction(action, instruction) {
         closeTaskCards();
@@ -125,7 +127,10 @@
         button.addEventListener('click', async function () { if (!chat.isBusy()) { if (agent) await agent.pause(); closeTaskCards(); } });
     });
 
+    recovery = window.createWriteRecovery({api: api, getConversationId: chat.getConversationId, getWorkspace: function () { return workspace && workspace.referenceTarget(); },
+        isBusy: chat.isBusy, setBusy: chat.setBusy, onRecovered: function (receipt) { return workspace.recovered(receipt); }});
     workspace = window.createWorkspaceController({
+        recovery: recovery,
         api: api,
         enterConversation: chat.enterConversation,
         showWorkspace: closeTaskCards,
@@ -134,13 +139,16 @@
         isBusy: chat.isBusy,
         setBusy: chat.setBusy,
         getConversationId: chat.getConversationId,
+        newInvestigation: chat.newConversation,
         beforeWorkspaceChange: function (target) { if (investigation) investigation.validateWorkspace(target); },
         onWorkspaceReady: async function (target) {
             updateWorkspaceButton();
             if (investigation) await investigation.bind(target);
+            if (recovery) await recovery.refresh();
         }
     });
     formula = window.createFormulaController({
+        recovery: recovery, recoveryWorkspace: workspace.recoveryWorkspace,
         ui: window.createFormulaUI({
             conversation: document.getElementById('conversation'),
             scrollArea: document.querySelector('main'),

@@ -120,6 +120,12 @@
                 importBusy = busy; updateImport();
                 if (columns) columns.setBusy(busy);
             },
+            finalRecord: function (record, workspace) {
+                var element = el("final-record"); element.hidden = !record;
+                element.textContent = record ? "최종 결과 기록 · " + record.column_ids.map(function (id) {
+                    var column = workspace.columns.find(function (c) { return String(c.column_id) === id; }); return column ? column.header : id;
+                }).join(", ") + " · " + record.row_count.toLocaleString() + "행 · " + new Date(record.at).toLocaleString() : "";
+            },
             review: function (workspace) {
                 var ids = window.resultDependencies.required(workspace);
                 var warning = el("review-warning");
