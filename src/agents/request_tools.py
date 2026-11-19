@@ -4,7 +4,7 @@ from services.errors import SHARED_MESSAGES
 from services.operations.schemas import Mapping, Operation, Rule, RowFilter, ScopeRequest, extraction_column_id
 from services.similarity import SimilaritySelection
 from services.group_review import GroupReviewRequest
-from services.recommendation.service import resolve_advice_columns, resolve_columns
+from services.recommendation.service import resolve_advice_columns, resolve_advice_subject, resolve_columns
 
 
 def build_request_tools(task_context: dict):
@@ -307,12 +307,18 @@ def build_request_tools(task_context: dict):
     @tool
     def recommend_preprocessing(
             column_ids: list[str] | None = None,
+            subject: Literal["company", "model"] | None = None,
     ) -> dict:
-        """사용자가 AI/LLM 의견이나 데이터 분석 조언을 명시적으로 요청했을 때 사용한다."""
-        ids = resolve_advice_columns(workspace, column_ids)
+        """명시적인 AI 의견 요청. 기업/거래처는 company, 모델규격/품명은 model.
+        사용자가 주제를 명시하면 subject에 전달하고, 미지정이면 대상 열의 역할로 판단한다."""
+        subject = resolve_advice_subject(workspace, column_ids, subject)
+        if subject is None:
+            return {"intent": "clarify", "answer": "기업·거래처와 모델규격 중 어느 쪽의 AI 의견이 필요한가요? 대상 열도 알려주세요."}
+        ids = resolve_advice_columns({**workspace, "advice_subject": subject}, column_ids)
 
         return {
             "intent": "recommendation",
+            "advice_subject": subject,
             "task_type": None,
             "operation": None,
             "similarity": None,

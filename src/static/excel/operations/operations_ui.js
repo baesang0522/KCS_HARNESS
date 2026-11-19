@@ -167,17 +167,7 @@
                     data.values.forEach(function (row) { counts[row[1]] += 1; });
                     el("summary").textContent = count + "행 확인 · 결과 2열 · 단일 후보 " + counts["단일 후보"] +
                         "행 · 미검출 " + counts["미검출"] + "행 · 복수 후보 " + counts["확인 필요 · 복수 후보"] + "행";
-                    var examples = el("extraction-preview");
-                    examples.textContent = "앞 10행 미리보기";
-                    examples.hidden = false;
-                    data.values.slice(0, 10).forEach(function (row, index) {
-                        var item = document.createElement("p");
-                        item.style.whiteSpace = "pre-wrap";
-                        item.textContent = data.snapshot.rows[index].excel_row + "행: " +
-                            data.snapshot.rows[index].values[0].slice(0, 160) + " → " +
-                            (row[0].slice(0, 160) || "(후보 없음)") + " · " + row[1];
-                        examples.appendChild(item);
-                    });
+
                 }
                 if (data.operation.kind === "group") {
                     var counts = {"변경": 0, "유지": 0, "확인 필요": 0};
@@ -216,18 +206,43 @@
                 if (existing) {
                     var destination = data.snapshot.output_columns.find(function (c) { return String(c.column_id) === data.snapshot.output_column_id; });
                     el("summary").textContent += " · 기존 ‘" + destination.header + "’ 열의 " + data.changed + "행 변경";
-                    var examples = el("extraction-preview"); examples.hidden = false; examples.textContent = "기존 값 → 적용할 값 (앞 10행)";
-                    data.values.slice(0, 10).forEach(function (row, i) {
-                        var line = document.createElement("p");
-                        line.textContent = data.snapshot.rows[i].excel_row + "행: " + data.snapshot.rows[i].destination.slice(0, 160) + " → " + row[0].slice(0, 160) +
-                            (["group", "extract"].includes(data.operation.kind) ? " · " + row[1] : ""); examples.appendChild(line);
-                    });
                     if (data.operation.kind === "split" && data.names.length > 1) {
                         el("summary").textContent += " · 여러 열로 분리하는 결과는 새 열 저장을 선택하세요.";
                     } else if (data.names.length > 1) el("summary").textContent += " · 상태 정보는 미리보기에서 확인하고 첫 번째 결과값만 반영합니다.";
                 }
                 if (conditional) el("summary").textContent = "조건에 맞는 " + count + "행 중 " + data.changed.toLocaleString() + "행 변경 예정";
                 else if (data.snapshot.row_filter) el("summary").textContent += " · 작업 조건에 맞는 행만 처리합니다.";
+                var examples = el("extraction-preview"), offset = 0;
+                var special = ["group", "extract"].includes(data.operation.kind);
+                var rows = data.values.map(function (values, index) {
+                    var original = data.snapshot.rows[index];
+                    var before = existing || conditional ? original.destination : original.values[data.operation.kind === "group" ? original.values.length - 1 : 0];
+                    var outputs = special ? values.slice(0, 1) : values;
+                    return {row: original.excel_row, before: before, after: outputs,
+                        changed: outputs.length !== 1 || before !== outputs[0],
+                        blank: outputs.some(function (value) { return !String(value).trim(); }),
+                        note: special ? values[1] : ""};
+                });
+                var blanks = rows.filter(function (row) { return row.blank; }).length;
+                el("summary").textContent += " · 빈 결과 " + blanks + "행 · 대상: " + data.snapshot.columns.map(function (c) { return c.header; }).join(", ");
+                rows.sort(function (a, b) { return Number(b.changed || b.blank) - Number(a.changed || a.blank); });
+                examples.hidden = false;
+                function renderExamples() {
+                    examples.textContent = "변경·빈 결과 우선 · " + (offset + 1) + "–" + Math.min(offset + 10, rows.length) + " / " + rows.length + "행";
+                    rows.slice(offset, offset + 10).forEach(function (row) {
+                        var line = document.createElement("p"); line.style.whiteSpace = "pre-wrap";
+                        line.textContent = row.row + "행: " + (row.before || "(빈 값)") + " → " + row.after.map(function (v) { return v || "(빈 결과)"; }).join(" | ") +
+                            " · " + (row.changed ? "변경" : "유지") + (row.note ? " · " + row.note : "");
+                        examples.appendChild(line);
+                    });
+                    [["이전", -10], ["다음", 10]].forEach(function (item) {
+                        var button = document.createElement("button"); button.type = "button"; button.textContent = item[0];
+                        button.disabled = item[1] < 0 ? offset === 0 : offset + 10 >= rows.length;
+                        button.dataset.previewDisabled = String(button.disabled);
+                        button.addEventListener("click", function () { var next = offset + item[1]; if (next >= 0 && next < rows.length) { offset = next; renderExamples(); } }); examples.appendChild(button);
+                    });
+                }
+                renderExamples();
             },
             destination: function () { if (conditional) return conditional.destination_column_id; return el("output-mode").value === "existing" ? el("existing-column").value : null; },
             output: function () {
@@ -269,7 +284,7 @@
                 el("final-review").hidden = false;
             },
             busy: function (busy, processing) {
-                document.getElementById("operations").querySelectorAll("button,select,input,textarea").forEach(function (control) { control.disabled = busy; });
+                document.getElementById("operations").querySelectorAll("button,select,input,textarea").forEach(function (control) { control.disabled = busy || control.dataset.previewDisabled === "true"; });
                 el("column").disabled = busy || el("kind").value === "extract";
                 el("apply").disabled = busy || !hasPreview;
                 el("cancel").hidden = !processing; el("cancel").disabled = !processing;

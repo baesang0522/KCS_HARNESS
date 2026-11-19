@@ -26,7 +26,7 @@
             var info = await window.workspaceTable.layout(context, workspace);
             return {row_start: info.body.rowIndex, row_count: info.body.rowCount, stamp: info.stamp};
         });
-        if (workspace.task_type === "model_normalization" || (workspace.task_type === "investigation" && workspace.advice_subject === "model")) {
+        if (workspace.task_type === "model_normalization" || (workspace.task_type === "investigation" && expected.advice_subject === "model")) {
             var grouped = await window.recommendationSheet.readModelAdvice(workspace, full, columnIds, progress, check);
             check();
             return Object.assign({

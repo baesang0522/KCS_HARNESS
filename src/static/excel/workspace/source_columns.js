@@ -99,6 +99,7 @@
             {mode: 'new', anchor: String(target.output_columns[target.output_columns.length - 1].column_id), side: 'after'}, progress, formats);
     }
     async function append(workspace, columnId, progress, options) {
+        columnId = String(columnId);
         if (columnId.startsWith('live:')) {
             var live = await readLive(workspace, columnId, options, progress);
             var added = await writeColumn(workspace, live.valuesById, live.column.header, progress);

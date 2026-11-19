@@ -199,3 +199,15 @@ test('frozen Y/N results can be passed to existing-column conditional edits',asy
     await excel.window.operationsSheet.write(snapshot,snapshot.rows.map(()=>['Y']),['분석대상여부'],{mode:'existing',column_id:destination},()=>{});
     assert.deepEqual(f.sheet.cells.slice(1).map(row=>row[2]),['Y','N','Y']);
 });
+
+test('formula evidence is recorded before writes and again before values are frozen',async()=>{
+ const h=createHost({rows:2});h.load('formula/formula_sheet.js');const phases=[];
+ await h.window.formulaSheet.applyFormulaPreview(plan(2),h.selection,()=>{},async(context,sheet,targets,calculated)=>{
+  phases.push(calculated);if(calculated){assert(h.writes.length>0);assert.equal(h.valueCopies.length,0);}
+  else assert.equal(h.writes.length,0);
+ });
+ assert.deepEqual(phases,[false,true]);assert(h.valueCopies.length>0);
+ const stopped=createHost({rows:2});stopped.load('formula/formula_sheet.js');
+ await assert.rejects(stopped.window.formulaSheet.applyFormulaPreview(plan(2),stopped.selection,()=>{},async()=>{throw Error('증거 저장 실패');}),/증거 저장 실패/);
+ assert.equal(stopped.writes.length,0);
+});

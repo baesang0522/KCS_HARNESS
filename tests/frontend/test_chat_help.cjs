@@ -163,11 +163,11 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
         openGroups:async(column,request)=>{reviewRequest={column,request};},
         configure:async()=>{throw Error("unscoped set action reached ordinary operation");},
         formulaTarget() {}, validateFormulaSource() {}, prepareFormulaOutput() {}, formulaResultColumns() {}, formulaResult() {}};
-    h.window.apiClient = {requestJson: async url => url.endsWith('/agent-runs') ? {run: null} : url.endsWith('/documents') ? {documents: []} : url.endsWith('/investigation') ? {revision:0,goal:'목표',conditions:[],document_notes:{},columns:[]} : {conversation_id: 'conversation'}, newRequestId: () => 'id'};
+    h.window.apiClient = {requestJson: async url => url.startsWith('/write-recovery') ? [] : url.endsWith('/agent-runs') ? {run: null} : url.endsWith('/documents') ? {documents: []} : url.endsWith('/investigation') ? {revision:0,goal:'목표',conditions:[],document_notes:{},columns:[]} : {conversation_id: 'conversation'}, newRequestId: () => 'id'};
     h.window.createWorkspaceController = options => { workspaceOptions = options; return stub; };
     h.window.createFormulaController = options => { formulaOptions = options; return stub; };
     h.window.createFormulaUI = () => ({});
-    h.load('chat/chat.js'); h.load('chat/agent.js'); h.load('cleaning_help/cleaning_help.js'); h.load('documents/documents.js'); h.load('documents/investigation.js'); h.load('documents/review_preprocess.js'); h.load('taskpane.js');
+    h.load('chat/chat.js'); h.load('chat/agent.js'); h.load('cleaning_help/cleaning_help.js'); h.load('documents/documents.js'); h.load('documents/investigation.js'); h.load('documents/review_preprocess.js'); h.load('operations/write_recovery.js'); h.load('taskpane.js');
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(workspaceOptions.isBusy(), false); assert.equal(workspaceOptions.getConversationId(), 'conversation');
     assert.equal(formulaOptions.validateSource, stub.validateFormulaSource);
@@ -219,14 +219,14 @@ test('all application scripts load in HTML order and the real controllers initia
     h.sandbox.fetch = async (url, options) => {
         requests.push({url, options});
         return {ok: true, json: async () => url === '/conversations' ? {conversation_id: 'conversation'}
-            : url.endsWith('/agent-runs') ? {run: null} : url.endsWith('/documents') ? {documents: []} : url.endsWith('/investigation') ? {revision:0,goal:'목표',conditions:[],document_notes:{},columns:[]} : {answer: '도움 카드를 열었어.', ui_action: {type: 'open_cleaning_help'}}};
+            : url.startsWith('/write-recovery') ? [] : url.endsWith('/agent-runs') ? {run: null} : url.endsWith('/documents') ? {documents: []} : url.endsWith('/investigation') ? {revision:0,goal:'목표',conditions:[],document_notes:{},columns:[]} : {answer: '도움 카드를 열었어.', ui_action: {type: 'open_cleaning_help'}}};
     };
     const scripts = h.document.querySelectorAll('script').map(node => node.getAttribute('src')).filter(Boolean);
     assert.equal(scripts.some(file=>file.startsWith('group_review/')),false);
     assert.equal(h.document.getElementById('work-groups'),null);assert.equal(h.document.getElementById('gr-panel'),null);
     scripts.filter(file => !file.startsWith('vendor/')).forEach(file => h.load(file));
     await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(requests.map(r => r.url), ['/conversations', '/conversations/conversation/documents', '/conversations/conversation/investigation', '/conversations/conversation/agent-runs']);
+    assert.deepEqual(requests.map(r => r.url), ['/conversations', '/write-recovery?conversation_id=conversation', '/conversations/conversation/documents', '/conversations/conversation/investigation', '/conversations/conversation/agent-runs']);
     assert.equal(h.document.querySelector('.send').disabled, false);
     assert.equal(h.document.getElementById('notice').textContent, '');
     await h.document.getElementById('open-workspace').emit('click');
@@ -271,4 +271,21 @@ test('unreflected review edits block both new chat requests and a pending retry 
     h.node('message').value='새 질문';await h.chat.sendMessage();
     assert.equal(h.requests.filter(r=>r.url==='/chat').length,calls);
     assert.match(h.node('conversation').textContent,/수정 내용 반영/);assert.equal(h.chat.isBusy(),false);
+});
+
+test('advice button carries the chosen target and uses the server-selected subject for the data read',async()=>{
+ const h=await setup();h.context.task_type='investigation';h.context.advice_subject='company';
+ await h.help.open(['model']);h.node('cleaning-help-kind').value='advice';await h.node('cleaning-help-kind').emit('change');
+ let subject;h.workspace.readRecommendation=async(ids,expected)=>{subject=expected.advice_subject;return {rows:[],column_ids:ids};};
+ h.reply=async url=>url==='/chat'?{ui_action:{type:'analyze_data',column_ids:['model'],advice_subject:'model'}}:{answer:'모델 의견',ui_action:null};
+ await h.node('cleaning-help-advice').emit('click');
+ assert.deepEqual(h.requests.find(r=>r.url==='/chat').body.workspace.target_column_ids,['model']);
+ assert.equal(subject,'model');assert.equal(h.context.advice_subject,'company');
+});
+test('new investigation waits for conversation creation and preserves current UI if creation fails',async()=>{
+ const h=await setup();h.node('conversation').textContent='기존 조사';
+ const original=h.api.requestJson;h.api.requestJson=async url=>{if(url==='/conversations')throw Error('연결 실패');return original(url);};
+ await assert.rejects(h.chat.newConversation(),/연결 실패/);
+ assert.equal(h.node('conversation').textContent,'기존 조사');assert.equal(h.chat.getConversationId(),'conversation');
+ h.api.requestJson=original;await h.chat.newConversation();assert.equal(h.node('conversation').textContent,'');
 });

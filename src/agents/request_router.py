@@ -8,7 +8,7 @@ from services.operations.schemas import Operation, ScopeRequest, extraction_colu
 from services.chat_state import TaskType
 from services.similarity import SimilaritySelection
 from services.group_review import GroupReviewRequest
-from services.recommendation.service import resolve_advice_columns, resolve_columns
+from services.recommendation.service import resolve_advice_columns, resolve_advice_subject, resolve_columns
 
 
 class RequestDecision(BaseModel):
@@ -24,6 +24,7 @@ class RequestDecision(BaseModel):
     formula_instruction: str | None = Field(default=None, min_length=1, max_length=8000)
     formula_column_ids: list[str] | None = Field(default=None, min_length=1, max_length=20)
     answer: str = Field(min_length=1, max_length=8000)
+    advice_subject: Literal["company", "model"] | None = None
     analysis_column_ids: list[str] | None = Field(default=None, max_length=200)
 
     @model_validator(mode="after")
@@ -126,9 +127,12 @@ async def route_request(runtime, messages, *, task_context: dict):
                 answer="먼저 분석할 작업 시트를 준비해 주세요.",
             ), reasons
 
-        ids = resolve_advice_columns(workspace, decision.analysis_column_ids)
+        subject = resolve_advice_subject(workspace, decision.analysis_column_ids, decision.advice_subject)
+        if subject is None:
+            return RequestDecision(intent="clarify", answer="기업·거래처와 모델규격 중 어느 쪽의 AI 의견이 필요한가요?"), reasons
+        ids = resolve_advice_columns({**workspace, "advice_subject": subject}, decision.analysis_column_ids)
         decision = decision.model_copy(update={
-            "analysis_column_ids": ids,
+            "analysis_column_ids": ids, "advice_subject": subject,
             "answer": "대상 열의 전체 데이터를 읽어 조언을 준비하겠습니다.",
         })
 

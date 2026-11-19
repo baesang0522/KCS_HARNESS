@@ -10,6 +10,7 @@ function createInvestigationHost() {
         const x = {rowIndex:r,columnIndex:c,rowCount:n,columnCount:m,worksheet:sheet,
             address:`${sheet.name}!R${r+1}C${c+1}:R${r+n}C${c+m}`,format:{},
             load(properties){if(/text|values|formulas/.test(properties)&&n*m>20000)throw new Error('unbounded read'); for(const property of properties.split(',')) {if(property==='text')loaded.text=read().map(row=>row.map(String)); else if(property==='numberFormat')loaded.numberFormat=formats(); else if(['values','formulas'].includes(property))loaded[property]=read();} return x;},
+            getSpecialCellsOrNullObject(type){if(type!=="Formulas")throw Error(type);return {isNullObject:true};},
             select(){host.selection=x;},
             copyFrom(input,type){if(type==='Values') x.values=input.values; else if(type==='Formats')x.numberFormat=input.numberFormat; else throw new Error(type);},
             getUsedRangeOrNullObject(){return {isNullObject:!read().flat().some(v=>v!==''),load(){}};}};

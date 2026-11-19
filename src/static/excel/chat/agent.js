@@ -52,7 +52,7 @@
         }
         async function pause(message) {
             attached = false; pending = null;
-            if (current && !["CANCELLED", "UNKNOWN"].includes(current.status)) {
+            if (current && !["CANCELLED", "UNKNOWN", "COMPLETED"].includes(current.status)) {
                 try { current = await post(path(current.run_id) + "/pause", {message: message || ""}); }
                 catch (error) { notice.textContent = "화면의 자동 진행은 멈췄지만 서버 상태는 확인하지 못했습니다. " + error.message; }
             }

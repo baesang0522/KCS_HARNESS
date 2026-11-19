@@ -2,9 +2,11 @@
 (function () {
     // 작업표 상태는 workspace 컨트롤러 소유이며, 호출 시 현재 상태를 읽는다.
     window.createWorkspaceFormula = function (options) {
-        var dependencyRecord = null;
+        var dependencyRecord = null, appliedPlan = null, resultRecords = null;
         return {
             dependencies: function () { return dependencyRecord; },
+            plan: function () { return appliedPlan; },
+            resultDependencies: function () { return resultRecords; },
             formulaTarget: async function (scope, fromSelection) {
                 var workspace = options.getWorkspace();
                 var lastFormula = options.getLastFormula();
@@ -61,7 +63,7 @@
                 });
             },
             prepareFormulaOutput: async function (preview, selection) {
-                dependencyRecord = null;
+                dependencyRecord = null; resultRecords = null; appliedPlan = preview.plan;
                 var workspace = options.getWorkspace();
                 if (!workspace || workspace.worksheet_id !== selection.worksheet_id) return;
                 if (workspace.row_filter) throw new Error("조건이 설정되어 수식 적용을 중단했습니다. 대상 범위를 다시 확인하세요.");
@@ -96,11 +98,13 @@
                 if (!selection.workspace_id) return [];
                 if (!workspace || selection.workspace_id !== workspace.workspace_id) throw new Error("수식 결과의 작업 표가 바뀌었습니다.");
                 await options.refresh();
-                return result.targets.map(function (range) {
+                var ids = result.targets.map(function (range) {
                     var columns = workspace.columns.filter(function (c) { return c.column_index === range.column_start; });
                     if (range.column_count !== 1 || columns.length !== 1) throw new Error("수식 결과 열을 확인하지 못했습니다.");
                     return String(columns[0].column_id);
                 });
+                if (options.captureResults && dependencyRecord) resultRecords = await options.captureResults(dependencyRecord, appliedPlan, result, selection, ids);
+                return ids;
             }
         };
     };

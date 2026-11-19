@@ -47,6 +47,7 @@ class ConfigureSimilarityAction(BaseModel):
 
 
 class AnalyzeDataAction(BaseModel):
+    advice_subject: Literal["company", "model"] | None = None
     type: Literal["analyze_data"]
     column_ids: list[ColumnId] = Field(min_length=1, max_length=200)
 

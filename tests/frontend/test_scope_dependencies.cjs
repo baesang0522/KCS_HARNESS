@@ -22,7 +22,9 @@ async function setup({count=4,targetCount=count}={}){
  'workspace/result_dependencies.js','workspace/workspace.js'].forEach(h.load);
  const messages=[];
  controller=h.window.createWorkspaceController({api,getConversationId:()=> 'conversation',isBusy:()=>busy,
- setBusy:value=>{busy=value;controller?.setBusy(value);},complete:message=>messages.push(message),enterConversation:noop});
+ setBusy:value=>{busy=value;controller?.setBusy(value);},complete:message=>messages.push(message),enterConversation:noop,
+ beforeWorkspaceChange:target=>{if(!target)throw Error('기존 조사에 연결됨');},
+ newInvestigation:async()=>{if(h.rejectNew)throw Error('새 조사 연결 실패');messages.push('새 조사 생성');controller.reset();}});
  const node=id=>h.document.getElementById(id);
  await node('work-restore').emit('click');
  const ids=Object.fromEntries(f.work.columns.map(c=>[c.header,c.column_id]));
@@ -172,4 +174,49 @@ test('opening scope after an input edit shows both dependent warnings outside th
  assert.equal(f.node('work-scope').hidden,false);assert.deepEqual(f.sheet.cells,before);
  assert.equal(f.h.document.querySelector('main').contains(warning),false);
  assert.equal(warning.parentElement.className,'app');
+});
+
+test('one formula run tracks only actual earlier output references, including ranges and quoted sheet names',async()=>{
+ const f=await setup(),deps=f.h.window.resultDependencies,work={...f.stored};
+ const selection={row_start:1,row_count:4,sheet_name:'조사',input_columns:[{column_id:f.ids['회사']}]};
+ const baseline=await deps.formula(work,selection),ids=[f.ids['결과'],f.ids['후속'],f.ids['메모']];
+ const records=await deps.formulaResults(work,baseline,{actions:[{formula:'=B2'},{formula:"=SUM('조사'!$E2:E2)"},{formula:'=B2&"E2"'}]},
+ {targets:[4,6,5].map(column_start=>({row_start:1,row_count:4,column_start}))},selection,ids);
+ records.forEach(record=>deps.register(work,record));
+ const before=structuredClone(f.sheet.cells);f.sheet.cells[1][4]='manual correction';
+ await deps.reconcile(work);assert.deepEqual(Array.from(deps.required(work)),[f.ids['후속']]);
+ assert.equal(f.sheet.cells[1][4],'manual correction');assert.deepEqual(f.sheet.cells[2],before[2]);
+ assert.equal(deps.referencesOutput('=SUM(D:E)',4,'조사'),true);
+ assert.equal(deps.referencesOutput('=Other!E2',4,'조사'),false);
+ assert.equal(deps.referencesOutput('="E2"',4,'조사'),false);
+});
+test('final result record survives manual panels and disappears when recorded values change',async()=>{
+ const f=await setup();await f.apply('회사');await f.controller.openScope();
+ await f.node('op-finalize').emit('click');await f.node('op-confirm-final').emit('click');
+ assert(f.stored.finalized);assert.match(f.node('work-final-record').textContent,/4행/);
+ await f.controller.openScope();assert(f.stored.finalized);
+ f.sheet.cells[1][4]='manual';await f.controller.context();assert.equal(f.stored.finalized,null);
+});
+
+test('new source starts a new investigation while keeping the old worksheet; failure keeps the current workspace',async()=>{
+ const f=await setup(),before=structuredClone(f.sheet.cells),savedId=f.stored.workspace_id;
+ f.h.rejectNew=true;await f.node('work-new').emit('click');
+ assert.equal(f.controller.referenceTarget().workspace_id,savedId);assert.match(f.node('work-status').textContent,/연결 실패/);
+ f.h.rejectNew=false;await f.node('work-new').emit('click');
+ assert.equal(f.controller.referenceTarget(),null);assert.equal(f.stored.workspace_id,savedId);
+ assert(f.messages.includes('새 조사 생성'));assert.deepEqual(f.sheet.cells,before);
+});
+
+test('editing an earlier formula output during the completion acknowledgement marks its downstream result for review',async()=>{
+ const f=await setup();f.sheet.cells[1][4]='';f.sheet.cells[1][6]='';
+ const selection={workspace_id:'work',worksheet_id:f.work.worksheet_id,sheet_name:'조사',table_id:f.work.table_id,row_start:1,row_count:4,
+ input_columns:[{column_id:f.ids['회사']}]};
+ await f.controller.prepareFormulaOutput({plan:{actions:[{target_range:'E2',formula:'=B2',output_label:'결과'},
+  {target_range:'G2',formula:'=E2',output_label:'후속'}]}},selection);
+ f.sheet.cells[1][4]='first';f.sheet.cells[1][6]='second';
+ const result={targets:[4,6].map(column_start=>({row_start:1,row_count:1,column_start,column_count:1}))};
+ const ids=await f.controller.formulaResultColumns(result,selection);
+ f.sheet.cells[1][4]='user edit during ack';await f.controller.formulaResult(result,selection,ids);
+ assert.deepEqual(Array.from((await f.controller.context()).review_required_column_ids),[f.ids['후속']]);
+ assert.equal(f.sheet.cells[1][4],'user edit during ack');
 });

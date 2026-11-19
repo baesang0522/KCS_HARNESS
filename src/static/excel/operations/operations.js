@@ -247,9 +247,11 @@
 
                 writeStarted = true;
                 result = await sheet.write(
-                    data.snapshot, writeValues, names, output, progress
+                    data.snapshot, writeValues, names, output, progress, null,
+                    options.recovery ? function (context, info, outputs) { return options.recovery.operation(data.job, context, info, data.snapshot, outputs, writeValues); } : null
                 );
 
+                if (options.recovery) options.recovery.remember(data.job.source.operation_job_id, function () { return options.result(result, data.job, data.snapshot, dependencyRecord); });
                 await options.jobs.status(
                     data.job,
                     "APPLIED",
@@ -262,6 +264,7 @@
                     if (output.mode !== "existing") column.description = resultDescription(data, index);
                 });
                 await options.result(result, data.job, data.snapshot, dependencyRecord);
+                if (options.recovery) options.recovery.completed(data.job.source.operation_job_id);
 
                 complete(
                     result.row_count.toLocaleString() +
@@ -314,7 +317,7 @@
             try {
                 var current = await sheet.read(workspace, target, ui.targets(), progress, function () {});
                 if (snapshot.stamp !== current.stamp || JSON.stringify(snapshot.rows) !== JSON.stringify(current.rows)) throw new Error("확인 중 값이 바뀌었습니다. 다시 확정하세요.");
-                await options.finalized(snapshot.columns.map(function (c) { return c.column_id; }), snapshot.rows.length);
+                await options.finalized(snapshot.columns.map(function (c) { return c.column_id; }), snapshot.rows.length, snapshot);
                 complete("현재 결과를 확정했습니다. 원본은 유지되며 후속 작업도 계속할 수 있습니다.");
             } catch (error) { complete(error.message); }
             finally { options.setBusy(false); }

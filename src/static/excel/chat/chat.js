@@ -277,6 +277,7 @@
                     if (advice && (!context || context.workspace_id !== advice.workspace_id)) {
                         throw new Error("분석 대상이 바뀌었습니다. 정제 도움을 다시 열어 주세요.");
                     }
+                    if (advice && advice.column_ids) context = Object.assign({}, context, {target_column_ids: advice.column_ids});
                     pendingRequest = Object.assign({}, run.request, {
                         advice_requested: !!advice,
                         message: value, workspace: context
@@ -298,7 +299,7 @@
                     notice.textContent = "전체 데이터를 읽고 있습니다…";
                     var data = await options.getWorkspace().readRecommendation(
                         reply.ui_action.column_ids,
-                        pendingRequest.workspace,
+                        Object.assign({}, pendingRequest.workspace, {advice_subject: reply.ui_action.advice_subject || pendingRequest.workspace.advice_subject}),
                         function (label, done, total) {
                             if (!run.cancelled) notice.textContent = label + " · " + done + "/" + total + "행";
                         },
@@ -382,6 +383,13 @@
             }
         }
 
+        async function newConversation() {
+            await createConversation();
+            renderMessages([]);
+            message.value = '';
+            notice.textContent = '';
+        }
+
         document.getElementById('new-chat').addEventListener(
             'click',
             async function () {
@@ -390,10 +398,7 @@
                 setBusy(true);
 
                 try {
-                    await createConversation();
-                    renderMessages([]);
-                    message.value = '';
-                    notice.textContent = '';
+                    await newConversation();
                 } catch (error) {
                     notice.textContent = error.message;
                 } finally {
@@ -425,7 +430,7 @@
         });
 
         return {
-            initialize: initializeConversation, sendMessage: sendMessage,
+            initialize: initializeConversation, sendMessage: sendMessage, newConversation: newConversation,
             appendMessage: appendMessage, enterConversation: enterConversation,
             beginRequest: beginRequest, endRequest: endRequest,
             checkRequest: checkChat, reportStop: reportStop,

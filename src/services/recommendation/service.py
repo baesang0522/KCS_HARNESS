@@ -30,6 +30,21 @@ def resolve_columns(
     return selected
 
 
+def resolve_advice_subject(workspace: dict | None, ids: list[str] | None = None, subject: str | None = None) -> str | None:
+    resolve_columns(workspace, ids)
+    if workspace["task_type"] != "investigation":
+        return "model" if workspace["task_type"] == "model_normalization" else "company"
+    if subject is not None:
+        if subject not in {"model", "company"}:
+            raise ValueError("분석 주제가 올바르지 않습니다.")
+        return subject
+    selected = ids if ids is not None else workspace.get("target_column_ids", [])
+    roles = {column.get("role") for column in workspace["columns"] if str(column["column_id"]) in selected}
+    model = bool(roles & set(MODEL_GROUP_ROLES))
+    company = bool(roles & {"company_name", "party_code", "country_code"})
+    return ("model" if model else "company") if model != company else None
+
+
 def resolve_advice_columns(workspace: dict | None, ids: list[str] | None) -> list[str]:
     selected = list(resolve_columns(workspace, ids))
     if workspace["task_type"] == "model_normalization" or (workspace["task_type"] == "investigation" and workspace.get("advice_subject") == "model"):
@@ -90,7 +105,7 @@ async def process_recommendation(
                 answer = await generate_advice(
                     runtime,
                     turn.question,
-                    workspace,
+                    {**workspace, "advice_subject": action.get("advice_subject") or workspace.get("advice_subject")},
                     payload,
                     progress=lambda message: setattr(turn, "recommendation_progress", message),
                 )

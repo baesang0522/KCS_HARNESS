@@ -9,7 +9,7 @@
         return Array.from(new Uint8Array(hash), function (value) { return value.toString(16).padStart(2, "0"); }).join("");
     }
     function referenced(record) {
-        return Array.from(new Set(record.input_ids.concat(sheet.filterColumns(record.filter), sheet.filterColumns(record.condition))));
+        return Array.from(new Set(record.input_ids.concat((record.links || []).map(function (link) { return link.input_id; }), sheet.filterColumns(record.filter), sheet.filterColumns(record.condition))));
     }
     async function read(workspace, record) {
         return Excel.run(async function (context) {
@@ -69,6 +69,11 @@
                 (record.scope_key !== null && record.scope_key !== sheet.filterKey(workspace.row_filter))) {
                 record.needs_review = true;
             } else if ((await read(workspace, record)).digest !== record.digest) record.needs_review = true;
+            for (var link of record.links || []) {
+                if (record.needs_review) break;
+                var linked = Object.assign({}, record, {input_ids: [link.input_id], links: [], range_ids: link.range_ids === undefined ? record.range_ids : link.range_ids});
+                if ((await read(workspace, linked)).digest !== link.digest) record.needs_review = true;
+            }
         }
         var stale = new Set(records.filter(function (record) { return record.needs_review; }).flatMap(function (record) { return record.output_ids; }));
         var changed;
@@ -102,5 +107,34 @@
         });
         return Object.assign(record, await read(workspace, record));
     }
-    window.resultDependencies = {fromSnapshot: fromSnapshot, register: register, reconcile: reconcile, required: required, formula: formula};
+    function referencesOutput(formula, columnIndex, sheetName) {
+        var source = (formula || "").replace(/"(?:[^"]|"")*"/g, '""');
+        // Computed addresses cannot be resolved statically; retain all earlier outputs for these formulas.
+        if (/\b(?:INDIRECT|OFFSET)\s*\(/i.test(source)) return true;
+        var reference = /(?<![\w.])(?:(?:'((?:[^']|'')+)'|([\w가-힣]+))!)?\$?([A-Z]{1,3})(?:\$?([1-9]\d*))?(?:\s*:\s*\$?([A-Z]{1,3})(?:\$?[1-9]\d*)?)?(?![\w(])/gi;
+        function column(text) { return Array.from(text.toUpperCase()).reduce(function (n, c) { return n * 26 + c.charCodeAt(0) - 64; }, 0) - 1; }
+        for (var match of source.matchAll(reference)) {
+            var name = match[1] ? match[1].replace(/''/g, "'") : match[2];
+            if (name && name.toLowerCase() !== (sheetName || "").toLowerCase()) continue;
+            if (!match[4] && !match[5]) continue;
+            var first = column(match[3]), last = match[5] ? column(match[5]) : first;
+            if (columnIndex >= Math.min(first, last) && columnIndex <= Math.max(first, last)) return true;
+        }
+        return false;
+    }
+    async function formulaResults(workspace, baseline, plan, result, selection, ids) {
+        var records = [];
+        for (var index = 0; index < ids.length; index++) {
+            var record = Object.assign({}, baseline, {output_ids: [ids[index]], links: [], coverage: null,
+                full: baseline.full && result.targets[index].row_start === selection.row_start && result.targets[index].row_count === selection.row_count});
+            for (var previous = 0; previous < index; previous++) {
+                if (!referencesOutput(plan.actions[index].formula, result.targets[previous].column_start, selection.sheet_name)) continue;
+                var input = await formula(workspace, Object.assign({}, selection, result.targets[previous], {input_columns: [{column_id: ids[previous]}]}));
+                record.links.push({input_id: ids[previous], digest: input.digest, range_ids: input.range_ids});
+            }
+            records.push(record);
+        }
+        return records;
+    }
+    window.resultDependencies = {fromSnapshot: fromSnapshot, formulaResults: formulaResults, referencesOutput: referencesOutput, read: read, register: register, reconcile: reconcile, required: required, formula: formula};
 })();
