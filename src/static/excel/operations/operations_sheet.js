@@ -91,6 +91,7 @@
                 function filterValue(id) {
                     var value = row.values[filterIds.indexOf(id)];
                     var own = ownChanges && ownChanges.get(row.identity);
+                    if (Array.isArray(own)) own = own.find(function (change) { return change.column_id === id; });
                     if (own && own.column_id === id) {
                         if (value !== own.after) throw new Error('작성 중 조건 열의 값이 바뀌었습니다. 결과를 확인하세요.');
                         value = own.before;
@@ -113,21 +114,25 @@
     }
     async function readRows(context, info, selected, ids, outputId, progress, check) {
         var columns = table.selectedColumns(info, ids), rows = [];
-        var output = outputId ? table.selectedColumns(info, [outputId])[0] : null;
+        var outputs = outputId ? table.selectedColumns(info, Array.isArray(outputId) ? outputId : [outputId]) : [];
         for (var run of blocks(selected, Math.max(1, Math.min(batchSize, Math.floor(20000 / Math.max(1, ids.length)))))) {
             check();
             var part = await table.chunk(context, info, run.start, run.count, columns);
-            var destination;
-            if (output) {
-                destination = info.sheet.getRangeByIndexes(run.start, output.column_index, run.count, 1);
-                destination.load('text,formulas'); await context.sync();
-            }
+            var destinations = outputs.map(function (output) {
+                var range = info.sheet.getRangeByIndexes(run.start, output.column_index, run.count, 1);
+                range.load('text,formulas'); return range;
+            });
+            if (destinations.length) await context.sync();
             selected.slice(run.offset, run.offset + run.selected).forEach(function (chosen) {
                 var i = chosen.excel_row - 1 - run.start, row = part[i];
                 if (row.identity !== chosen.identity) throw new Error('읽는 동안 행 순서가 바뀌었습니다. 다시 확인하세요.');
-                if (destination) {
-                    if (String(destination.formulas[i][0]).startsWith('=')) throw new Error('기존 수식 셀은 값으로 덮어쓰지 않습니다. 다른 결과 열을 선택하세요.');
-                    row.destination = destination.text[i][0];
+                if (destinations.length) {
+                    var current = destinations.map(function (destination) {
+                        if (String(destination.formulas[i][0]).startsWith('=')) throw new Error('기존 수식 셀은 값으로 덮어쓰지 않습니다. 다른 결과 열을 선택하세요.');
+                        return destination.text[i][0];
+                    });
+                    row.destination = current[0];
+                    if (destinations.length > 1) row.destinations = current;
                 }
                 rows.push(row);
             });
@@ -152,7 +157,8 @@
             check();
             return {workspace: workspace, target: {row_start: target.row_start, row_count: target.row_count},
                 identity_filter: identities || null, row_filter: filter, condition: condition, scope_rows: selected, range_ids: selected.range_ids, columns: table.selectedColumns(info, ids), rows: rows,
-                stamp: info.stamp, row_start: target.row_start, output_column_id: outputId || null,
+                stamp: info.stamp, row_start: target.row_start, output_column_id: Array.isArray(outputId) ? outputId[0] : outputId || null,
+                output_column_ids: Array.isArray(outputId) ? outputId : null,
                 output_columns: info.columns.filter(function (c) { return c.column_id !== info.identity.column_id; })};
         });
     }
@@ -160,7 +166,7 @@
         var selected = await scope(context, info, snapshot.target, snapshot.row_filter, progress, function () {}, ownChanges, null, snapshot.identity_filter ? new Set(snapshot.identity_filter) : null, snapshot.condition);
         if (JSON.stringify(selected) !== JSON.stringify(snapshot.scope_rows)) throw new Error('조건에 맞는 행이나 행 순서가 바뀌었습니다. 미리보기를 다시 만드세요.');
         var rows = await readRows(context, info, selected, snapshot.columns.map(function (c) { return String(c.column_id); }),
-            snapshot.output_column_id, progress, function () {});
+            snapshot.output_column_ids || snapshot.output_column_id, progress, function () {});
         if (JSON.stringify(rows) !== JSON.stringify(expected)) throw new Error('입력값 또는 기존 결과값이 바뀌었습니다. 미리보기를 다시 만드세요.');
     }
     function uniqueNames(names, columns) {
@@ -182,7 +188,8 @@
             return row.length !== names.length || row.some(function (value) { return typeof value !== 'string'; });
         }))) throw new Error('원본 열의 표시 형식을 확인할 수 없습니다.');
         var existing = output.mode === 'existing';
-        if (existing && (names.length !== 1 || output.column_id !== snapshot.output_column_id)) {
+        var outputIds = [output.column_id].concat(output.score_column_id ? [output.score_column_id] : []);
+        if (existing && (names.length !== outputIds.length || JSON.stringify(outputIds) !== JSON.stringify(snapshot.output_column_ids || [snapshot.output_column_id]))) {
             throw new Error('기존 결과 열이 바뀌었습니다. 미리보기를 다시 만드세요.');
         }
         if (JSON.stringify(snapshot.row_filter) !== JSON.stringify(snapshot.workspace.row_filter || null)) {
@@ -197,7 +204,7 @@
             info = await table.layout(context, snapshot.workspace);
             if (info.stamp !== snapshot.stamp) throw new Error('표 구성이 바뀌었습니다. 미리보기를 다시 만드세요.');
             if (existing) {
-                outputs = table.selectedColumns(info, [output.column_id]);
+                outputs = table.selectedColumns(info, outputIds);
             } else {
                 var anchor = info.columns.findIndex(function (c) { return String(c.column_id) === output.anchor; });
                 if (anchor < 0 || info.columns[anchor].column_id === info.identity.column_id) throw new Error('결과 위치를 확인하세요.');
@@ -232,7 +239,7 @@
                     info = await table.layout(context, snapshot.workspace);
                     if (stamp !== info.stamp) throw new Error('작성 중 표 구성이 바뀌었습니다.');
                     var before = await readRows(context, info, snapshot.scope_rows.slice(run.offset, run.offset + run.selected),
-                        snapshot.columns.map(function (c) { return String(c.column_id); }), snapshot.output_column_id, function () {}, function () {});
+                        snapshot.columns.map(function (c) { return String(c.column_id); }), snapshot.output_column_ids || snapshot.output_column_id, function () {}, function () {});
                     if (JSON.stringify(before) !== JSON.stringify(expected.slice(run.offset, run.offset + run.selected))) throw new Error('작성 중 값이나 행 순서가 바뀌었습니다.');
                     for (var part of runs(snapshot.rows.slice(run.offset, run.offset + run.selected))) {
                         outputs.forEach(function (column, j) {
@@ -248,14 +255,15 @@
                     started = true; await context.sync();
                     if (existing) for (var k = run.offset; k < run.offset + run.selected; k++) {
                         expected[k].destination = values[k][0];
+                        if (expected[k].destinations) expected[k].destinations = values[k].slice();
                         snapshot.columns.forEach(function (column, j) {
-                            if (String(column.column_id) === output.column_id) expected[k].values[j] = values[k][0];
+                            var index = outputIds.indexOf(String(column.column_id));
+                            if (index >= 0) expected[k].values[j] = values[k][index];
                         });
                         var filterIds = Array.from(new Set(filterColumns(snapshot.row_filter).concat(filterColumns(snapshot.condition))));
-                        if (filterIds.includes(output.column_id)) {
-                            ownChanges.set(expected[k].identity, {column_id: output.column_id,
-                                before: snapshot.scope_rows[k].filter_values[filterIds.indexOf(output.column_id)], after: values[k][0]});
-                        }
+                        ownChanges.set(expected[k].identity, outputIds.filter(function (id) { return filterIds.includes(id); }).map(function (id) {
+                            return {column_id: id, before: snapshot.scope_rows[k].filter_values[filterIds.indexOf(id)], after: values[k][outputIds.indexOf(id)]};
+                        }));
                     }
                     progress('결과 작성', run.offset + run.selected, values.length);
                 }

@@ -65,6 +65,7 @@ class CreateOperationJob(StrictModel):
 
 
 class OutputPlacement(StrictModel):
+    score_column_id: ColumnId | None = None
     mode: Literal["new", "existing"] = "new"
     column_id: ColumnId | None = None
     anchor: ColumnId | None = None
@@ -73,6 +74,8 @@ class OutputPlacement(StrictModel):
 
     @model_validator(mode="after")
     def validate_destination(self):
+        if self.score_column_id and (self.mode != "existing" or self.score_column_id == self.column_id):
+            raise ValueError("유사도 점수는 그룹명과 다른 기존 열이어야 합니다.")
         if self.mode == "existing":
             if not self.column_id:
                 raise ValueError("결과를 반영할 기존 열을 선택하세요.")
@@ -171,7 +174,7 @@ def preview_job(job: OperationJob, payload: JobPreview):
         raise ValueError("분석 대상 행 수가 바뀌었습니다. 새 미리보기를 만드세요.")
     if request.operation.kind == "match_suppliers":
         from services.supplier_matching import compare
-        result = compare(request.rows, job.supplier_references)
+        result = compare(request.rows, job.supplier_references, request.operation.similarity_method or "auto")
     else:
         result = execute(request)
     job.selected_count = payload.selected_count
@@ -184,14 +187,18 @@ def begin_apply(job: OperationJob, output: OutputPlacement) -> OperationJob:
             "새 미리보기만 적용할 수 있습니다. "
             "이미 시작한 실행은 다시 쓰지 않습니다."
         )
-    if job.source.operation.condition and (
+    if output.score_column_id and job.source.operation.kind != "match_suppliers":
+        raise ConflictError("점수 열은 거래처 매칭에서만 반영합니다.")
+    if job.source.operation.kind == "set" and job.source.operation.condition and (
         output.mode != "existing" or output.column_id != job.source.operation.destination_column_id
     ):
         raise ConflictError("요청한 기존 열에만 조건부 변경을 반영할 수 있습니다.")
     planned = job.source.operation.output
+    if job.source.operation.kind == "match_suppliers" and output.mode == "existing" and (not planned or planned.mode != "existing"):
+        raise ConflictError("기존 그룹 열의 미분류 조건으로 새 미리보기를 준비하세요.")
     if planned:
-        keys = ["mode", "column_id"] if planned.mode == "existing" else ["mode", "name", "anchor", "side"]
-        if any(getattr(planned, key) is not None and getattr(planned, key) != getattr(output, key) for key in keys):
+        keys = ["mode", "column_id", "score_column_id"] if planned.mode == "existing" else ["mode", "name", "anchor", "side"]
+        if planned.score_column_id != output.score_column_id or any(getattr(planned, key) is not None and getattr(planned, key) != getattr(output, key) for key in keys):
             raise ConflictError("미리보기의 저장 위치와 다릅니다. 새 미리보기를 확인하세요.")
     job.output = output.model_copy(deep=True)
     job.status = "APPLYING"
@@ -225,7 +232,7 @@ def update_job(job: OperationJob, update: JobUpdate) -> OperationJob:
         raise ConflictError("허용되지 않는 실행 상태 변경입니다.")
 
     if job.output and job.output.mode == "existing":
-        if update.status == "APPLIED" and update.result_column_ids != [job.output.column_id]:
+        if update.status == "APPLIED" and update.result_column_ids != [job.output.column_id] + ([job.output.score_column_id] if job.output.score_column_id else []):
             raise ConflictError("승인한 기존 결과 열과 다릅니다.")
     elif set(update.result_column_ids) & set(job.source.operation.input_column_ids):
         raise ConflictError("결과는 입력과 다른 새 열이어야 합니다.")

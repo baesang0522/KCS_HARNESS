@@ -21,8 +21,8 @@ def build_request_tools(task_context: dict):
         }
         referenced = operation.input_column_ids + ([operation.destination_column_id] if operation.destination_column_id else [])
         if operation.output:
-            referenced += [value for value in [operation.output.column_id, operation.output.anchor] if value]
-            if operation.condition and (operation.output.mode != "existing" or operation.output.column_id != operation.destination_column_id):
+            referenced += [value for value in [operation.output.column_id, operation.output.score_column_id, operation.output.anchor] if value]
+            if operation.kind == "set" and operation.condition and (operation.output.mode != "existing" or operation.output.column_id != operation.destination_column_id):
                 raise ValueError("조건부 변경은 지정한 기존 열에만 반영합니다. 다른 목적지에는 새 작업을 요청하세요.")
         if operation.kind != "extract" or operation.extraction_mode is not None:
             operation.validate_ready()
@@ -308,12 +308,16 @@ def build_request_tools(task_context: dict):
         return prepare_operation(**{**pending, "output": output})
 
     @tool
-    def match_suppliers(column_id: str | None = None, output: OperationOutput | None = None) -> dict:
+    def match_suppliers(column_id: str | None = None, output: OperationOutput | None = None,
+                        method: Literal["auto", "levenshtein", "sequence"] = "auto") -> dict:
         """확인한 PDF 기준 거래처 n개와 현재 범위의 고유 해외거래처 N개를 비교한다.
-        최고 Levenshtein 점수 90 이상만 한국어 그룹명을 부여하고 동점은 저장 목록의 뒤 항목을 택한다.
+        지정한 방식의 최고 점수 90 이상만 한국어 그룹명을 부여하고 동점은 저장 목록의 뒤 항목을 택한다.
+        미지정은 auto: Levenshtein으로 먼저 비교하고 90 미만만 SequenceMatcher로 보완해 한 번에 미리보기한다.
+        알고리즘 선택을 사용자에게 묻지 않는다. 특정 방식 지정 시에만 method=sequence 또는 levenshtein을 전달한다.
+        기존 그룹·점수 열이 있으면 재사용하고 그룹이 빈 행만 비교한다. 채워진 그룹과 점수는 유지한다.
         대소문자·연속 공백을 통일해 비교한다. 기준 목록은 서버가 읽으며 AI가 매핑을 만들지 않는다.
-        기본은 새 그룹·점수 열의 변경 미리보기다. 확인 후 적용하며 90 미만은 미분류다."""
-        return prepare_operation(kind="match_suppliers", column_ids=[target(column_id)], output=output)
+        기존 결과가 없으면 새 그룹·점수 열의 변경 미리보기다. 확인 후 적용하며 90 미만은 미분류다."""
+        return prepare_operation(kind="match_suppliers", column_ids=[target(column_id)], output=output, similarity_method=method)
 
     @tool
     def inspect_similarity(

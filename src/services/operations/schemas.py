@@ -107,6 +107,7 @@ class ScopeRequest(StrictModel):
 
 
 class OperationOutput(StrictModel):
+    score_column_id: ColumnId | None = None
     mode: Literal["new", "existing"] = "new"
     column_id: ColumnId | None = None
     name: str | None = Field(default=None, min_length=1, max_length=200)
@@ -115,6 +116,8 @@ class OperationOutput(StrictModel):
 
     @model_validator(mode="after")
     def validate_output(self):
+        if self.score_column_id and (self.mode != "existing" or self.score_column_id == self.column_id):
+            raise ValueError("유사도 점수는 그룹명과 다른 기존 열이어야 합니다.")
         if self.mode == "existing" and not self.column_id:
             raise ValueError("반영할 기존 열 ID를 지정하세요.")
         if self.mode == "new" and self.column_id is not None:
@@ -125,6 +128,7 @@ class OperationOutput(StrictModel):
 
 
 class Operation(StrictModel):
+    similarity_method: Literal["auto", "levenshtein", "sequence"] | None = None
     output: OperationOutput | None = None
     kind: Literal["preprocess", "split", "group", "replace", "map", "extract", "set", "match_suppliers"]
     column_ids: list[ColumnId] = Field(min_length=1, max_length=20)
@@ -150,9 +154,24 @@ class Operation(StrictModel):
 
     @model_validator(mode="after")
     def validate_operation(self):
-        if self.kind == "match_suppliers" and len(self.column_ids) != 1:
-            raise ValueError("비교할 해외거래처 열 하나를 지정하세요.")
-        if self.condition is not None or self.destination_column_id is not None:
+        if self.kind == "match_suppliers":
+            if len(self.column_ids) != 1:
+                raise ValueError("비교할 해외거래처 열 하나를 지정하세요.")
+            if self.destination_column_id is not None:
+                raise ValueError("거래처 결과 위치는 output으로 지정하세요.")
+            if self.output and self.output.mode == "existing":
+                outputs = [self.output.column_id, self.output.score_column_id]
+                if set(filter(None, outputs)) & set(self.column_ids):
+                    raise ValueError("거래처 원본과 그룹·점수 결과 열은 서로 달라야 합니다.")
+                expected = RowFilter(column_id=self.output.column_id, operator="blank", value="")
+                if self.condition is not None and self.condition != expected:
+                    raise ValueError("거래처 재비교는 기존 그룹명이 빈 행에만 적용합니다.")
+                self.condition = expected
+            elif self.condition:
+                raise ValueError("미분류 조건에는 기존 그룹 결과 열이 필요합니다.")
+        elif self.similarity_method is not None or (self.output and self.output.score_column_id):
+            raise ValueError("유사도 방식과 점수 열은 거래처 매칭에서만 지정합니다.")
+        if self.kind != "match_suppliers" and (self.condition is not None or self.destination_column_id is not None):
             if self.kind != "set" or self.condition is None or self.destination_column_id is None:
                 raise ValueError("조건부 값 변경에는 조건과 반영할 기존 열을 함께 지정하세요.")
             if self.column_ids != [self.condition.column_id]:
@@ -241,7 +260,7 @@ class OperationRequest(StrictModel):
             raise ValueError("대상 열 개수와 행의 값 개수가 다릅니다.")
         if sum(len(value) for row in self.rows for value in row.values) > 16000000:
             raise ValueError("처리할 문자열이 너무 많습니다. 대상 행을 줄여 주세요.")
-        if self.operation.condition:
+        if self.operation.condition and self.operation.kind == "set":
             condition = self.operation.condition
             for row in self.rows:
                 value = row.values[0]
