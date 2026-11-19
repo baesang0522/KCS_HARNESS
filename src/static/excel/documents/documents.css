@@ -16,3 +16,12 @@
 #review-clean-column, #review-clean-words { width:100%; box-sizing:border-box; }
 #review-clean-rules > div { display:flex; align-items:center; justify-content:space-between; gap:6px; }
 #review-clean-examples { max-height:220px; overflow:auto; overflow-wrap:anywhere; white-space:pre-wrap; }
+
+/* 대화 영역의 높이를 바꾸지 않아 여닫아도 읽던 위치가 유지된다. */
+.documents-dock { position:relative; flex:0 0 0; z-index:2; }
+.documents-dock #documents-panel { position:absolute; bottom:0; left:18px; right:18px; margin:0; padding:12px; max-height:50vh; display:flex; flex-direction:column; box-shadow:0 -5px 20px #35284920; }
+.documents-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-shrink:0; }
+.documents-heading h2 { margin:0; }
+#documents-content { min-height:0; overflow-y:auto; overscroll-behavior-y:contain; margin:8px 0; }
+#documents-content:focus-visible { outline:2px solid #7057d9; outline-offset:-2px; }
+.documents-dock .document-actions { flex-shrink:0; border-top:1px solid #e8e5ef; padding-top:8px; }

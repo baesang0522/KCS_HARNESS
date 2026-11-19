@@ -1,21 +1,32 @@
 "use strict";
 (function () {
-    var headers = {supplier: ['그룹', '구분', '회사명', '근거 페이지'],
+    var headers = {supplier: ['그룹명', '회사명', '근거 페이지'],
         item: ['그룹', 'HS', '규격', '조건', '근거 페이지'], other: ['그룹', '내용', '근거 페이지']};
+    var legacySupplierHeaders = ['그룹', '구분', '회사명', '근거 페이지'];
     function key(cid, did) { return 'kcs.pdf-review.' + cid + '.' + did; }
     function canonical(rows) {
-        return JSON.stringify(rows.map(function (row) {
-            var t = row.target, fields = t.kind === 'supplier' ? [t.group, t.category, t.company_name]
+        var suppliers = [], other = [];
+        rows.forEach(function (row) {
+            var t = row.target, fields = t.kind === 'supplier' ? [t.category || t.company_name, t.company_name]
                 : t.kind === 'item' ? [t.group, t.hs_codes, t.specification, t.requirements] : [t.group, t.description];
-            return JSON.stringify([t.kind, fields, row.source_pages.slice().sort(function (a, b) { return a - b; })]);
-        }).sort());
+            var value = JSON.stringify([t.kind, fields, row.source_pages.slice().sort(function (a, b) { return a - b; })]);
+            (t.kind === 'supplier' ? suppliers : other).push(value);
+        });
+        return JSON.stringify([suppliers, other.sort()]);
     }
     function values(row) {
-        var t = row.target, cells = t.kind === 'supplier' ? [t.group, t.category, t.company_name]
+        var t = row.target, cells = t.kind === 'supplier' ? [t.category || t.company_name, t.company_name]
             : t.kind === 'item' ? [t.group, t.hs_codes.join(', '), t.specification, t.requirements] : [t.group, t.description];
         return cells.concat([row.source_pages.join(', ')]);
     }
-    function parse(kind, rows) {
+    function parse(kind, rows, legacy, baseline) {
+        var originals = new Map();
+        (baseline || []).slice().reverse().forEach(function (item) {
+            if (item.target.kind !== 'supplier') return;
+            var key = JSON.stringify(values(item));
+            if (!originals.has(key)) originals.set(key, []);
+            originals.get(key).push(item);
+        });
         return rows.filter(function (row) { return row.some(function (value) { return String(value).trim(); }); }).map(function (row, index) {
             var cells = row.map(function (value) { return String(value).trim(); });
             var pages = cells[cells.length - 1], sourcePages = [];
@@ -27,8 +38,13 @@
             if (!cells[0]) throw new Error('빈 그룹을 채워 주세요. (' + (index + 1) + '번째 항목)');
             var target = {kind: kind, group: cells[0]};
             if (kind === 'supplier') {
-                if (!cells[2]) throw new Error('회사명을 채워 주세요. (' + (index + 1) + '번째 항목)');
-                target.category = cells[1]; target.company_name = cells[2];
+                var name = cells[legacy ? 2 : 1];
+                if (!name) throw new Error('회사명을 채워 주세요. (' + (index + 1) + '번째 항목)');
+                target.category = legacy ? cells[1] : cells[0]; target.company_name = name;
+                if (!legacy) {
+                    var matches = originals.get(JSON.stringify(cells)), original = matches && matches.pop();
+                    if (original) target = Object.assign({}, original.target);
+                }
             } else if (kind === 'item') {
                 target.hs_codes = cells[1] ? cells[1].split(/[,，\n]/).map(function (s) { return s.trim(); }) : [];
                 target.specification = cells[2]; target.requirements = cells[3];
@@ -57,7 +73,7 @@
     async function ensure(cid, did, filename, rows) {
         requireExcel();
         return Excel.run(async function (context) {
-            var saved = await metadata(context, cid, did), meta = saved || {entries: [], baseline: rows};
+            var saved = await metadata(context, cid, did), meta = saved || {entries: [], baseline: rows, original_rows: rows};
             if (saved && canonical(meta.baseline) !== canonical(rows)) throw new Error('기존 검토 시트와 저장된 조건이 달라요. 시트의 수정 내용부터 확인하세요.');
             var kinds = Array.from(new Set(rows.map(function (row) { return row.target.kind; })));
             if (!kinds.length && !meta.entries.length) kinds.push('other');
@@ -77,7 +93,7 @@
                     var table = sheet.tables.add(range, true);
                     sheet.load('id,name'); table.load('id');
                     range.format.columnWidth = 120; range.format.wrapText = true;
-                    sheet.getRange(kind === 'supplier' ? 'C:C' : kind === 'item' ? 'D:D' : 'B:B').format.columnWidth = 280;
+                    sheet.getRange(kind === 'item' ? 'D:D' : 'B:B').format.columnWidth = 280;
                     sheet.freezePanes.freezeRows(4);
                     await context.sync();
                     meta.entries.push({kind: kind, worksheet_id: sheet.id, table_id: String(table.id)});
@@ -101,7 +117,7 @@
             var rows = [];
             for (var entry of meta.entries) {
                 var snapshot = await tableSnapshot(context, entry);
-                rows = rows.concat(parse(entry.kind, snapshot.values));
+                rows = rows.concat(parse(entry.kind, snapshot.values, snapshot.legacy, meta.baseline));
             }
             return {rows: rows, baseline: meta.baseline};
         });
@@ -110,8 +126,9 @@
         var table = context.workbook.worksheets.getItem(entry.worksheet_id).tables.getItem(entry.table_id);
         var header = table.getHeaderRowRange(), count = table.rows.getCount();
         header.load('values'); await context.sync();
-        if (JSON.stringify(header.values[0]) !== JSON.stringify(headers[entry.kind])) throw new Error('검토 표의 열 이름과 순서를 원래대로 돌려 주세요.');
-        var snapshot = {worksheet_id: entry.worksheet_id, table_id: entry.table_id, kind: entry.kind, values: []};
+        var legacy = entry.kind === 'supplier' && JSON.stringify(header.values[0]) === JSON.stringify(legacySupplierHeaders);
+        if (!legacy && JSON.stringify(header.values[0]) !== JSON.stringify(headers[entry.kind])) throw new Error('검토 표의 열 이름과 순서를 원래대로 돌려 주세요.');
+        var snapshot = {worksheet_id: entry.worksheet_id, table_id: entry.table_id, kind: entry.kind, legacy: legacy, headers: header.values[0], values: []};
         if (!count.value) return snapshot;
         var body = table.getDataBodyRange();
         body.load('rowIndex,columnIndex,rowCount,columnCount'); await context.sync();
@@ -125,19 +142,23 @@
         return Excel.run(async function (context) {
             var meta = await metadata(context, cid, did);
             if (!meta) throw new Error('먼저 검토 시트를 열어 주세요.');
-            return meta.entries.flatMap(function (entry) {
-                return headers[entry.kind].map(function (header, index) {
+            var targets = [];
+            for (var entry of meta.entries) {
+                var snapshot = await tableSnapshot(context, entry);
+                targets = targets.concat(snapshot.headers.map(function (header, index) {
                     return {table_id: entry.table_id, column_index: index, kind: entry.kind,
                         label: (meta.entries.length > 1 ? {supplier: '거래처', item: '품목', other: '기타'}[entry.kind] + ' · ' : '') + header};
-                });
-            });
+                }));
+            }
+            return targets;
         });
     }
     async function preprocessSnapshot(context, cid, did, target) {
         var meta = await metadata(context, cid, did);
         var entry = meta && meta.entries.find(function (item) { return item.table_id === target.table_id; });
-        if (!entry || !Number.isInteger(target.column_index) || target.column_index < 0 || target.column_index >= headers[entry.kind].length) throw new Error('이 PDF 검토 표의 열을 다시 선택하세요.');
+        if (!entry || !Number.isInteger(target.column_index) || target.column_index < 0) throw new Error('이 PDF 검토 표의 열을 다시 선택하세요.');
         var snapshot = await tableSnapshot(context, entry);
+        if (target.column_index >= snapshot.headers.length) throw new Error('이 PDF 검토 표의 열을 다시 선택하세요.');
         if (!snapshot.values.length) throw new Error('검토 표에 처리할 행이 없어요.');
         snapshot.column_index = target.column_index;
         return snapshot;
@@ -168,6 +189,7 @@
         await Excel.run(async function (context) {
             var meta = await metadata(context, cid, did);
             if (!meta) throw new Error('검토 시트 정보를 찾을 수 없어요.');
+            if (!meta.original_rows) meta.original_rows = meta.baseline;
             meta.baseline = rows;
             context.workbook.settings.add(key(cid, did), meta); await context.sync();
         });

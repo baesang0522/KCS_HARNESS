@@ -70,11 +70,17 @@
                 var destination = ui.destination ? ui.destination() : null;
                 var snapshot = await sheet.read(readWorkspace, readTarget, ids, progress, check, destination, null, null, operation.condition);
                 var values = [], changed = 0, headers = [];
-                var size = operation.kind === "group" ? snapshot.rows.length : 10000;
+                var comparisonRows = snapshot.rows;
+                if (operation.kind === "match_suppliers") {
+                    var unique = new Map();
+                    snapshot.rows.forEach(function (row) { if (!unique.has(row.values[0])) unique.set(row.values[0], row); });
+                    comparisonRows = Array.from(unique.values());
+                }
+                var size = operation.kind === "group" ? snapshot.rows.length : operation.kind === "match_suppliers" ? 250 : 10000;
                 // ponytail: 미리보기는 창 메모리에 보관. 200만 결과 셀을 넘으면 범위를 줄인다.
-                for (var offset = 0; offset < snapshot.rows.length; offset += size) {
+                for (var offset = 0; offset < comparisonRows.length; offset += size) {
                     check();
-                    var rows = snapshot.rows.slice(offset, offset + size).map(function (row) { return {excel_row: row.excel_row, values: row.values}; });
+                    var rows = comparisonRows.slice(offset, offset + size).map(function (row) { return {excel_row: row.excel_row, values: row.values}; });
                     var result = await options.jobs.preview(
                         job,
                         rows,
@@ -89,7 +95,16 @@
                     if (result.headers.length > headers.length) headers = result.headers;
                     changed += result.changed_count;
                     if (headers.length * snapshot.rows.length > 2000000) throw new Error("결과가 200만 셀을 초과합니다. 범위를 줄여 주세요.");
-                    progress("처리", values.length, snapshot.rows.length);
+                    progress(operation.kind === "match_suppliers" ? "고유 거래처 비교" : "처리", values.length, comparisonRows.length);
+                }
+                if (operation.kind === "match_suppliers") {
+                    var matches = new Map(comparisonRows.map(function (row, index) { return [row.values[0], values[index]]; }));
+                    values = snapshot.rows.map(function (row) {
+                        var result = matches.get(row.values[0]).slice();
+                        if (destination && !result[0]) result[0] = row.destination;
+                        return result;
+                    });
+                    changed = values.filter(function (row, index) { return row[0] !== snapshot.rows[index].values[0]; }).length;
                 }
                 values.forEach(function (row) { while (row.length < headers.length) row.push(""); });
                 if (destination) changed = values.filter(function (row, i) { return row[0] !== snapshot.rows[i].destination; }).length;
@@ -115,7 +130,8 @@
                     snapshot: snapshot,
                     values: values,
                     names: headers,
-                    changed: changed
+                    changed: changed,
+                    unique_count: operation.kind === "match_suppliers" ? comparisonRows.filter(function (row) { return row.values[0].trim(); }).length : null
                 };
                 if (ui.output().mode === "existing" && operation.kind === "split" && headers.length !== 1) throw new Error("여러 열로 분리하는 결과는 새 열에 저장해야 해요. 새 열로 다시 요청해 주세요.");
                 ui.preview(preview); options.status(operation.condition
@@ -170,6 +186,9 @@
                     " 기준 분리 / " + (operation.part === "last" ? "마지막 단어" : (index + 1) + "번째 조각");
             } else if (operation.kind === "replace") {
                 action = "문자열 치환 " + JSON.stringify(operation.find) + " → " + JSON.stringify(operation.replacement);
+            } else if (operation.kind === "match_suppliers") {
+                action = "PDF 기준 거래처와 비교 / 최고 점수 90 이상 / 동점은 기준 목록 뒤 항목 / 공백·대소문자 통일";
+                if (index === 1) action += " / 최고 유사도 점수";
             } else if (operation.kind === "map") {
                 action = "공백·대소문자 정리 기준 매핑 " + operation.mappings.length + "개 적용";
             } else if (operation.kind === "group") {
@@ -210,16 +229,30 @@
             var writeStarted = false;
 
             try {
+                if (data.operation.kind === "match_suppliers" && options.beforeApply) await options.beforeApply();
                 var output = ui.output();
-                var writeValues = data.values;
+                var writeValues = data.values, writeSnapshot = data.snapshot;
                 if (output.mode === "existing") {
                     if (data.operation.kind === "split" && data.names.length !== 1) throw new Error("여러 열로 분리하는 결과는 새 열로 저장하세요.");
                     writeValues = data.values.map(function (row) { return [row[0]]; });
                 }
                 options.setBusy(true);
+                if (data.operation.kind === "match_suppliers" && output.mode === "existing") {
+                    var current = await sheet.read(data.snapshot.workspace, data.snapshot.target, data.operation.column_ids,
+                        progress, function () {}, output.column_id);
+                    if (current.stamp !== data.snapshot.stamp || JSON.stringify(current.rows) !== JSON.stringify(data.snapshot.rows) ||
+                        JSON.stringify(current.scope_rows) !== JSON.stringify(data.snapshot.scope_rows)) throw new Error("비교 후 데이터가 바뀌었습니다. 새 미리보기를 확인하세요.");
+                    var matched = data.values.map(function (row, i) { return row[1] !== "" && Number(row[1]) >= 90 ? i : -1; }).filter(function (i) { return i >= 0; });
+                    writeValues = matched.map(function (i) { return writeValues[i]; });
+                    writeSnapshot = Object.assign({}, data.snapshot, {
+                        rows: matched.map(function (i) { return data.snapshot.rows[i]; }),
+                        scope_rows: matched.map(function (i) { return data.snapshot.scope_rows[i]; }),
+                        identity_filter: matched.map(function (i) { return data.snapshot.rows[i].identity; })
+                    });
+                }
 
-                var names = ["group", "extract"].includes(data.operation.kind)
-                    ? [output.name, output.name + (data.operation.kind === "group" ? " 변경여부" : " 추출상태")]
+                var names = ["group", "extract", "match_suppliers"].includes(data.operation.kind)
+                    ? [output.name, output.name + (data.operation.kind === "group" ? " 변경여부" : data.operation.kind === "match_suppliers" ? " 유사도 점수" : " 추출상태")]
                     : data.names.map(function (_, i) {
                         return output.name +
                             (data.names.length > 1 ? " " + (i + 1) : "");
@@ -233,8 +266,8 @@
 
                 writeStarted = true;
                 result = await sheet.write(
-                    data.snapshot, writeValues, names, output, progress, null,
-                    options.recovery ? function (context, info, outputs) { return options.recovery.operation(data.job, context, info, data.snapshot, outputs, writeValues); } : null
+                    writeSnapshot, writeValues, names, output, progress, null,
+                    options.recovery ? function (context, info, outputs) { return options.recovery.operation(data.job, context, info, writeSnapshot, outputs, writeValues); } : null
                 );
 
                 if (options.recovery) options.recovery.remember(data.job.source.operation_job_id, function () { return options.result(result, data.job, data.snapshot, dependencyRecord); });

@@ -36,17 +36,17 @@ async function setup() {
     const shared={api:h.api,isBusy:h.chat.isBusy,setBusy:h.chat.setBusy,beginRequest:h.chat.beginRequest,endRequest:h.chat.endRequest,checkRequest:h.chat.checkRequest,reportStop:h.chat.reportStop};
     h.investigation=h.window.createInvestigationController({messages:h.messages,...shared,getWorkspace:()=>null,onChanged:()=>h.documents?.render()});
     h.documents=h.window.createDocumentsController({...shared,beforeUpload:h.investigation.prepare,readConditions:h.investigation.extract,
-        reviewInfo:h.investigation.info,applyReview:h.investigation.apply,preprocessReview:async()=>{}});
+        reviewInfo:h.investigation.info,applyReview:h.investigation.previewApply,preprocessReview:async()=>{}});
     await h.chat.initialize();
     h.upload=async(...names)=>{h.node('document-file').files=names.map(name=>({name}));await h.node('document-file').emit('change');};
     return h;
 }
 test('supplier then item from file picker keep distinct editable sheets and per-document confirmation',async()=>{
     const h=await setup();await h.upload('거래처.pdf');
-    const supplierSheet=h.excel.sheets[0],did1=Object.keys(h.state.reviews)[0];supplierSheet.cells[4][2]='사용자가 수정한 회사';
+    const supplierSheet=h.excel.sheets[0],did1=Object.keys(h.state.reviews)[0];supplierSheet.cells[4][1]='사용자가 수정한 회사';
     await h.upload('품목.pdf');
     assert.equal(h.excel.sheets.length,2);assert.equal(h.chat.isBusy(),false);assert.equal(h.node('document-add').disabled,false);
-    assert.equal(h.node('documents-list').children.length,2);assert.equal(supplierSheet.cells[4][2],'사용자가 수정한 회사');
+    assert.equal(h.node('documents-list').children.length,2);assert.equal(supplierSheet.cells[4][1],'사용자가 수정한 회사');
     assert.deepEqual(h.node('documents-list').querySelectorAll('button').map(b=>b.textContent),[]);
     const did2=Object.keys(h.state.reviews)[1];assert.equal(h.excel.active,h.excel.sheets[1]);
     assert.notEqual(h.excel.sheets[0].id,h.excel.sheets[1].id);
@@ -72,4 +72,16 @@ test('Excel failure offers only retry until its sheet exists, including after re
     assert.deepEqual(labels(),[]);assert.equal(h.excel.sheets.length,1);
     await h.investigation.load('conversation');assert.deepEqual(labels(),[]);
     assert.equal(h.calls.filter(c=>c.url.includes('/extractions/')).length,1);
+});
+
+test('reflection button previews both PDFs without typing and saves only after chat approval',async()=>{
+ const h=await setup();await h.upload('거래처.pdf','품목.pdf');const ids=Object.keys(h.state.reviews);
+ h.excel.sheets[0].cells[4][1]='수정된 회사';h.excel.sheets[1].cells[4][3]='150mm 이상';
+ h.node('message').value='아직 보내지 않은 질문';assert.equal(h.node('documents-apply').disabled,false);
+ await h.node('documents-apply').emit('click');assert.equal(h.node('documents-panel').hidden,true);
+ assert.equal(h.calls.filter(c=>c.url.includes('/reviews/')).length,0);assert.match(h.chatText(),/PDF 2개/);
+ assert.equal(h.node('message').value,'아직 보내지 않은 질문');assert.equal(h.calls.some(c=>c.url==='/chat'),false);
+ await h.messages.command('적용');assert.equal(h.state.reviews[ids[0]][0].target.company_name,'수정된 회사');
+ assert.equal(h.state.reviews[ids[1]][0].target.requirements,'150mm 이상');assert(h.state.conditions.every(c=>c.status==='confirmed'));
+ assert.equal(h.node('documents-panel').hidden,true);
 });

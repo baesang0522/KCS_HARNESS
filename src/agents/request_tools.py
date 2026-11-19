@@ -308,6 +308,14 @@ def build_request_tools(task_context: dict):
         return prepare_operation(**{**pending, "output": output})
 
     @tool
+    def match_suppliers(column_id: str | None = None, output: OperationOutput | None = None) -> dict:
+        """확인한 PDF 기준 거래처 n개와 현재 범위의 고유 해외거래처 N개를 비교한다.
+        최고 Levenshtein 점수 90 이상만 한국어 그룹명을 부여하고 동점은 저장 목록의 뒤 항목을 택한다.
+        대소문자·연속 공백을 통일해 비교한다. 기준 목록은 서버가 읽으며 AI가 매핑을 만들지 않는다.
+        기본은 새 그룹·점수 열의 변경 미리보기다. 확인 후 적용하며 90 미만은 미분류다."""
+        return prepare_operation(kind="match_suppliers", column_ids=[target(column_id)], output=output)
+
+    @tool
     def inspect_similarity(
             column_id: str | None = None,
             group_column_id: str | None = None,
@@ -414,7 +422,7 @@ def build_request_tools(task_context: dict):
             map_values,
             group_values,
             find_model_candidates,
-            inspect_similarity,
+            inspect_similarity, match_suppliers,
             # open_group_review,
             recommend_preprocessing,
         ])
