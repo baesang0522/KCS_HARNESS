@@ -21,7 +21,8 @@ from api.investigation import router
 from repositories.conversation_repository import ConversationNotFound, MemoryConversationRepository, StoredTurn
 from services.documents.schemas import ReferenceDocument
 from services.errors import ServiceError
-from services.investigation import evidence_sources, investigation_context
+from services.investigation.extraction import evidence_sources
+from services.investigation.service import investigation_context
 
 
 def make_app():

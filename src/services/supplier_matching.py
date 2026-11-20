@@ -5,7 +5,8 @@ from services.similarity import score
 
 
 def references(conversation, source):
-    from services.investigation import SupplierTarget, same_workspace, source_issue
+    from services.investigation.schemas import SupplierTarget
+    from services.investigation.service import same_workspace, source_issue
     state = conversation.investigation
     if not state.workspace or not same_workspace(state.workspace.model_dump(), source.model_dump()):
         raise ConflictError("PDF 조사와 같은 작업표에서 거래처를 비교하세요.")

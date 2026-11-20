@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from agents.request_tools import build_request_tools
 from services.errors import MODEL_RESPONSE_ERROR
-from services.agent_runs import RepeatedReadError
+from services.errors import RepeatedReadError
 from services.debug_log import log_event
 
 

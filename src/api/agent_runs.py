@@ -2,7 +2,8 @@ from uuid import UUID
 from time import perf_counter
 from services.debug_log import log_event
 from fastapi import APIRouter, Request
-from services import agent_runs as service
+from services.agent_runs import service
+from services.agent_runs.schemas import Advance, BindJob, PauseRun
 
 router = APIRouter(prefix="/conversations/{conversation_id}/agent-runs", tags=["Agent"])
 
@@ -15,7 +16,7 @@ async def current_run(conversation_id: UUID, request: Request):
 
 
 @router.post("/{run_id}/advance")
-async def advance(conversation_id: UUID, run_id: UUID, payload: service.Advance, request: Request):
+async def advance(conversation_id: UUID, run_id: UUID, payload: Advance, request: Request):
     state = request.app.state
     cid = str(conversation_id)
     ids = {"conversation_id": cid, "request_id": str(payload.request_id), "run_id": str(run_id)}
@@ -37,14 +38,14 @@ async def advance(conversation_id: UUID, run_id: UUID, payload: service.Advance,
 
 
 @router.post("/{run_id}/bind")
-async def bind(conversation_id: UUID, run_id: UUID, payload: service.BindJob, request: Request):
+async def bind(conversation_id: UUID, run_id: UUID, payload: BindJob, request: Request):
     state = request.app.state
     async with state.conversations.edit(str(conversation_id)) as conversation:
         return service.bind_job(conversation, run_id, payload, state.operation_jobs, state.formula_jobs, str(conversation_id))
 
 
 @router.post("/{run_id}/pause")
-async def pause(conversation_id: UUID, run_id: UUID, request: Request, payload: service.PauseRun | None = None):
+async def pause(conversation_id: UUID, run_id: UUID, request: Request, payload: PauseRun | None = None):
     async with request.app.state.conversations.edit(str(conversation_id)) as conversation:
         service.find_run(conversation, run_id)
         if conversation.active_agent_run_id == str(run_id):

@@ -4,7 +4,8 @@ from uuid import uuid4
 
 from repositories.conversation_repository import MemoryConversationRepository
 from runtime import create_runtime
-from services.agent_runs import Advance, advance
+from services.agent_runs.schemas import Advance
+from services.agent_runs.service import advance
 from services.chat import process_chat
 
 

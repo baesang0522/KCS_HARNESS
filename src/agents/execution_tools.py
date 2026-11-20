@@ -1,9 +1,10 @@
 """Goal execution reuses the manual tools; reads return evidence instead of a card."""
 from langchain_core.tools import tool
-from services.agent_runs import ReadAction, RepeatedReadError
+from services.agent_runs.schemas import ReadAction
+from services.errors import RepeatedReadError
 from services.operations.schemas import RowFilter, OperationOutput
 from services.similarity import SimilaritySettings
-from services.recommendation.service import resolve_columns
+from services.workspace import resolve_columns
 
 
 def execution_tools(context, manual_tools):

@@ -1,6 +1,6 @@
 """선정된 데이터를 검토하고 제안을 종합·근거 확인한다."""
 from services.errors import MODEL_RESPONSE_ERROR
-from services.recommendation.model_io import ask, available_bytes, batches
+from models.structured import ask, available_bytes, batches
 from services.recommendation.selection import top_model_combinations
 from services.recommendation.schemas import AdviceRequest, Review
 

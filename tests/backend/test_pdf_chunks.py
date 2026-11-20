@@ -9,8 +9,9 @@ from repositories.conversation_repository import MemoryConversation
 from services.documents.schemas import ReferenceDocument
 from services.documents.chunks import flatten_sources
 from services.errors import ConflictError, ModelProcessingError
-from services.investigation import ExtractConditions, evidence_sources, extract_conditions
-from services.recommendation.model_io import INPUT_BYTES
+from services.investigation.schemas import ExtractConditions
+from services.investigation.extraction import evidence_sources, extract_conditions
+from models.structured import INPUT_BYTES
 
 
 class PDFChunkTests(unittest.IsolatedAsyncioTestCase):

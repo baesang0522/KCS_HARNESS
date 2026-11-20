@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query, Request
 from services.documents.schemas import DocumentLink, ReferenceDocument
 from services.documents.service import MAX_UPLOAD_BYTES, check_capacity, extract_in_process, find_document
 from services.errors import ConflictError, DocumentError, NotFoundError
-from services.investigation import invalidate_document
+from services.investigation.service import invalidate_document
 
 router = APIRouter(prefix="/conversations/{conversation_id}/documents", tags=["documents"])
 

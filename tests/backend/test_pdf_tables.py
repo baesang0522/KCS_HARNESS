@@ -12,8 +12,9 @@ import pymupdf
 
 from services.documents.extractor import extract_pdf
 from services.documents.schemas import DocumentTable, ReferenceDocument
-from services.investigation import (Extraction, ExtractConditions, SaveReview, extract_conditions,
-                                    model_table_extraction, public_investigation, save_review)
+from services.investigation.schemas import Extraction, ExtractConditions, SaveReview
+from services.investigation.extraction import extract_conditions, model_table_extraction
+from services.investigation.service import public_investigation, save_review
 from services.documents.tables import split_company_name
 from repositories.conversation_repository import MemoryConversationRepository
 

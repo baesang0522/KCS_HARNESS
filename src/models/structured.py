@@ -1,4 +1,4 @@
-"""조언 모델의 입력 예산, 분할 전송 및 구조화 응답 검증."""
+"""모델 입력 예산·분할 전송·구조화 응답 검증. AI 의견과 PDF 추출이 공유한다."""
 import json
 import logging
 import re
@@ -131,5 +131,3 @@ async def ask(model, prompt: str, stage: str, payload: dict, schema):
                     MODEL_RESPONSE_ERROR
                 ) from error
             request_payload["validation_errors"] = errors
-
-

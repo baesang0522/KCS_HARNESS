@@ -6,7 +6,7 @@ from agents.request_router import RequestDecision, route_request
 from services.recommendation.service import resolve_advice_columns, resolve_advice_subject
 from repositories.conversation_repository import StoredTurn
 from services.errors import MODEL_RESPONSE_ERROR, ConflictError, ModelProcessingError
-from services.investigation import investigation_context
+from services.investigation.service import investigation_context
 from services.formula.service import formula_job_context
 from services.execution_history import execution_history_context, same_formula_workspace
 
@@ -118,7 +118,7 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
             context = build_task_context(state, formula_jobs, operation_jobs=operation_jobs,
                                          conversation_id=conversation_id, workspace=workspace,
                                          investigation=investigation_context(conversation, workspace))
-            from services.agent_runs import active_context
+            from services.agent_runs.service import active_context
             context["agent_run"] = active_context(conversation, workspace)
             context["user_request"] = message
             if advice_requested:
@@ -136,11 +136,11 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
                     log_context={"conversation_id": conversation_id, "request_id": request_id})
             answer = decision.answer
             if decision.intent == "agent":
-                from services.agent_runs import start_run
+                from services.agent_runs.service import start_run
                 run = start_run(conversation, decision, workspace, message, operation_jobs, formula_jobs, request_id)
                 action = {"type": "agent_run", "run_id": run.id}
             else:
-                from services.agent_runs import pause_active
+                from services.agent_runs.service import pause_active
                 pause_active(conversation)
                 action, answer = decision_action(decision, workspace)
         except ConflictError:
