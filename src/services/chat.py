@@ -120,6 +120,7 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
                                          investigation=investigation_context(conversation, workspace))
             from services.agent_runs import active_context
             context["agent_run"] = active_context(conversation, workspace)
+            context["user_request"] = message
             if advice_requested:
                 subject = resolve_advice_subject(workspace)
                 if subject is None:

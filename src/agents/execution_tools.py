@@ -15,7 +15,6 @@ def execution_tools(context, manual_tools):
             raise RepeatedReadError(
                 "동일한 열·조건의 조회/비교는 이미 완료됐습니다. agent_run.read_results의 실제 결과를 사용하세요. "
                 "셀 변경은 아직 하지 않았습니다. 같은 조회 대신 남은 목표의 기존 변경 도구로 미리보기를 준비하거나 결과를 보고하세요. "
-                "대표 부호→그룹을 이미 읽었다면 apply_group_by_code로 같은 부호의 그룹을 반영하세요. "
                 "정보가 실제로 부족한 경우에만 구체적인 확인 질문을 하세요."
             )
         return {"intent": "read", "read": spec, "answer": answer}
@@ -87,4 +86,7 @@ def execution_tools(context, manual_tools):
     names = {"ask_user", "answer_question", "change_scope", "update_matching_rows",
              "remove_words", "preprocess", "replace_text", "split_text", "map_values", "group_values",
              "find_model_candidates", "match_suppliers"}
-    return [item for item in manual_tools if item.name in names] + [read_workspace, compare_values, apply_group_by_code, calculate_formula]
+    tools = [item for item in manual_tools if item.name in names] + [read_workspace, compare_values, calculate_formula]
+    if context.get("agent_run", {}).get("code_grouping_request"):
+        tools.append(apply_group_by_code)
+    return tools
