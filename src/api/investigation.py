@@ -3,8 +3,9 @@ from uuid import UUID
 from fastapi import APIRouter, Request
 
 from services.documents.schemas import DocumentWorkspace
-from services.investigation import (ExtractConditions, SaveInvestigation, SaveReview, bind_investigation,
-    extract_conditions, public_investigation, save_investigation, save_review)
+from services.investigation.schemas import ExtractConditions, SaveInvestigation, SaveReview
+from services.investigation.service import bind_investigation, public_investigation, save_investigation, save_review
+from services.investigation.extraction import extract_conditions
 
 router = APIRouter(prefix="/conversations/{conversation_id}/investigation", tags=["investigation"])
 

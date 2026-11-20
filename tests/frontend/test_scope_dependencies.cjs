@@ -19,7 +19,7 @@ async function setup({count=4,targetCount=count}={}){
  }};
  ['workspace/workspace_sheet.js','workspace/table_reader.js','operations/operations_sheet.js','operations/operations_ui.js',
  'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js',
- 'workspace/result_dependencies.js','workspace/workspace.js'].forEach(h.load);
+ 'workspace/result_dependencies.js','workspace/workspace_actions.js','workspace/workspace.js'].forEach(h.load);
  const messages=[];
  controller=h.window.createWorkspaceController({messages:h.messages,api,getConversationId:()=> 'conversation',isBusy:()=>busy,
  setBusy:value=>{busy=value;controller?.setBusy(value);},complete:message=>messages.push(message),enterConversation:noop,
@@ -210,4 +210,20 @@ test('editing an earlier formula output during the completion acknowledgement ma
  f.sheet.cells[1][4]='user edit during ack';await f.controller.formulaResult(result,selection,ids);
  assert.deepEqual(Array.from((await f.controller.context()).review_required_column_ids),[f.ids['후속']]);
  assert.equal(f.sheet.cells[1][4],'user edit during ack');
+});
+
+test('role changes stay in the workspace owner and roll back when saving fails without cell writes', async () => {
+ const f = await setup(), before = structuredClone(f.sheet.cells);
+ await f.controller.assignRole({column_id: f.ids['회사'], role: 'company_name'});
+ assert.equal(f.stored.columns.find(c => c.column_id === f.ids['회사']).role, 'company_name');
+ f.failSave = true;
+ await f.controller.assignRole({column_id: f.ids['국가'], role: 'company_name'});
+ f.failSave = false;
+ const current = await f.controller.context();
+ assert.equal(current.columns.find(c => c.column_id === f.ids['회사']).role, 'company_name');
+ assert.equal(current.columns.find(c => c.column_id === f.ids['국가']).role, 'reference');
+ await f.controller.assignRole({column_id: f.ids['국가'], role: 'company_name'});
+ assert.equal(f.stored.columns.find(c => c.column_id === f.ids['회사']).role, 'reference');
+ assert.equal(f.stored.columns.find(c => c.column_id === f.ids['국가']).role, 'company_name');
+ assert.deepEqual(f.sheet.cells, before);
 });

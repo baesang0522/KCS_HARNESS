@@ -9,7 +9,8 @@ from services.operations.schemas import Operation, OperationOutput, ScopeRequest
 from services.chat_state import TaskType
 from services.similarity import SimilaritySettings
 from services.group_review import GroupReviewRequest
-from services.recommendation.service import resolve_advice_columns, resolve_advice_subject, resolve_columns
+from services.recommendation.service import resolve_advice_columns, resolve_advice_subject
+from services.workspace import resolve_columns
 
 
 class RequestDecision(BaseModel):

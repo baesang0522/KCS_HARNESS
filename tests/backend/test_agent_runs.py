@@ -17,7 +17,7 @@ from api.formula_jobs import router as formula_router
 from api.errors import service_error_response
 from repositories.conversation_repository import MemoryConversationRepository, ConversationNotFound
 from services.errors import ServiceError
-from services.agent_runs import MAX_STEPS
+from services.agent_runs.service import MAX_STEPS
 
 
 class AgentTests(unittest.TestCase):

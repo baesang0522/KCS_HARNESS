@@ -25,6 +25,7 @@ async function setup({rows=90000,cachedRows=90000}={}) {
     window.errorMessages = JSON.parse(fs.readFileSync(path.join(__dirname, '../../src/services/error_messages.json'), 'utf8'));
     const sandbox={window,console,Excel:{run:async fn=>fn({})}};
     vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../src/static/excel/formula/workspace_formula.js'),'utf8'),sandbox);
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../src/static/excel/workspace/workspace_actions.js'),'utf8'),sandbox);
     vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../src/static/excel/workspace/workspace.js'),'utf8'),sandbox);
     h.controller=window.createWorkspaceController({messages:h.messages,api:{newRequestId:()=> 'id'},getConversationId:()=> 'conversation',
         isBusy:()=>false,setBusy(){},complete(){},enterConversation(){},

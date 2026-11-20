@@ -1,7 +1,7 @@
 """원문 구절 ID를 유지하며 AI 호출 분량만 나눈다. 문서 전체를 자르지 않는다."""
 from itertools import islice
 
-from services.recommendation.model_io import available_bytes, batches
+from models.structured import available_bytes, batches
 
 
 def flatten_sources(pages):
