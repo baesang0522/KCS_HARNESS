@@ -1,4 +1,4 @@
-from services.chat_actions import DocumentAction, WorkspaceAction, FormulaOutputAction
+from services.chat.actions import DocumentAction, WorkspaceAction, FormulaOutputAction
 from uuid import UUID
 from typing import Annotated, Literal
 from services.similarity import SimilaritySettings

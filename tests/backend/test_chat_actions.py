@@ -4,7 +4,7 @@ from pydantic import ValidationError, TypeAdapter
 from agents.request_tools import build_request_tools
 from agents.request_router import RequestDecision
 from api.schemas import UIAction
-from services.chat import decision_action
+from services.chat.service import decision_action
 from services.operations.schemas import OperationOutput
 from services.operations.jobs import CreateOperationJob, OperationJob, OutputPlacement, begin_apply
 from services.errors import ConflictError

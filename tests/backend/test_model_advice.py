@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from agents.request_graph import run_request_graph
 from repositories.conversation_repository import MemoryConversationRepository
-from services.chat import process_chat
+from services.chat.service import process_chat
 from services.errors import MODEL_RESPONSE_ERROR, ModelProcessingError
 from services.recommendation.analysis import generate_advice
 from models.structured import ask, batches, byte_size
@@ -152,7 +152,7 @@ class ModelAdviceTests(unittest.IsolatedAsyncioTestCase):
     async def test_chat_exception_has_friendly_message_and_does_not_save_turn(self):
         repo = MemoryConversationRepository()
         cid = await repo.create()
-        with patch('services.chat.route_request', new=AsyncMock(side_effect=ValueError('bad output'))):
+        with patch('services.chat.service.route_request', new=AsyncMock(side_effect=ValueError('bad output'))):
             with self.assertRaisesRegex(ModelProcessingError, MODEL_RESPONSE_ERROR):
                 await process_chat(runtime=None, repository=repo, formula_jobs={},
                                    operation_jobs={}, conversation_id=cid,

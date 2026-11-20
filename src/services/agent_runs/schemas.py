@@ -64,6 +64,7 @@ class AgentRun:
     requests: dict = field(default_factory=dict)
     seen: set = field(default_factory=set)
     request_id: str | None = None
+    origin_request_id: str | None = None
     message: str = ""
     user_request: str = ""
     code_grouping_request: str | None = None

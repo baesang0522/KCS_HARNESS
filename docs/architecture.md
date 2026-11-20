@@ -7,7 +7,7 @@
 ```mermaid
 flowchart TD
     UI[Excel 채팅] --> API[api/chat.py]
-    API --> CHAT[services/chat.py]
+    API --> CHAT[services/chat/service.py]
     CHAT --> ROUTER[agents/request_router.py]
     ROUTER --> GRAPH[agents/request_graph.py]
     GRAPH --> TOOLS[agents/tools/ · execution_tools.py]
@@ -58,14 +58,14 @@ flowchart TD
 
 `services/agent_runs/service.py`의 `validate_code_grouping_request`는 현재 사용자 원문 인용을 검증한다. `agents/execution_tools.py`의 도구 노출과 `request_graph.py`의 `prompts/code_grouping.yml` 추가도 이 요청 여부를 따른다. 일반 회사명 매칭 요청에는 대표 부호 연결을 붙이지 않는다.
 
-도구를 추가하면 정의만 추가해서 끝내지 않는다. 결정 검증, `services/chat.py`의 `decision_action`, API 응답 형식, `taskpane.js`의 전달 경로, 실행 기능, 프롬프트·테스트까지 확인한다.
+도구를 추가하면 정의만 추가해서 끝내지 않는다. 결정 검증, `services/chat/service.py`의 `decision_action`, API 응답 형식, `taskpane.js`의 전달 경로, 실행 기능, 프롬프트·테스트까지 확인한다.
 
 ## 업무 처리와 저장 상태
 
 | 위치 | 역할 |
 | --- | --- |
-| `services/chat.py` | 대화 이력·작업 문맥 구성, 요청 라우팅, 결정 → 화면 동작 변환 |
-| `services/chat_state.py`, `chat_actions.py` | 대화 작업 상태와 문서·작업표·수식 위치 변경 자료형 |
+| `services/chat/service.py` | 대화 이력·작업 문맥 구성, 요청 라우팅, 결정 → 화면 동작 변환 |
+| `services/chat/state.py`, `services/chat/actions.py` | 대화 작업 상태와 문서·작업표·수식 위치 변경 자료형 |
 | `services/agent_runs/schemas.py` | 목표 실행 요청·Excel 응답·메모리 실행 상태 |
 | `services/agent_runs/service.py` | 시작·재개·작업 연결·조회 결과 검증·다음 단계·중복 실행 방지 |
 | `services/investigation/schemas.py` | 조사 대상·근거·조건·검토 요청과 저장 상태 |
@@ -135,3 +135,9 @@ API 경로·저장 데이터·도구 이름과 인자는 파일 이동만으로 
 ## 보류 기능
 
 `static/excel/group_review/`는 현재 페이지에서 로드하지 않는다. 도구 등록·화면 연결도 보류 상태이며 코드·테스트·기존 저장 정보는 유지한다. 과거 상세 사용법은 [보관 문서](history.md)다.
+
+## 채팅 패키지와 적용 추적
+
+`services/chat/service.py`는 기존 채팅 처리, `state.py`는 대화 작업 상태, `actions.py`는 화면 동작 형식을 담당한다. 기존 함수·자료형은 유지하고 호출부·테스트·평가 스크립트의 import를 갱신했다.
+
+채팅 ID 전달 → 작업 생성 → 미리보기 → 적용 시작 → Excel 완료 보고 → 복구 확인의 로그는 [로그 안내](logging.md)를 따른다. 에이전트의 `origin_request_id`는 왕복·취소에 쓰는 `request_id`와 별도다. 정제·수식 작업은 선택적인 출처 ID를 보관하고, 서버 API가 기존 상태 전환을 관측한다. 추가 네트워크 요청이나 LangSmith 의존성·연동은 없다.

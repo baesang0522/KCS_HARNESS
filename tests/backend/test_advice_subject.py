@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 from agents.request_tools import build_request_tools
 from services.recommendation.service import resolve_advice_subject
-from services.chat import process_chat
+from services.chat.service import process_chat
 from repositories.conversation_repository import MemoryConversationRepository
 
 

@@ -64,9 +64,9 @@ async function setup() {
         const body=options.body?JSON.parse(options.body):null;requests.push({url,body,signal:options.signal});return h.respond(url,body,options);
     }};
     const chat=h.window.createChatController({api,getWorkspace:()=>workspace,closeTaskCards(){},resetTasks(){},
-        handleUIAction:async action=>{if(action)actions.push(action);if(h.onAction)await h.onAction(action);},runAgent:(action,run)=>agent.run(action,run),
+        handleUIAction:async (action,instruction,origin)=>{if(action)actions.push(action);if(h.onAction)await h.onAction(action,instruction,origin);},runAgent:(action,run)=>agent.run(action,run),
         beforeManualAction:()=>agent.detach(),onBusy:value=>{if(!value&&agent)agent.flush();}});
-    agent=h.window.createAgentController({api,chat,getWorkspace:()=>workspace,handleUIAction:async action=>{if(action)actions.push(action);if(h.onAction)await h.onAction(action);}});
+    agent=h.window.createAgentController({api,chat,getWorkspace:()=>workspace,handleUIAction:async (action,instruction,origin)=>{if(action)actions.push(action);if(h.onAction)await h.onAction(action,instruction,origin);}});
     h.window.readAgentData=async()=>({rows:[{identity:1,excel_row:2,values:['AA']},{identity:3,excel_row:4,values:['AA']}],verify:async()=>{}});
     await chat.initialize();
     h.document.getElementById('message').value='값을 확인해줘';
@@ -214,4 +214,27 @@ test('three automatic group handoffs continue to completion without any apply cl
     await Promise.race([done,new Promise((_,reject)=>{setTimeout(()=>reject(new Error('automatic progression stalled')),1000).unref();})]);
     assert.equal(h.actions.length,3);
     assert.equal(h.document.getElementById('conversation').querySelectorAll('button').length,0);
+});
+
+
+test('agent handoff and automatic continuation preserve the originating chat rather than advance IDs', async () => {
+    const h = await setup(), original = h.getRespond(), origins = [];
+    let step = 0, finish;
+    const continued = new Promise(resolve => { finish = resolve; });
+    h.setRespond(async (url, body, options) => {
+        if (url.endsWith('/advance')) return Object.assign(h.state('WAITING_USER',
+            {type:'configure_operation',operation:{kind:'preprocess'}},'step-'+ ++step), {origin_request_id:'original-chat'});
+        return original(url,body,options);
+    });
+    h.setAction(async (action, instruction, origin) => {
+        origins.push(origin);
+        if (origins.length === 1) {
+            await h.agent.bind('operation','job');
+            h.agent.complete({job_id:'job',status:'SUCCEEDED'},'완료');
+        } else finish();
+    });
+    await h.chat.sendMessage();
+    await continued;
+    assert.deepEqual(origins,['original-chat','original-chat']);
+    assert(h.requests.filter(r => r.url.endsWith('/advance')).every(r => r.body.request_id !== 'original-chat'));
 });

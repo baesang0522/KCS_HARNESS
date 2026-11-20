@@ -1,6 +1,7 @@
 from typing import Literal
 from uuid import UUID
 from fastapi import APIRouter, Query, Request
+from services.debug_log import job_event
 from services import write_recovery as service
 
 router = APIRouter(prefix="/write-recovery", tags=["write-recovery"])
@@ -21,12 +22,18 @@ async def pending(conversation_id: UUID, request: Request, worksheet_id: str | N
 async def evidence(kind: Kind, job_id: UUID, conversation_id: UUID, payload: service.WriteEvidence, request: Request):
     async with request.app.state.conversations.edit(str(conversation_id)):
         job = service.find(request.app.state, kind, job_id, conversation_id)
-        service.save_evidence(job, kind, payload)
-        return service.public(job, kind)
+        with job_event("write_recovery.evidence", job.source, kind, block_count=len(payload.blocks)) as event:
+            service.save_evidence(job, kind, payload)
+            event["status"] = job.status
+            return service.public(job, kind)
 
 
 @router.post("/{kind}/{job_id}/check")
 async def check(kind: Kind, job_id: UUID, conversation_id: UUID, payload: service.WriteObservation, request: Request):
     async with request.app.state.conversations.edit(str(conversation_id)):
         job = service.find(request.app.state, kind, job_id, conversation_id)
-        return service.recover(job, kind, payload)
+        with job_event("write_recovery.check", job.source, kind, previous_status=job.status,
+                       method="user" if payload.conclusion else "comparison") as event:
+            result = service.recover(job, kind, payload)
+            event.update(status=job.status, conclusion=job.write_checks[-1]["result"] if job.write_checks else None)
+            return result

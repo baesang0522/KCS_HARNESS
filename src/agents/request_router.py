@@ -1,12 +1,12 @@
 from typing import Literal
-from services.chat_actions import DocumentAction, WorkspaceAction, FormulaOutputAction
+from services.chat.actions import DocumentAction, WorkspaceAction, FormulaOutputAction
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
 from services.errors import SHARED_MESSAGES
 from agents.request_graph import run_request_graph
 from services.operations.schemas import Operation, OperationOutput, ScopeRequest, extraction_column_id
-from services.chat_state import TaskType
+from services.chat.state import TaskType
 from services.similarity import SimilaritySettings
 from services.group_review import GroupReviewRequest
 from services.recommendation.service import resolve_advice_columns, resolve_advice_subject

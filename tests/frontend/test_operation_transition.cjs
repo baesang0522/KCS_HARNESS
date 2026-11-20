@@ -58,3 +58,36 @@ test('server settings error is displayed once and prevents Excel reads or writes
     await handlers.preview();
     assert.deepEqual(events, [serverMessage]);
 });
+
+
+test('operation requests retain per-job origins, clear stale origins, and carry write failures',async()=>{
+    const bodies=[];let handlers, serial=0;
+    const operation={kind:'preprocess',column_ids:['in'],rules:[{operation:'trim'}]};
+    const workspace={workspace_id:'work',worksheet_id:'sheet',table_id:'table',task_type:'investigation',columns:[{column_id:'in'}]};
+    const ui=new Proxy({bind:x=>{handlers=x;},operation:()=>operation,output:()=>({mode:'new',anchor:'in',name:'out'})},
+        {get:(o,k)=>o[k]||(()=>{})});
+    const window={createOperationsUI:()=>ui,operationsSheet:{
+        read:async()=>({workspace,columns:workspace.columns,rows:[{excel_row:2,values:[' A ']}]}),
+        write:async()=>{throw new Error('Excel write disconnected');}
+    }};
+    const sandbox={window,console,AbortController};
+    for (const file of ['operation_jobs.js','operations.js']) vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../src/static/excel/operations',file),'utf8'),sandbox);
+    const api={newRequestId:()=> 'job-'+ ++serial,requestJson:async(url,options)=>{
+        const body=JSON.parse(options.body);bodies.push({url,body});
+        if(url==='/operation-jobs')return {source:body};
+        if(url.includes('/preview'))return {headers:['결과'],changed_count:1,rows:body.rows.map(r=>({...r,values:['A']}))};
+        return {};
+    }};
+    const controller=window.createOperations({api,isBusy:()=>false,setBusy(){},refresh:async()=>false,status(){},complete(){},changed(){},
+        jobs:window.createOperationJobs(api,()=> 'conversation')});
+    controller.show(workspace,{row_start:1,row_count:1},['in'],true);
+    controller.configure(operation,'first-chat');await handlers.preview();await handlers.apply();
+    controller.reset();controller.show(workspace,{row_start:1,row_count:1},['in'],true);
+    controller.configure(operation);await handlers.preview();
+    const creations=bodies.filter(x=>x.url==='/operation-jobs');
+    assert.deepEqual(creations.map(x=>x.body.origin_request_id),['first-chat',null]);
+    const unknown=bodies.find(x=>x.body.status==='UNKNOWN');
+    assert(unknown.url.includes('/job-1/'));
+    assert.equal(unknown.body.error_message,'Excel write disconnected');
+    assert(!bodies.some(x=>x.body.status==='APPLIED'));
+});

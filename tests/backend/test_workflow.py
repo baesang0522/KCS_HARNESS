@@ -15,8 +15,8 @@ from api.formula_jobs import router as formula_router
 from api.errors import service_error_response
 from repositories.conversation_repository import MemoryConversationRepository, ConversationNotFound
 from services.errors import ServiceError
-from services.chat import build_task_context
-from services.chat_state import WorkFlowState
+from services.chat.service import build_task_context
+from services.chat.state import WorkFlowState
 from services.execution_history import execution_history_context
 from services.formula.schemas import CreateFormulaJobRequest, FormulaPlan
 from services.operations.jobs import CreateOperationJob, OperationJob
@@ -59,7 +59,7 @@ class WorkflowTests(unittest.TestCase):
         from unittest.mock import AsyncMock, patch
         from agents.request_router import RequestDecision
         decision = RequestDecision(intent='group_review', answer='검토 화면을 열었습니다.', analysis_column_ids=['model'])
-        with patch('services.chat.route_request', new=AsyncMock(return_value=(decision, []))):
+        with patch('services.chat.service.route_request', new=AsyncMock(return_value=(decision, []))):
             response = self.client.post('/chat', json={'conversation_id': self.cid, 'request_id': str(uuid4()),
                 'message': '묶음 검토', 'workspace': self.workspace})
         self.assertEqual(response.status_code, 200, response.text)

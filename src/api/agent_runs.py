@@ -32,7 +32,7 @@ async def advance(conversation_id: UUID, run_id: UUID, payload: Advance, request
                   error_type=type(error).__name__, error_message=str(error),
                   elapsed_ms=round((perf_counter() - started) * 1000))
         raise
-    log_event("agent.advance.completed", **ids, result=result,
+    log_event("agent.advance.completed", **ids, origin_request_id=result.get("origin_request_id"), result=result,
               elapsed_ms=round((perf_counter() - started) * 1000))
     return result
 
@@ -41,7 +41,10 @@ async def advance(conversation_id: UUID, run_id: UUID, payload: Advance, request
 async def bind(conversation_id: UUID, run_id: UUID, payload: BindJob, request: Request):
     state = request.app.state
     async with state.conversations.edit(str(conversation_id)) as conversation:
-        return service.bind_job(conversation, run_id, payload, state.operation_jobs, state.formula_jobs, str(conversation_id))
+        result = service.bind_job(conversation, run_id, payload, state.operation_jobs, state.formula_jobs, str(conversation_id))
+        log_event("agent.job_bound", conversation_id=str(conversation_id), origin_request_id=result.get("origin_request_id"),
+                  run_id=str(run_id), step_id=str(payload.step_id), job_id=str(payload.job_id), job_kind=payload.kind)
+        return result
 
 
 @router.post("/{run_id}/pause")

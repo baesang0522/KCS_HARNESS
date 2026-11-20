@@ -51,6 +51,7 @@
                 if (inputScope && inputScope.output && inputScope.output.name) instruction += "\n결과 열 이름: " + inputScope.output.name;
                 var payload = Object.assign({}, selection, {
                     conversation_id: options.getConversationId(),
+                    origin_request_id: inputScope && inputScope.origin_request_id || null,
                     formula_job_id: api.newRequestId(),
                     instruction: instruction
                 });
@@ -169,7 +170,8 @@
                 if (approvalRequested && !recorded) {
                     try {
                         await api.requestJson("/formula-jobs/" + formulaJob.formula_job_id + "/previews/" +
-                            preview.preview_id + "/unknown", {method: "POST"});
+                            preview.preview_id + "/unknown", {method: "POST", headers: {"Content-Type": "application/json"},
+                                body: JSON.stringify({error_message: error.message})});
                     } catch (statusError) {
                         error.message += " · 서버의 적용 상태를 확인하지 못했습니다. 다시 적용하지 마세요.";
                     }
