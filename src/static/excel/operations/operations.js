@@ -3,7 +3,7 @@
     window.createOperations = function (options) {
         var ui = window.createOperationsUI(options.messages), sheet = window.operationsSheet;
         var workspace = null, target = null, preview = null, processing = false, cancelled = false, abort = null;
-        var finalSnapshot = null, retirement = Promise.resolve();
+        var finalSnapshot = null, retirement = Promise.resolve(), originRequestId = null;
         function invalidate(keepJob) {
             var discarded = preview;
 
@@ -69,7 +69,7 @@
                 job = await options.jobs.create(
                     readWorkspace,
                     readTarget,
-                    operation
+                    operation, originRequestId
                 );
                 check();
                 var ids = operation.column_ids.concat(operation.kind === "group" ? [operation.value_column_id] : []);
@@ -154,7 +154,7 @@
                     try {
                         await options.jobs.status(
                             job,
-                            cancelled ? "CANCELLED" : "FAILED"
+                            cancelled ? "CANCELLED" : "FAILED", null, error.message
                         );
                     } catch (recordError) {
                         error.message +=
@@ -309,7 +309,7 @@
                 if (!applyRequested) {
                     if (automatic) {
                         invalidate(true);
-                        try { await options.jobs.status(data.job, cancelled ? "CANCELLED" : "FAILED"); }
+                        try { await options.jobs.status(data.job, cancelled ? "CANCELLED" : "FAILED", null, error.message); }
                         catch (recordError) { error.message += " · 실행 상태 기록 실패: " + recordError.message; }
                         complete(error.message, {kind: "operation", job_id: data.job.source.operation_job_id, status: "FAILED"});
                     } else options.status(error.message);
@@ -319,7 +319,7 @@
                 var recordMessage = "";
                 if (!recorded) {
                     try {
-                        await options.jobs.status(data.job, "UNKNOWN");
+                        await options.jobs.status(data.job, "UNKNOWN", null, error.message);
                     } catch (recordError) {
                         console.warn("정제 적용 상태 기록 실패", recordError);
                         recordMessage = " · 서버 실행 상태를 확인하지 못했습니다.";
@@ -375,7 +375,7 @@
         return {
             reconcile: function (work, next, fallback) { workspace = work; target = next; invalidate(); return ui.reconcile(work.columns, fallback, work.task_type); },
             show: function (work, next, preferred, resetMode) { workspace = work; target = next; invalidate(); ui.show(work.columns, preferred || [], work.task_type, resetMode); },
-            configure: function (operation) { invalidate(); ui.configure(operation); },
+            configure: function (operation, requestId) { invalidate(); originRequestId = requestId || null; ui.configure(operation); },
             preview: build,
             recommendExtraction: recommendExtraction,
             sampleRows: sampleRows,
@@ -387,7 +387,7 @@
             cancel: function () { cancelled = true; if (abort) abort.abort(); invalidate(); ui.forget(); },
             invalidate: invalidate,
             busy: function (busy) { ui.busy(busy, processing); },
-            reset: function () { workspace = target = null; invalidate(); ui.forget(); }
+            reset: function () { workspace = target = originRequestId = null; invalidate(); ui.forget(); }
         };
     };
 })();

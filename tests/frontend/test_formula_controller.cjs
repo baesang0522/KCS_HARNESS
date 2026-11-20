@@ -37,7 +37,7 @@ function setup(fail=false, config={}) {
         beginRequest:()=>({controller:new AbortController()}),checkRequest(){},endRequest(){},setBusy(){},
         complete:x=>messages.push(x)
     });
-    return {start:async()=>{controller.openAndSelect('합산',{workspace_id:'work',column_ids:['a','b']});await timer();},apply:()=>handlers.apply(),requests,messages,status,bodies,events,get scope(){return scopeSeen;},get writes(){return writes;}};
+    return {start:async()=>{controller.openAndSelect('합산',{workspace_id:'work',column_ids:['a','b'],...(config.origin ? {origin_request_id:config.origin} : {})});await timer();},apply:()=>handlers.apply(),requests,messages,status,bodies,events,get scope(){return scopeSeen;},get writes(){return writes;}};
 }
 test('failed partial apply never reports completion and cannot be retried by button',async()=>{
     const h=setup(true);await h.start();await h.apply();await h.apply();
@@ -88,4 +88,12 @@ test('workspace formula request announces automatic lookup rather than asking fo
     assert(h.status.some(text=>text.includes('90,000행으로 수식 계획')));
     assert(!h.status.some(text=>text.includes('Excel에서 선택한 범위를 가져옵니다')));
     assert.equal(h.writes,0);
+});
+
+
+test('formula creation retains its chat origin and unknown writes report the client failure', async () => {
+    const h=setup(true,{origin:'chat-origin'});await h.start();await h.apply();
+    assert.equal(h.bodies.find(x=>x.url==='/formula-jobs').body.origin_request_id,'chat-origin');
+    assert.equal(h.bodies.find(x=>x.url.endsWith('/unknown')).body.error_message,'partial error');
+    assert(!h.requests.some(x=>x.endsWith('/complete')));
 });

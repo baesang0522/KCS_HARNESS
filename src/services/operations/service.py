@@ -1,3 +1,4 @@
+from services.debug_log import log_event
 from services.operations.rules import preprocess, split_value, model_candidates
 from services.operations.schemas import OperationRequest, OperationResponse, Row, mapping_key
 
@@ -17,14 +18,8 @@ def value_catalog(values: list[str]) -> dict:
 
 def execute(payload: OperationRequest) -> OperationResponse:
     operation = payload.operation
-    print(
-        "[operations.execute v2]",
-        "file=", __file__,
-        "kind=", operation.kind,
-        "group_mode=", operation.group_mode,
-        "source_row=", operation.source_row,
-        flush=True,
-    )
+    log_event("operation.execute", operation_kind=operation.kind,
+              group_mode=operation.group_mode, source_row=operation.source_row)
     mappings = {
         mapping_key(item.source): item.target
         for item in operation.mappings

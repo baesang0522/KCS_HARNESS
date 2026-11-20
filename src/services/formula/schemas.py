@@ -79,6 +79,7 @@ class CreateFormulaJobRequest(BaseModel):
 
     task_type: Literal["formula"]
     conversation_id: UUID
+    origin_request_id: UUID | None = None
     formula_job_id: UUID
     instruction: str = Field(min_length=1, max_length=8000)
     worksheet_id: str = Field(min_length=1, max_length=256)
@@ -305,3 +306,9 @@ class FormulaJob(BaseModel):
     error: str = ""
     result: FormulaCompletion | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class FormulaUnknownRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    error_message: str | None = None

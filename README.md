@@ -5,6 +5,7 @@ Excel 추가 기능에서 원본 데이터를 작업표로 가져와 정제·비
 ## 어디부터 볼지
 
 - [코드 지도](docs/architecture.md): 폴더·파일별 역할, 호출 흐름, 상태 소유권, 수정 위치.
+- [요청·Excel 적용 로그](docs/logging.md): 요청 ID로 미리보기·적용·완료 미확인·복구 기록 찾기.
 - [현재 사용 안내](docs/usage.md): 화면과 채팅 작업, 저장·복구, 현재 제약.
 - [개발 계획·완료 이력](docs/development.md): 미완료 계획과 과거 검증 기록.
 - [이전 기능 설명](docs/history.md): 과거 UI·보류 기능의 설명 보관. 현재 사용법과 구분한다.
@@ -49,5 +50,7 @@ node --test tests/frontend/*.cjs
 - `model.*`: 작업 문맥·대화·선택한 도구·오류·시간.
 - `tool.*`: 도구 이름·인자·결과·오류·재시도 여부.
 - `agent.advance.*`, `agent.failed`: Excel에서 돌아온 결과와 다음 단계.
+- `origin_request_id`·`job_id`: 원래 채팅과 정제·수식 작업 연결.
+- `operation.*`, `formula.*`, `write_recovery.*`: 미리보기·적용 시작·완료 보고·복구 상태. 단계 처리 완료와 실제 적용 완료(`APPLIED`)를 구분한다. 자세한 예시는 [로그 안내](docs/logging.md)를 참고한다.
 
 구조화된 비밀번호·API 키·토큰 필드는 가린다. 업무 데이터·자유 입력은 기록되므로 공유 전에 확인한다. 별도 로그 파일 저장·순환은 없으며 필요하면 서버 출력을 파일로 저장한다.

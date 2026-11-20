@@ -290,6 +290,7 @@
                     run.request = pendingRequest;
                 }
 
+                var originRequestId = pendingRequest.request_id;
                 var reply = await api.requestJson('/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -346,7 +347,7 @@
 
                 try {
                     setBusy(false);
-                    await options.handleUIAction(reply.ui_action, value);
+                    await options.handleUIAction(reply.ui_action, value, reply.origin_request_id || originRequestId);
                 } catch (uiError) {
                     // 서버에서 성공한 요청을 다시 전송하게 만들지 않는다.
                     notice.textContent =

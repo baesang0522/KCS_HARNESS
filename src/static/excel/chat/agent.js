@@ -88,7 +88,7 @@
                     if (state.status !== "WAITING_EXCEL") {
                         var handoff = state.status === "WAITING_USER" && state.step && !state.step.job ? state.step.action : null;
                         writeVerification = handoff && handoff.auto_apply ? verify : null;
-                        return {answer: state.answer, ui_action: handoff || null};
+                        return {answer: state.answer, ui_action: handoff || null, origin_request_id: state.origin_request_id || null};
                     }
                     var step = state.step;
                     receipt = {step_id: step.step_id, status: "SUCCEEDED"};
@@ -141,7 +141,7 @@
                     chat.checkRequest(request);
                     chat.appendMessage("assistant", reply.answer);
                     chat.setBusy(false);
-                    await options.handleUIAction(reply.ui_action, current.goal);
+                    await options.handleUIAction(reply.ui_action, current.goal, reply.origin_request_id);
                 } catch (error) {
                     if (request.cancelled) { await chat.reportStop(request); chat.appendMessage("assistant", "조사 실행을 중지했습니다."); }
                     else chat.appendMessage("assistant", error.message);

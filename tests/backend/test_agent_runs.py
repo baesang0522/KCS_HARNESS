@@ -455,3 +455,19 @@ class AgentTests(unittest.TestCase):
         self.assertIn('지시가 없습니다',result['answer'])
         self.assertIsNone(result['step'])
         self.assertFalse(self.app.state.operation_jobs)
+
+    def test_public_steps_keep_the_chat_origin_across_advances_and_replace_it_for_new_goals(self):
+        first = self.start()
+        with patch('builtins.print') as output:
+            state = self.read()
+        model_event = next(json.loads(call.args[0]) for call in output.call_args_list if json.loads(call.args[0]).get('event') == 'model.started')
+        self.assertEqual(model_event['origin_request_id'], first['request_id'])
+        self.assertEqual(model_event['request_id'], self.last_payload['request_id'])
+        self.assertEqual(state['origin_request_id'], first['request_id'])
+        self.assertEqual(self.agent_run.request_id, self.last_payload['request_id'])
+        self.advance('ask_user', dict(question='확인하고 이어가줘'), self.receipt(state, rows=self.rows))
+        resumed = self.chat('resume_agent', {}, '확인했어. 이어가줘')
+        self.assertEqual(self.read()['origin_request_id'], resumed['request_id'])
+        second = self.start('현재 값을 다시 확인해줘')
+        self.assertEqual(self.read()['origin_request_id'], second['request_id'])
+        self.assertNotEqual(first['request_id'], second['request_id'])

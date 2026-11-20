@@ -61,7 +61,7 @@
         if (/^쓰기 결과 확인[.!]?$/.test(text)) { chat.appendMessage('user', text); await recovery.refresh(); return true; }
         return false;
     }
-    async function handleAction(action, instruction) {
+    async function handleAction(action, instruction, originRequestId) {
         if (!action) return;
         if (action.type === 'open_investigation') { await investigation.open(); return; }
         if (action.type === 'open_cleaning_help') { messages.say('정제할 열과 원하는 결과를 채팅으로 알려줘. 데이터에 맞는 방법을 찾으려면 AI 정제 의견을 요청해 줘.'); return; }
@@ -81,13 +81,13 @@
         if (action.type === 'configure_operation') {
             if (action.operation.kind === 'set' && !action.operation.condition) throw new Error('후보를 선택해 표시하는 기능은 보류 중이야. 조건 없는 전체 행 변경은 실행하지 않아.');
             chat.setBusy(true);
-            try { await workspace.configure(action.operation); } finally { chat.setBusy(false); }
+            try { await workspace.configure(action.operation, originRequestId); } finally { chat.setBusy(false); }
             if (action.operation.kind === 'extract' && !action.operation.extraction_mode) await workspace.recommendExtraction();
             else await workspace.previewOperation(action.auto_apply === true, action.auto_apply ? agent.verifyWrite : null);
             return;
         }
         if (action.type !== 'confirm_selection') throw new Error('지원하지 않는 작업 요청이야.');
-        if (action.task_type === 'formula') formula.openAndSelect(action.instruction || instruction, {workspace_id: action.workspace_id, column_ids: action.column_ids, output: action.output});
+        if (action.task_type === 'formula') formula.openAndSelect(action.instruction || instruction, {workspace_id: action.workspace_id, column_ids: action.column_ids, output: action.output, origin_request_id: originRequestId || null});
         else await workspace.open(action.task_type);
     }
     document.querySelectorAll('[data-task]').forEach(function (button) {

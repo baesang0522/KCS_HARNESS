@@ -531,9 +531,9 @@
             },
             previewOperation: function (automatic, verify) { return operations.preview(automatic, verify); },
             recommendExtraction: function () { return operations.recommendExtraction(); },
-            configure: async function (operation) {
+            configure: async function (operation, originRequestId) {
                 if (!workspace) throw new Error(window.errorMessages.WORKSPACE_SETUP_REQUIRED);
-                await refresh(); display(operation.column_ids); operations.configure(operation); ui.hide();
+                await refresh(); display(operation.column_ids); operations.configure(operation, originRequestId); ui.hide();
                 ui.status(operation.condition ? "현재 데이터에서 조건에 맞는 행을 확인합니다…" : "현재 데이터로 변경 내용을 계산하고 있어요…");
             },
             recoveryWorkspace: function () { return workspace; },

@@ -7,7 +7,7 @@ async function setup(saved) {
     const context = {workspace_id: 'work', worksheet_id: 'sheet', table_id: 'table', sheet_name: '작업표',
         task_type: 'model_normalization', row_count: 90000,
         columns: [{column_id: 'trade', role: 'trade_name'}, {column_id: 'model', role: 'model_spec'}], target_column_ids: ['model']};
-    h.context = context; h.requests = []; h.actions = []; h.dismissed = 0;
+    h.context = context; h.requests = []; h.actions = []; h.origins = []; h.dismissed = 0;
     h.workspace = {context: async () => h.context, reset() {}, dismiss() { h.dismissed++; },
         open: async () => {}, configure: async settings => { h.configured = settings; },
         configureSimilarity: async settings => { h.similarity = settings; },
@@ -31,7 +31,7 @@ async function setup(saved) {
     h.chat = h.window.createChatController({api: h.api, getWorkspace: () => h.workspace,
         closeTaskCards: close, resetTasks: () => h.workspace.reset(),
         beforeSend:()=>h.beforeSend && h.beforeSend(),
-        handleUIAction: async action => { h.actions.push(action);  },
+        handleUIAction: async (action, instruction, origin) => { h.actions.push(action); h.origins.push(origin); },
         onBusy: () => { if (h.help) h.help.updateControls(); }});
 
     await h.chat.initialize();
@@ -261,4 +261,16 @@ test('new investigation waits for conversation creation and preserves current UI
  await assert.rejects(h.chat.newConversation(),/연결 실패/);
  assert.equal(h.node('conversation').textContent,'기존 조사');assert.equal(h.chat.getConversationId(),'conversation');
  h.api.requestJson=original;await h.chat.newConversation();assert.equal(h.node('conversation').textContent,'');
+});
+
+
+test('each chat action carries its own originating request after pending state is cleared', async () => {
+    const h = await setup();
+    h.reply = async () => ({answer: '미리보기', ui_action: {type: 'configure_operation'}});
+    for (const message of ['첫 번째 정제', '다음 정제']) {
+        h.node('message').value = message;
+        await h.chat.sendMessage();
+    }
+    assert.deepEqual(h.origins, h.requests.filter(r => r.url === '/chat').map(r => r.body.request_id));
+    assert.notEqual(h.origins[0], h.origins[1]);
 });

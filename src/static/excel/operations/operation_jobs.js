@@ -20,11 +20,12 @@
         }
 
         return {
-            create: async function (workspace, target, operation) {
+            create: async function (workspace, target, operation, originRequestId) {
                 var models = workspace.columns.filter(function (column) { return column.role === "model_spec"; });
                 var job = await post("/operation-jobs", {
                     operation_job_id: api.newRequestId(),
                     conversation_id: getConversationId(),
+                    origin_request_id: originRequestId || null,
                     workspace_id: workspace.workspace_id,
                     worksheet_id: workspace.worksheet_id,
                     table_id: String(workspace.table_id),
@@ -51,9 +52,10 @@
                 return post(path(job, "apply"), output);
             },
 
-            status: function (job, status, ids) {
+            status: function (job, status, ids, errorMessage) {
                 return post(path(job, "status"), {
                     status: status,
+                    error_message: errorMessage || null,
                     result_column_ids: ids || []
                 });
             }

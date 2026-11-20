@@ -28,7 +28,7 @@ def fingerprint(value):
 def public(run):
     return deepcopy({"run_id": run.id, "goal": run.goal, "status": run.status,
                      "answer": run.answer, "step": run.step, "observation": run.observation,
-                     "workspace": run.workspace, "steps": run.steps})
+                     "workspace": run.workspace, "steps": run.steps, "origin_request_id": run.origin_request_id})
 
 
 def find_run(conversation, run_id):
@@ -73,6 +73,7 @@ def start_run(conversation, decision, workspace, message, operation_jobs, formul
                 job.status = "CANCELLED" if run.step["job"]["kind"] == "operation" else "FAILED"
             run.status, run.step = "READY", None
         run.request_id = request_id
+        run.origin_request_id = request_id
         run.workspace = deepcopy(workspace)
         run.observation = None
         run.read_results.clear()
@@ -83,7 +84,7 @@ def start_run(conversation, decision, workspace, message, operation_jobs, formul
     pause_active(conversation)
     validate_code_grouping_request(decision.code_grouping_request, message)
     run = AgentRun(id=str(uuid4()), goal=decision.goal, workspace=deepcopy(workspace), request_id=request_id,
-                   user_request=message, code_grouping_request=decision.code_grouping_request)
+                   user_request=message, code_grouping_request=decision.code_grouping_request, origin_request_id=request_id)
     conversation.agent_runs[run.id] = run
     conversation.active_agent_run_id = run.id
     return run
@@ -203,11 +204,12 @@ def reconcile_job(run, operation_jobs, formula_jobs):
 async def advance(*, conversation, conversation_id, run_id, payload, runtime, operation_jobs, formula_jobs):
     from agents.request_graph import run_request_graph
     from agents.request_router import RequestDecision
-    from services.chat import build_task_context, decision_action
+    from services.chat.service import build_task_context, decision_action
     from services.investigation.service import investigation_context
 
     run = find_run(conversation, run_id)
-    ids = {"conversation_id": conversation_id, "request_id": str(payload.request_id), "run_id": str(run_id)}
+    ids = {"conversation_id": conversation_id, "request_id": str(payload.request_id), "run_id": str(run_id),
+           "origin_request_id": run.origin_request_id}
     workspace = payload.workspace.model_dump(mode="json")
     if not same_workspace(run.workspace, workspace):
         raise ConflictError("실행 중인 작업표와 응답의 작업표가 다릅니다.")

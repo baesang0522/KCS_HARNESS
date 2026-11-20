@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from services.chat_state import WorkFlowState
+from services.chat.state import WorkFlowState
 from services.investigation.schemas import InvestigationState
 from services.errors import ConflictError, NotFoundError
 

@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from api.schemas import ChatRequest, ChatResponse
 from repositories.conversation_repository import to_messages
-from services.chat import process_chat, workflow_snapshot
+from services.chat.service import process_chat, workflow_snapshot
 from services.debug_log import log_event as log_chat
 from services.recommendation.schemas import AdviceRequest
 from services.recommendation.service import process_recommendation

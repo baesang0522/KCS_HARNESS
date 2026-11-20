@@ -6,7 +6,7 @@ from repositories.conversation_repository import MemoryConversationRepository
 from runtime import create_runtime
 from services.agent_runs.schemas import Advance
 from services.agent_runs.service import advance
-from services.chat import process_chat
+from services.chat.service import process_chat
 
 
 async def main():

@@ -34,6 +34,7 @@ JobStatus = Literal[
 class CreateOperationJob(StrictModel):
     operation_job_id: UUID
     conversation_id: UUID
+    origin_request_id: UUID | None = None
     workspace_id: UUID
     worksheet_id: ColumnId
     table_id: ColumnId
@@ -85,6 +86,7 @@ class OutputPlacement(StrictModel):
 
 
 class JobUpdate(StrictModel):
+    error_message: str | None = None
     status: Literal[
         "PREVIEW_READY",
         "APPLIED",

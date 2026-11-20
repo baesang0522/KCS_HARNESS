@@ -184,7 +184,7 @@ class InvestigationConditionTests(unittest.TestCase):
         async def route(runtime, messages, *, task_context, log_context=None):
             captured.update(context=task_context, messages=messages)
             return RequestDecision(intent='general', answer='기억한 조건'), []
-        with patch('services.chat.route_request', new=route):
+        with patch('services.chat.service.route_request', new=route):
             result = self.client.post('/chat', json=dict(conversation_id=self.cid, request_id=str(uuid4()), message='조사 조건이 뭐였지?'))
         self.assertEqual(result.status_code, 200, result.text)
         self.assertEqual(len(captured['messages']), 21)
@@ -203,7 +203,7 @@ class InvestigationConditionTests(unittest.TestCase):
     def test_chat_condition_request_returns_valid_ui_action(self):
         async def route(runtime, messages, *, task_context, log_context=None):
             return RequestDecision(intent='investigation', answer='조건 화면'), []
-        with patch('services.chat.route_request', new=route):
+        with patch('services.chat.service.route_request', new=route):
             result = self.client.post('/chat', json=dict(conversation_id=self.cid, request_id=str(uuid4()), message='PDF 조사 조건 보여줘'))
         self.assertEqual(result.status_code, 200, result.text)
         self.assertEqual(result.json()['ui_action'], {'type': 'open_investigation'})
