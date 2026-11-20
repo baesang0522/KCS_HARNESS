@@ -48,6 +48,7 @@
             try {
                 if (await options.refresh()) { complete("삭제된 대상 열을 제외했습니다. 채팅으로 다음 처리할 열을 알려주세요."); return; }
                 var operation = ui.operation(); invalidate(); processing = true; cancelled = false;
+                var referenceComparison = operation && (operation.kind === "match_suppliers" || operation.extraction_mode === "pdf");
                 if (automatic && (!operation || operation.kind !== "set" || !operation.condition ||
                     operation.condition.operator !== "equals" || operation.condition_scope !== "current" ||
                     !operation.destination_column_id || typeof verify !== "function")) {
@@ -83,12 +84,12 @@
                 }
                 var values = [], changed = 0, headers = [];
                 var comparisonRows = snapshot.rows;
-                if (operation.kind === "match_suppliers") {
+                if (referenceComparison) {
                     var unique = new Map();
                     snapshot.rows.forEach(function (row) { if (!unique.has(row.values[0])) unique.set(row.values[0], row); });
                     comparisonRows = Array.from(unique.values());
                 }
-                var size = operation.kind === "group" ? snapshot.rows.length : operation.kind === "match_suppliers" ? 250 : 10000;
+                var size = operation.kind === "group" ? snapshot.rows.length : referenceComparison ? 250 : 10000;
                 // ponytail: 미리보기는 창 메모리에 보관. 200만 결과 셀을 넘으면 범위를 줄인다.
                 for (var offset = 0; offset < comparisonRows.length; offset += size) {
                     check();
@@ -109,14 +110,14 @@
                     if (headers.length * snapshot.rows.length > 2000000) throw new Error("결과가 200만 셀을 초과합니다. 범위를 줄여 주세요.");
                     progress(operation.kind === "match_suppliers" ? "고유 거래처 비교" : "처리", values.length, comparisonRows.length);
                 }
-                if (operation.kind === "match_suppliers") {
+                if (referenceComparison) {
                     var matches = new Map(comparisonRows.map(function (row, index) { return [row.values[0], values[index]]; }));
                     values = snapshot.rows.map(function (row) {
                         var result = matches.get(row.values[0]).slice();
                         if (destination && !result[0]) result[0] = row.destination;
                         return result;
                     });
-                    changed = values.filter(function (row, index) { return row[0] !== snapshot.rows[index].values[0]; }).length;
+                    changed = values.filter(function (row, index) { return operation.extraction_mode === "pdf" ? Boolean(row[0]) : row[0] !== snapshot.rows[index].values[0]; }).length;
                 }
                 values.forEach(function (row) { while (row.length < headers.length) row.push(""); });
                 if (destination) changed = values.filter(function (row, i) { return row[0] !== snapshot.rows[i].destination; }).length;
@@ -192,8 +193,8 @@
             } else if (operation.kind === "set") {
                 action = "지정값 입력 " + JSON.stringify(operation.assigned_value);
             } else if (operation.kind === "extract") {
-                action = operation.extraction_mode === "labelled" ? "MODEL·CODE·GRADE 뒤의 값 추출" : "문자·숫자 모델명 후보 추출";
-                if (index === 1) action += " / 추출상태: 단일 후보·미검출·복수 후보";
+                action = operation.extraction_mode === "pdf" ? "PDF 기준 모델명 대조 / 대소문자·연속 공백 통일 / 미검출은 빈칸 / 추가 조건 판정 아님" : operation.extraction_mode === "labelled" ? "MODEL·CODE·GRADE 뒤의 값 추출" : "문자·숫자 모델명 후보 추출";
+                if (index === 1) action += operation.extraction_mode === "pdf" ? " / PDF 분류 그대로 / 모델명과 같은 순서" : " / 추출상태: 단일 후보·미검출·복수 후보";
             } else if (operation.kind === "split") {
                 action = (operation.delimiter === null ? "공백" : JSON.stringify(operation.delimiter)) +
                     " 기준 분리 / " + (operation.part === "last" ? "마지막 단어" : (index + 1) + "번째 조각");
@@ -244,7 +245,7 @@
             try {
                 options.setBusy(true);
                 if (automatic) { check(); await verify(); check(); }
-                if (data.operation.kind === "match_suppliers" && options.beforeApply) await options.beforeApply();
+                if ((data.operation.kind === "match_suppliers" || data.operation.extraction_mode === "pdf") && options.beforeApply) await options.beforeApply();
                 var output = ui.output();
                 var writeValues = data.values, writeSnapshot = data.snapshot;
                 if (output.mode === "existing") {
@@ -266,7 +267,7 @@
                     });
                 }
 
-                var names = ["group", "extract", "match_suppliers"].includes(data.operation.kind)
+                var names = data.operation.extraction_mode === "pdf" ? [output.name, output.name + " 종류"] : ["group", "extract", "match_suppliers"].includes(data.operation.kind)
                     ? [output.name, output.name + (data.operation.kind === "group" ? " 변경여부" : data.operation.kind === "match_suppliers" ? " 유사도 점수" : " 추출상태")]
                     : data.names.map(function (_, i) {
                         return output.name +

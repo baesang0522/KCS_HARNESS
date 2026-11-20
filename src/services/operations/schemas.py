@@ -142,7 +142,7 @@ class Operation(StrictModel):
     representative: Text | None = None
     part: Literal["all", "last"] = "all"
     group_mode: Literal["manual", "first_non_empty"] = "manual"
-    extraction_mode: Literal["alphanumeric", "labelled"] | None = None
+    extraction_mode: Literal["pdf", "alphanumeric", "labelled"] | None = None
     assigned_value: Text | None = None
     condition: RowFilter | None = None
     condition_scope: Literal["current", "all"] = "current"
@@ -182,6 +182,8 @@ class Operation(StrictModel):
             raise ValueError("값 지정 작업에는 적용할 값을 입력하세요. 빈 문자열도 사용할 수 있습니다.")
         if self.kind != "extract" and self.extraction_mode is not None:
             raise ValueError("추출 방식은 모델명 후보 찾기에서만 지정하세요.")
+        if self.extraction_mode == "pdf" and self.output and self.output.mode == "existing":
+            raise ValueError("PDF 추출은 모델명과 종류를 함께 저장합니다. 새 결과 열로 요청하세요.")
         if len(set(self.column_ids)) != len(self.column_ids):
             raise ValueError("대상 열이 중복되었습니다.")
         if self.kind == "group":

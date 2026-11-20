@@ -112,6 +112,7 @@ class JobPreview(StrictModel):
 
 
 class OperationJob(StrictModel):
+    model_references: list[dict] | None = None
     supplier_references: list[dict] | None = None
     write_evidence: dict | None = None
     write_checks: list[dict] = Field(default_factory=list)
@@ -134,19 +135,21 @@ def find_job(jobs: dict, job_id:UUID, conversation_id: UUID) -> OperationJob:
     return job
 
 
-def create_job(source: CreateOperationJob, jobs: dict, supplier_references=None) -> OperationJob:
+def create_job(source: CreateOperationJob, jobs: dict, supplier_references=None, model_references=None) -> OperationJob:
+    if source.operation.extraction_mode == "pdf" and not model_references:
+        raise ConflictError("확인한 PDF 모델명 목록이 필요합니다.")
     if source.operation.kind == "match_suppliers" and not supplier_references:
         raise ConflictError("확인한 기준 거래처 목록이 필요합니다.")
     key = str(source.operation_job_id)
     if key in jobs:
-        if jobs[key].source != source or jobs[key].supplier_references != supplier_references:
+        if jobs[key].source != source or jobs[key].supplier_references != supplier_references or jobs[key].model_references != model_references:
             raise ConflictError("같은 실행 ID에 다른 설정이 전달됐습니다.")
         return jobs[key]
 
     if len(jobs) >= 100:
         raise ConflictError("서버의 정제 실행 기록 100개 제한에 도달했습니다.")
 
-    jobs[key] = OperationJob(source=source.model_copy(deep=True), supplier_references=supplier_references)
+    jobs[key] = OperationJob(source=source.model_copy(deep=True), supplier_references=supplier_references, model_references=model_references)
     return jobs[key]
 
 
@@ -177,6 +180,9 @@ def preview_job(job: OperationJob, payload: JobPreview):
     if request.operation.kind == "match_suppliers":
         from services.supplier_matching import compare
         result = compare(request.rows, job.supplier_references, request.operation.similarity_method or "auto")
+    elif request.operation.extraction_mode == "pdf":
+        from services.model_matching import compare
+        result = compare(request.rows, job.model_references)
     else:
         result = execute(request)
     job.selected_count = payload.selected_count
@@ -195,6 +201,8 @@ def begin_apply(job: OperationJob, output: OutputPlacement) -> OperationJob:
         output.mode != "existing" or output.column_id != job.source.operation.destination_column_id
     ):
         raise ConflictError("요청한 기존 열에만 조건부 변경을 반영할 수 있습니다.")
+    if job.source.operation.extraction_mode == "pdf" and output.mode == "existing":
+        raise ConflictError("모델명과 종류를 함께 저장할 새 결과 열을 사용하세요.")
     planned = job.source.operation.output
     if job.source.operation.kind == "match_suppliers" and output.mode == "existing" and (not planned or planned.mode != "existing"):
         raise ConflictError("기존 그룹 열의 미분류 조건으로 새 미리보기를 준비하세요.")
@@ -283,7 +291,7 @@ def operation_history_context(
             result = column_info(column_id)
             result["purpose"] = (
                 "change_status"
-                if operation.kind in {"group", "extract"} and index == 1
+                if operation.kind in {"group", "extract"} and operation.extraction_mode != "pdf" and index == 1
                 else "data"
             )
             result["can_continue"] = (

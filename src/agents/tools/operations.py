@@ -196,11 +196,12 @@ def build_operations_tools(task_context: dict):
     @tool
     def find_model_candidates(
         column_id: str | None = None,
-        extraction_mode: Literal["alphanumeric", "labelled"] | None = None,
+        extraction_mode: Literal["pdf", "alphanumeric", "labelled"] | None = "pdf",
             output: OperationOutput | None = None,
     ) -> dict:
-        """모델규격명 한 열에서 문자+숫자 또는 MODEL·CODE·GRADE 뒤 후보를 추출한다.
-        방식 미지정이면 실제 패턴 추천을 채팅에 표시한다. 다른 열과 비교하는 조건부 추출은 formula다. 자동 적용하지 않는다."""
+        """기본은 확인한 PDF 모델명을 모델규격명 열에서 찾아 모델명·PDF 분류를 새 열에 함께 추출한다.
+        미검출은 빈칸이며 라벨 추출을 자동 실행하지 않는다. 사용자가 명시하면 alphanumeric/labelled를 사용한다.
+        null은 패턴 추천이다. 다른 열과 비교하는 조건부 추출은 formula다. 자동 적용하지 않는다."""
         expected = extraction_column_id(workspace)
         if column_id is not None and column_id != expected:
             raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])

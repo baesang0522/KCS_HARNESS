@@ -17,6 +17,7 @@ from services.operations.jobs import (
 )
 from services.operations.schemas import OperationResponse
 from services.supplier_matching import references, validate_references
+from services import model_matching
 
 router = APIRouter(prefix="/operation-jobs", tags=["Operations"])
 
@@ -27,7 +28,8 @@ async def create_job(payload: CreateOperationJob, request: Request):
                    row_count=payload.row_count, replayed=str(payload.operation_job_id) in request.app.state.operation_jobs) as event:
         async with request.app.state.conversations.edit(str(payload.conversation_id)) as conversation:
             suppliers = references(conversation, payload) if payload.operation.kind == "match_suppliers" else None
-            job = service.create_job(payload, request.app.state.operation_jobs, suppliers)
+            models = model_matching.references(conversation, payload) if payload.operation.extraction_mode == "pdf" else None
+            job = service.create_job(payload, request.app.state.operation_jobs, suppliers, models)
             event["status"] = job.status
             return job
 
@@ -50,6 +52,7 @@ async def preview_job(job_id: UUID, conversation_id: UUID, payload: JobPreview, 
         with job_event("operation.preview", job.source, "operation", batch_row_count=len(payload.rows),
                        selected_count=payload.selected_count) as event:
             validate_references(job, conversation)
+            model_matching.validate_references(job, conversation)
             try:
                 result = service.preview_job(job, payload)
                 event.update(status=job.status, result_row_count=len(result.rows), changed_count=result.changed_count)
@@ -65,6 +68,7 @@ async def begin_apply(job_id: UUID, conversation_id: UUID, payload: OutputPlacem
         with job_event("operation.apply_start", job.source, "operation", previous_status=job.status,
                        output_mode=payload.mode, output_column_id=payload.column_id) as event:
             validate_references(job, conversation)
+            model_matching.validate_references(job, conversation)
             from services.write_recovery import ensure_resolved
             ensure_resolved(request.app.state, job.source, str(job_id))
             result = service.begin_apply(job, payload)

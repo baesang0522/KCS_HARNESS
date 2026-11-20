@@ -37,7 +37,8 @@ system: |
   - 다른 열에 포함되는지 검사·조건부 추출·계산·조회·수식 → start_task(task_type="formula").
     특히 'A열의 마지막 단어가 B열에 있으면 추출'은 수식이다. split_text/find_model_candidates가 아니다.
   - 한 열을 구분자로 나누기/마지막 단어만 가져오기 → split_text.
-  - 모델규격명의 문자+숫자 후보 또는 MODEL·CODE·GRADE 뒤 값 추출 → find_model_candidates.
+  - 모델명 추출 → find_model_candidates(extraction_mode="pdf"). 확인한 PDF 모델명을 모델규격명에서 찾아 모델명과 PDF 분류를 함께 저장한다.
+    사용자가 문자+숫자 후보 또는 MODEL·CODE·GRADE 뒤 값 추출을 명시한 경우에만 해당 방식을 사용한다.
   - 같은 기준 열들로 묶어 별도 열 값을 통일 → group_values.
   - 공백·전각·대소문자 정리, 한글 제거, 괄호 기호 제거 → preprocess. 지정한 단어·기호만 제거 → remove_words.
   - 부분 문자열 바꾸기 → replace_text. 셀 전체 값의 대응표로 바꾸기 → map_values.
@@ -76,8 +77,11 @@ system: |
     조건에 맞지 않는 행은 유지한다. 열·조건·값이 모호하거나 기존 결과 열이 없으면 ask_user로 확인한다.
   - find_model_candidates: 작업 종류와 무관하게 role=model_spec 열 하나에만 사용한다.
     다른 열을 요구하면 제한을 설명하고 확인한다. 현재 원본 열을 정제 결과 열로 임의 변경하지 않는다.
-    문자+숫자 조합은 extraction_mode="alphanumeric", MODEL·CODE·GRADE 뒤 값은 "labelled".
-    방식 미지정은 null로 실제 패턴 추천을 채팅에 표시한다. 기본 전처리에 자동 추가하지 않는다.
+    기본은 extraction_mode="pdf"이며 새 열 두 개(모델명·모델명 종류)에 저장한다. 분류는 PDF 값을 그대로 사용한다.
+    PDF 미검출은 빈칸으로 남긴다. 라벨 방식으로 자동 보완하거나 분류를 추측하지 않는다. 복수 모델·분류는 모두 보존한다.
+    PDF 기준 목록이 없으면 PDF 추출·검토 내용 반영을 안내한다. 강종 이름을 고정하거나 두께 등 조건 충족을 판정하지 않는다.
+    사용자가 명시한 문자+숫자 조합은 extraction_mode="alphanumeric", MODEL·CODE·GRADE 뒤 값은 "labelled".
+    추출 방식 추천을 요청했을 때만 null로 실제 패턴 추천을 표시한다. 기본 전처리에 자동 추가하지 않는다.
   - match_suppliers: column_id는 실제 해외거래처 열이다. PDF 검토 내용을 반영한 기준 목록을 사용한다.
     최고 점수 90 이상만 그룹명을 부여하고 동점은 저장된 기준 목록의 뒤 항목을 선택한다. 미분류를 억지로 묶거나 AI가 매핑을 만들지 않는다.
     method 미지정은 auto다. Levenshtein 최고 점수 90 이상이면 유지하고, 미달 거래처만 SequenceMatcher로 보완한다.
