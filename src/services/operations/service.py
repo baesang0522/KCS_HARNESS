@@ -20,6 +20,20 @@ def execute(payload: OperationRequest) -> OperationResponse:
     operation = payload.operation
     log_event("operation.execute", operation_kind=operation.kind,
               group_mode=operation.group_mode, source_row=operation.source_row)
+    if operation.kind == "dimensions":
+        from services.operations.dimensions import DimensionParser, NAMES
+        parser = DimensionParser(operation.dimensions)
+        cache, result, excerpts = {}, [], []
+        for row in payload.rows:
+            value = row.values[0]
+            if value not in cache:
+                cache[value] = parser.parse(value)
+            values, excerpt = cache[value]
+            result.append(Row(excel_row=row.excel_row, values=values))
+            excerpts.append(excerpt)
+        return OperationResponse(headers=[NAMES[k] + "(mm)" for k in operation.dimensions.selected_fields] + ["규격 파싱 상태"],
+                                 rows=result, extracted_texts=excerpts, summary=operation.dimensions.summary(),
+                                 changed_count=sum(any(row.values[:-1]) for row in result))
     mappings = {
         mapping_key(item.source): item.target
         for item in operation.mappings

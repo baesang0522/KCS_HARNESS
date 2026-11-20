@@ -82,7 +82,7 @@
                         {kind: "operation", job_id: job.source.operation_job_id, status: "SUCCEEDED"});
                     return;
                 }
-                var values = [], changed = 0, headers = [];
+                var values = [], changed = 0, headers = [], extractedTexts = [], parsingSummary = "";
                 var comparisonRows = snapshot.rows;
                 if (referenceComparison) {
                     var unique = new Map();
@@ -101,6 +101,10 @@
                     );
                     check();
                     if (!Array.isArray(result.rows) || result.rows.length !== rows.length || !result.headers.length) throw new Error("결과 행 수가 요청과 다릅니다.");
+                    if (operation.kind === "dimensions") {
+                        if (!Array.isArray(result.extracted_texts) || result.extracted_texts.length !== rows.length || result.extracted_texts.some(function (v) { return typeof v !== "string"; })) throw new Error("추출 근거가 결과 행과 다릅니다.");
+                        extractedTexts = extractedTexts.concat(result.extracted_texts); parsingSummary = result.summary || "";
+                    }
                     result.rows.forEach(function (row, i) {
                         if (row.excel_row !== rows[i].excel_row || !Array.isArray(row.values) || row.values.some(function (v) { return typeof v !== "string" || v.length > 32767; })) throw new Error("유효하지 않은 처리 결과입니다.");
                         values.push(row.values);
@@ -143,6 +147,7 @@
                     snapshot: snapshot,
                     values: values,
                     names: headers,
+                    extracted_texts: extractedTexts, parsing_summary: parsingSummary,
                     changed: changed,
                     unique_count: operation.kind === "match_suppliers" ? comparisonRows.filter(function (row) { return row.values[0].trim(); }).length : null
                 };
@@ -192,6 +197,8 @@
                 }).join(" → ");
             } else if (operation.kind === "set") {
                 action = "지정값 입력 " + JSON.stringify(operation.assigned_value);
+            } else if (operation.kind === "dimensions") {
+                action = "규격 파싱 / " + data.names[index] + " / " + data.parsing_summary;
             } else if (operation.kind === "extract") {
                 action = operation.extraction_mode === "pdf" ? "PDF 기준 모델명 대조 / 대소문자·연속 공백 통일 / 미검출은 빈칸 / 추가 조건 판정 아님" : operation.extraction_mode === "labelled" ? "MODEL·CODE·GRADE 뒤의 값 추출" : "문자·숫자 모델명 후보 추출";
                 if (index === 1) action += operation.extraction_mode === "pdf" ? " / PDF 분류 그대로 / 모델명과 같은 순서" : " / 추출상태: 단일 후보·미검출·복수 후보";
@@ -247,7 +254,15 @@
                 if (automatic) { check(); await verify(); check(); }
                 if ((data.operation.kind === "match_suppliers" || data.operation.extraction_mode === "pdf") && options.beforeApply) await options.beforeApply();
                 var output = ui.output();
-                var writeValues = data.values, writeSnapshot = data.snapshot;
+                var writeValues = data.values, writeSnapshot = data.snapshot, writeFormats = null;
+                if (data.operation.kind === "dimensions") {
+                    writeValues = data.values.map(function (row) { return row.map(function (value, index) {
+                        if (index === row.length - 1 || value === "") return value;
+                        if (!/^\d+(?:\.\d+)?$/.test(value) || !Number.isFinite(Number(value))) throw new Error("유효하지 않은 치수 결과입니다.");
+                        return Number(value);
+                    }); });
+                    writeFormats = writeValues.map(function (row) { return row.map(function (_, index) { return index === row.length - 1 ? "@" : "General"; }); });
+                }
                 if (output.mode === "existing") {
                     if (data.operation.kind === "split" && data.names.length !== 1) throw new Error("여러 열로 분리하는 결과는 새 열로 저장하세요.");
                     writeValues = data.values.map(function (row) { return output.score_column_id ? row.slice() : [row[0]]; });
@@ -267,7 +282,7 @@
                     });
                 }
 
-                var names = data.operation.extraction_mode === "pdf" ? [output.name, output.name + " 종류"] : ["group", "extract", "match_suppliers"].includes(data.operation.kind)
+                var names = data.operation.kind === "dimensions" ? ui.names(data) : data.operation.extraction_mode === "pdf" ? [output.name, output.name + " 종류"] : ["group", "extract", "match_suppliers"].includes(data.operation.kind)
                     ? [output.name, output.name + (data.operation.kind === "group" ? " 변경여부" : data.operation.kind === "match_suppliers" ? " 유사도 점수" : " 추출상태")]
                     : data.names.map(function (_, i) {
                         return output.name +
@@ -283,7 +298,7 @@
 
                 writeStarted = true;
                 result = await sheet.write(
-                    writeSnapshot, writeValues, names, output, progress, null,
+                    writeSnapshot, writeValues, names, output, progress, writeFormats,
                     options.recovery ? function (context, info, outputs) { return options.recovery.operation(data.job, context, info, writeSnapshot, outputs, writeValues); } : null
                 );
 

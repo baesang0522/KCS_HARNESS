@@ -28,7 +28,7 @@ def build_request_tools(task_context: dict):
             available["split_text"],
             available["map_values"],
             available["group_values"],
-            available["find_model_candidates"],
+            available["find_model_candidates"], available["parse_dimensions"],
             available["inspect_similarity"], available["match_suppliers"],
             # available["open_group_review"],
             available["recommend_preprocessing"],

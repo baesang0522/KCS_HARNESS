@@ -86,7 +86,7 @@ def execution_tools(context, manual_tools):
     # Reuse existing operations; only verified representative-code propagation skips approval.
     names = {"ask_user", "answer_question", "change_scope", "update_matching_rows",
              "remove_words", "preprocess", "replace_text", "split_text", "map_values", "group_values",
-             "find_model_candidates", "match_suppliers"}
+             "find_model_candidates", "match_suppliers", "parse_dimensions"}
     tools = [item for item in manual_tools if item.name in names] + [read_workspace, compare_values, calculate_formula]
     if context.get("agent_run", {}).get("code_grouping_request"):
         tools.append(apply_group_by_code)

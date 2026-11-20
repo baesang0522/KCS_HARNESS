@@ -50,7 +50,7 @@ class CreateOperationJob(StrictModel):
         self.operation.validate_ready()
         if self.operation.condition and self.operation.condition_scope == "all" and self.row_filter is not None:
             raise ValueError("전체 범위 요청에는 기존 행 필터를 적용하지 않습니다.")
-        if self.operation.kind == "extract" and (
+        if self.operation.kind in {"extract", "dimensions"} and (
             self.model_spec_column_id is None
             or self.operation.column_ids != [self.model_spec_column_id]
         ):
@@ -203,6 +203,8 @@ def begin_apply(job: OperationJob, output: OutputPlacement) -> OperationJob:
         raise ConflictError("요청한 기존 열에만 조건부 변경을 반영할 수 있습니다.")
     if job.source.operation.extraction_mode == "pdf" and output.mode == "existing":
         raise ConflictError("모델명과 종류를 함께 저장할 새 결과 열을 사용하세요.")
+    if job.source.operation.kind == "dimensions" and output.mode == "existing":
+        raise ConflictError("치수와 확인 상태를 함께 보존하도록 새 결과 열을 사용하세요.")
     planned = job.source.operation.output
     if job.source.operation.kind == "match_suppliers" and output.mode == "existing" and (not planned or planned.mode != "existing"):
         raise ConflictError("기존 그룹 열의 미분류 조건으로 새 미리보기를 준비하세요.")
@@ -280,6 +282,13 @@ def operation_history_context(
             "exists": column is not None,
         }
 
+    dimension_rules = {}
+    for job in matched:
+        if job.status == "APPLIED" and job.source.operation.kind == "dimensions":
+            column_id = job.source.operation.column_ids[0]
+            if column_id in columns:
+                dimension_rules.setdefault(column_id, job.source.operation.dimensions.model_dump())
+
     records = []
     # shortcut: 현재 작업공간의 최근 10건만 제공한다. 더 오래된 결과는 사용자가 대상 열을 명시해야 한다.
     for job in matched[:EXECUTION_HISTORY_LIMIT]:
@@ -291,7 +300,8 @@ def operation_history_context(
             result = column_info(column_id)
             result["purpose"] = (
                 "change_status"
-                if operation.kind in {"group", "extract"} and operation.extraction_mode != "pdf" and index == 1
+                if (operation.kind in {"group", "extract"} and operation.extraction_mode != "pdf" and index == 1)
+                or (operation.kind == "dimensions" and index == len(operation.dimensions.selected_fields))
                 else "data"
             )
             result["can_continue"] = (
@@ -325,4 +335,5 @@ def operation_history_context(
     return {
         "records": records,
         "omitted_count": max(0, len(matched) - len(records)),
+        "dimension_rules": dimension_rules,
     }

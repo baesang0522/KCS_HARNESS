@@ -56,5 +56,5 @@ def execution_history_context(operation_jobs: dict, formula_jobs: dict, *, conve
                 column['can_continue'] = False
     records.sort(key=lambda record: record['created_at'], reverse=True)
     # shortcut: 최근 10건만 제공한다. 더 오래된 결과는 사용자가 대상 열을 명시해야 한다.
-    return {'records': records[:EXECUTION_HISTORY_LIMIT],
+    return {'records': records[:EXECUTION_HISTORY_LIMIT], 'dimension_rules': history.get('dimension_rules', {}),
             'omitted_count': history['omitted_count'] + max(0, len(records) - EXECUTION_HISTORY_LIMIT)}

@@ -5,6 +5,7 @@ from services.errors import SHARED_MESSAGES
 from services.operations.schemas import Mapping, Operation, OperationOutput, Rule, extraction_column_id
 from services.similarity import SimilaritySettings
 from services.group_review import GroupReviewRequest
+from services.operations.dimensions import DimensionRules, Dimension, Unit, PRODUCTS, DimensionParser
 from services.workspace import resolve_columns
 
 def build_operations_tools(task_context: dict):
@@ -214,6 +215,50 @@ def build_operations_tools(task_context: dict):
 
 
     @tool
+    def parse_dimensions(product: str | None = None, column_id: str | None = None,
+                         fields: list[Dimension] | None = None, order: list[Dimension] | None = None,
+                         unit: Unit | None = None, delimiter: str | None = None, after: str | None = None,
+                         labels: dict[Dimension, str] | None = None, reuse_rules: bool = True,
+                         output: OperationOutput | None = None) -> dict:
+        """모델규격명에서 치수를 읽어 mm 수치와 파싱 상태를 기존 미리보기로 보낸다.
+        품목을 모르면 product를 생략해 질문한다. 대화/PDF에서 확인한 품목만 전달한다.
+        철판/강관/환봉은 기본 순서, 그 외 품목은 명시된 order 또는 labels가 필요하다.
+        사용자 요청만 order/fields/unit/delimiter/after/labels에 전달한다. 모른다는 답은 기본값을 사용한다.
+        unit은 단위 없는 값의 단위다. fields는 뽑을 항목, order는 입력 숫자 순서다.
+        예: thickness만 추출, order=[width,length,thickness], after=SIZE:, labels={thickness:THK:}.
+        같은 입력 열의 미리보기/적용된 규칙을 재사용한다. 새 품목이나 reuse_rules=false면 초기화한다.
+        after=""는 시작 표기 해제, labels={}는 사용자 표기 해제, order=[]는 기본 순서 복귀다.
+        임의 정규식/코드는 받지 않는다. 미검출·모호함은 숫자를 비우며 자동 적용하지 않는다."""
+        expected = extraction_column_id(workspace)
+        if column_id is not None and column_id != expected:
+            raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])
+        previous = {}
+        if reuse_rules:
+            pending = workspace.get("pending_operation") or {}
+            if pending.get("kind") == "dimensions" and pending.get("column_ids") == [expected]:
+                previous = pending.get("dimensions") or {}
+            else:
+                previous = task_context.get("execution_history", {}).get("dimension_rules", {}).get(expected, {})
+        if product and previous.get("product") and product.lower().strip() != previous["product"].lower().strip():
+            if PRODUCTS.get(product.lower().strip(), product) != PRODUCTS.get(previous["product"].lower().strip(), previous["product"]):
+                previous = {}
+        settings = dict(previous)
+        settings.update({key: value for key, value in dict(product=product, fields=fields, order=order,
+                        unit=unit, delimiter=delimiter, after=after, labels=labels).items() if value is not None})
+        if not settings.get("product"):
+            return {"intent": "clarify", "answer": "어떤 물품 데이터야? 철판·강관·환봉 같은 품목을 알려줘. 표기 순서를 몰라도 괜찮아."}
+        if settings.get("order") == []:
+            settings["order"] = None
+        if not PRODUCTS.get(settings["product"].lower().strip()) and not settings.get("order") and not settings.get("labels"):
+            return {"intent": "clarify", "answer": settings["product"] + "의 기본 치수 표기는 아직 지원하지 않아. 원문의 규격 예시와 뽑을 항목을 알려줘. 순서나 항목 표기를 알면 같이 말해줘."}
+        rules = DimensionRules.model_validate(settings)
+        DimensionParser(rules)  # 서로 다른 치수에 같은 표기를 지정하는 충돌은 미리 차단한다.
+        result = prepare_operation(kind="dimensions", column_ids=[expected], dimensions=rules, output=output)
+        result["answer"] = rules.summary() + " 실제 원문과 추출 결과를 미리보기로 보여줄게."
+        return result
+
+
+    @tool
     def change_output(output: OperationOutput) -> dict:
         """현재 채팅의 정제 또는 수식 미리보기 저장 위치만 바꿔 다시 계산한다. 적용은 하지 않는다.
         기존 열은 실제 column_id, 새 열은 name/anchor/side를 지정한다."""
@@ -275,5 +320,5 @@ def build_operations_tools(task_context: dict):
 
 
     return {item.name: item for item in [
-        set_value, update_matching_rows, remove_words, preprocess, replace_text, split_text, map_values, group_values, find_model_candidates, change_output, match_suppliers, inspect_similarity, open_group_review
+        set_value, update_matching_rows, remove_words, preprocess, replace_text, split_text, map_values, group_values, find_model_candidates, parse_dimensions, change_output, match_suppliers, inspect_similarity, open_group_review
     ]}

@@ -3,6 +3,7 @@ from uuid import UUID
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from services.operations.dimensions import DimensionRules
 
 Text = Annotated[str, Field(max_length=32767)]
 ColumnId = Annotated[str, Field(min_length=1, max_length=256)]
@@ -128,9 +129,10 @@ class OperationOutput(StrictModel):
 
 
 class Operation(StrictModel):
+    dimensions: DimensionRules | None = None
     similarity_method: Literal["auto", "levenshtein", "sequence"] | None = None
     output: OperationOutput | None = None
-    kind: Literal["preprocess", "split", "group", "replace", "map", "extract", "set", "match_suppliers"]
+    kind: Literal["preprocess", "split", "group", "replace", "map", "extract", "set", "match_suppliers", "dimensions"]
     column_ids: list[ColumnId] = Field(min_length=1, max_length=20)
     rules: list[Rule] = Field(default_factory=list, max_length=10)
     delimiter: str | None = Field(default=None, min_length=1, max_length=100)
@@ -154,6 +156,10 @@ class Operation(StrictModel):
 
     @model_validator(mode="after")
     def validate_operation(self):
+        if (self.kind == "dimensions") != (self.dimensions is not None):
+            raise ValueError("규격 파싱에는 품목과 파싱 규칙이 필요합니다.")
+        if self.kind == "dimensions" and self.output and self.output.mode == "existing":
+            raise ValueError("치수와 확인 상태를 함께 보존하도록 새 결과 열을 사용하세요.")
         if self.kind == "match_suppliers":
             if len(self.column_ids) != 1:
                 raise ValueError("비교할 해외거래처 열 하나를 지정하세요.")
@@ -275,6 +281,8 @@ class OperationRequest(StrictModel):
 
 
 class OperationResponse(StrictModel):
+    extracted_texts: list[Text] | None = None
+    summary: str | None = None
     headers: list[str]
     rows: list[Row]
     changed_count: int
