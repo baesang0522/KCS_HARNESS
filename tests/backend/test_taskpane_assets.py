@@ -41,6 +41,7 @@ class TaskpaneAssetsTests(unittest.TestCase):
             ('workspace/table_reader.js', 'operations/operations_sheet.js'),
             ('workspace/table_reader.js', 'recommendation/recommendation_sheet.js'),
             ('formula/workspace_formula.js', 'workspace/workspace.js'),
+            ('workspace/workspace_actions.js', 'workspace/workspace.js'),
             ('operations/extraction_suggestions.js', 'operations/operations.js'),
             ('chat/chat.js', 'taskpane.js'),
             ('documents/documents.js', 'taskpane.js'),

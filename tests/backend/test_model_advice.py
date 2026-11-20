@@ -11,10 +11,11 @@ from repositories.conversation_repository import MemoryConversationRepository
 from services.chat import process_chat
 from services.errors import MODEL_RESPONSE_ERROR, ModelProcessingError
 from services.recommendation.analysis import generate_advice
-from services.recommendation.model_io import ask, batches, byte_size
+from models.structured import ask, batches, byte_size
 from services.recommendation.selection import top_model_combinations
 from services.recommendation.schemas import AdviceRequest, Review
-from services.recommendation.service import resolve_advice_columns, resolve_columns
+from services.recommendation.service import resolve_advice_columns
+from services.workspace import resolve_columns
 
 
 MODEL_COLUMNS = [

@@ -29,3 +29,7 @@ class ModelProcessingError(ServiceError):
 
 class DocumentError(ServiceError):
     pass
+
+
+class RepeatedReadError(ValueError):
+    """Let the planner correct a repeated read before another Excel round trip."""

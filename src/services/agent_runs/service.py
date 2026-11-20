@@ -1,92 +1,19 @@
-"""In-memory goal runs. Excel waits never hold a request or the conversation lock."""
+"""목표 실행 상태 전환. Excel 응답 대기 중에는 대화 잠금을 잡지 않는다."""
 import asyncio
 import hashlib
 import json
 import re
 from copy import deepcopy
-from dataclasses import dataclass, field
 from time import monotonic
-from typing import Literal
-from uuid import UUID, uuid4
-
+from uuid import uuid4
 from langchain_core.messages import HumanMessage
-from pydantic import Field, model_validator
-
-from services.errors import ConflictError, NotFoundError
+from services.errors import ConflictError, NotFoundError, RepeatedReadError
 from services.debug_log import log_event
-from services.operations.schemas import ColumnId, RowFilter, StrictModel, WorkspaceContext
-from services.similarity import SimilaritySettings, SimilarityRequest, inspect_similarity
+from services.agent_runs.schemas import AgentRun, ReadAction
+from services.similarity import SimilarityRequest, inspect_similarity
 
 # Same scale as the request graph's existing recursion guard; user waits do not consume it.
 MAX_STEPS = 8
-
-
-class RepeatedReadError(ValueError):
-    """Let the planner correct a repeated read before another Excel round trip."""
-
-
-class ReadAction(StrictModel):
-    column_ids: list[ColumnId] = Field(min_length=1, max_length=200)
-    condition: RowFilter | None = None
-    similarity: SimilaritySettings | None = None
-
-    @model_validator(mode="after")
-    def columns_match(self):
-        if len(set(self.column_ids)) != len(self.column_ids):
-            raise ValueError("읽을 열 ID가 중복되었습니다.")
-        if self.similarity and self.column_ids != self.similarity.input_column_ids:
-            raise ValueError("비교 열과 읽을 열이 다릅니다.")
-        return self
-
-
-class ReadRow(StrictModel):
-    identity: int = Field(ge=1, le=1048576)
-    excel_row: int = Field(ge=1, le=1048576)
-    values: list[str]
-
-
-class Receipt(StrictModel):
-    step_id: UUID
-    status: Literal["SUCCEEDED", "FAILED", "UNKNOWN"]
-    rows: list[ReadRow] | None = None
-    message: str = Field(default="", max_length=8000)
-
-
-class Advance(StrictModel):
-    request_id: UUID
-    workspace: WorkspaceContext
-    receipt: Receipt | None = None
-
-
-class PauseRun(StrictModel):
-    message: str = Field(default="", max_length=8000)
-
-
-class BindJob(StrictModel):
-    step_id: UUID
-    job_id: UUID
-    kind: Literal["operation", "formula"]
-
-
-@dataclass
-class AgentRun:
-    id: str
-    goal: str
-    workspace: dict
-    status: str = "READY"
-    answer: str = "현재 상태를 확인하고 있습니다."
-    step: dict | None = None
-    observation: dict | None = None
-    history: list = field(default_factory=list)
-    read_results: list = field(default_factory=list)
-    requests: dict = field(default_factory=dict)
-    seen: set = field(default_factory=set)
-    request_id: str | None = None
-    message: str = ""
-    user_request: str = ""
-    code_grouping_request: str | None = None
-    steps: int = 0
-    deadline: float | None = None
 
 
 def same_workspace(a, b):
@@ -277,7 +204,7 @@ async def advance(*, conversation, conversation_id, run_id, payload, runtime, op
     from agents.request_graph import run_request_graph
     from agents.request_router import RequestDecision
     from services.chat import build_task_context, decision_action
-    from services.investigation import investigation_context
+    from services.investigation.service import investigation_context
 
     run = find_run(conversation, run_id)
     ids = {"conversation_id": conversation_id, "request_id": str(payload.request_id), "run_id": str(run_id)}

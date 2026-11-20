@@ -10,7 +10,7 @@ from api.errors import service_error_response
 from repositories.conversation_repository import MemoryConversation, MemoryConversationRepository
 from services.documents.schemas import DocumentWorkspace
 from services.errors import ServiceError
-from services.investigation import Condition, SupplierTarget
+from services.investigation.schemas import Condition, SupplierTarget
 from services.operations.schemas import Row, Operation
 from pydantic import ValidationError
 from services.errors import ConflictError
