@@ -31,6 +31,23 @@
             ui.showPreview(instruction, selection, preview, targetSnapshot);
         }
 
+        async function failPreview(message) {
+            preview = targetSnapshot = null;
+            ui.reset();
+            if (formulaJob && formulaJob.preview) {
+                try {
+                    formulaJob = await api.requestJson("/formula-jobs/" + formulaJob.formula_job_id +
+                        "/previews/" + formulaJob.preview.preview_id + "/failed", {
+                            method: "POST", headers: {"Content-Type": "application/json"},
+                            body: JSON.stringify({error_message: message})
+                        });
+                } catch (error) {
+                    message += " · 서버에 미리보기 실패를 전달하지 못했습니다. 현재 화면에 적용할 미리보기는 없습니다. " + error.message;
+                }
+            }
+            return message;
+        }
+
         async function selectAndPlan() {
             if (options.isBusy() || !instruction) return;
             var run = options.beginRequest();
@@ -86,12 +103,12 @@
                 await useTarget(prepared, run);
             } catch (error) {
                 if (run.cancelled) {
-                    preview = targetSnapshot = null;
                     await options.reportStop(run);
-                    options.complete("수식 계획 생성을 중지했습니다. 셀은 변경하지 않았습니다.");
+                    var stopped = await failPreview("수식 계획 생성을 중지했습니다. 셀은 변경하지 않았습니다.");
+                    options.complete(stopped, formulaJob && {kind: "formula", job_id: formulaJob.formula_job_id, status: "FAILED"});
                 } else {
-                    if (!targetSnapshot) preview = null;
-                    options.complete(error.message, formulaJob && {kind: "formula", job_id: formulaJob.formula_job_id, status: "FAILED"});
+                    var message = await failPreview(error.message);
+                    options.complete(message, formulaJob && {kind: "formula", job_id: formulaJob.formula_job_id, status: "FAILED"});
                 }
             } finally {
                 options.endRequest(run);
@@ -176,6 +193,7 @@
                         error.message += " · 서버의 적용 상태를 확인하지 못했습니다. 다시 적용하지 마세요.";
                     }
                 }
+                if (!approvalRequested) error.message = await failPreview(error.message);
                 options.complete((applied ? "결과값은 저장됐지만 완료 정보 처리에 실패했습니다. 다시 쓰지 마세요. " : "") + error.message,
                     {kind: "formula", job_id: formulaJob.formula_job_id, status: approvalRequested ? "UNKNOWN" : "FAILED"});
             } finally {
@@ -183,19 +201,27 @@
             }
         }
 
-        ui.bind({source: selectSource, target: selectTarget, apply: approveAndApply, cancel: function () { preview = targetSnapshot = null; if (formulaJob) options.complete('수식 적용을 취소했어.', {kind: 'formula', job_id: formulaJob.formula_job_id, status: 'FAILED'}); options.setBusy(false); }});
+        ui.bind({source: selectSource, target: selectTarget, apply: approveAndApply, cancel: async function () {
+            options.setBusy(true);
+            try {
+                var message = await failPreview('수식 적용을 취소했어.');
+                if (formulaJob) options.complete(message, {kind: 'formula', job_id: formulaJob.formula_job_id, status: 'FAILED'});
+            } finally { options.setBusy(false); }
+        }});
         return {
             changeOutput: async function (action) {
-                ui.reset();
                 if (!formulaJob || formulaJob.formula_job_id !== action.formula_job_id || !preview || applied || writeAttempted) throw new Error('변경할 수식 미리보기가 없어. 작업을 다시 요청해 줘.');
                 options.setBusy(true);
                 try {
+                    ui.reset();
                     if (action.output.name) throw new Error('수식 결과 이름을 바꾸려면 원하는 이름과 함께 수식 작업을 다시 요청해 줘.');
                     var destination = await options.resolveOutput(action.output, selection);
                     if (!destination) {
                         preview = formulaJob.preview;
                         await useTarget(await excel.prepareFormulaPreview(preview, selection));
                     } else await useTarget(await excel.readFormulaTarget(preview, selection, destination));
+                } catch (error) {
+                    throw new Error(await failPreview(error.message));
                 } finally { options.setBusy(false); }
             },
             dismiss: function () { window.clearTimeout(startTimer); ui.reset(); },

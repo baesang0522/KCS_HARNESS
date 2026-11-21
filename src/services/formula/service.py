@@ -54,7 +54,8 @@ def formula_job_context(formula_job: FormulaJob) -> dict:
         "sheet_name": public["sheet_name"],
         "address": public["address"],
         "instruction": public["instruction"],
-        "analysis": formula_job.preview.plan.summary if formula_job.preview else formula_job.error,
+        "error": formula_job.error or None,
+        "analysis": formula_job.error or (formula_job.preview.plan.summary if formula_job.preview else ""),
         "plan": formula_job.preview.plan.model_dump(mode="json") if formula_job.preview else None,
         "analysis_truncated": False,
     }
@@ -137,6 +138,8 @@ async def plan_formula_job(formula_job_id: UUID, formula_jobs: dict, runtime) ->
     if formula_job.status not in {"CREATED", "FAILED"}:
         raise ConflictError("적용을 시작한 수식은 다시 계획하거나 실행할 수 없습니다.")
     formula_job.status, formula_job.error = "PLANNING", ""
+    formula_job.preview = None
+    formula_job.approved_preview_id = None
     try:
         plan = await generate_formula_plan(formula_job.source, formula_job.planning_context, runtime)
         formula_job.preview = FormulaPreview(plan=plan)
@@ -149,7 +152,9 @@ async def plan_formula_job(formula_job_id: UUID, formula_jobs: dict, runtime) ->
     except ValidationError as error:
         logger.exception("수식 계획 검증 실패: formula_job_id=%s", formula_job_id)
         formula_job.status = "FAILED"
-        if any("복수 결과 범위의 행은 서로 같아야 합니다." in item["msg"] for item in error.errors()):
+        if any(item["type"] == "json_invalid" for item in error.errors()):
+            formula_job.error = "AI의 수식 계획 응답을 JSON으로 읽지 못했습니다. 자동 재생성 후에도 형식 오류가 남아 중단했습니다. 셀은 변경하지 않았습니다. 다시 요청하세요."
+        elif any("복수 결과 범위의 행은 서로 같아야 합니다." in item["msg"] for item in error.errors()):
             formula_job.error = "AI가 만든 결과 범위들의 시작·끝 행이 서로 달라 실행을 중단했습니다. 셀은 변경하지 않았습니다. 수식 계획을 다시 요청하세요."
         else:
             formula_job.error = "AI가 만든 수식 계획의 형식이나 범위가 올바르지 않아 실행을 중단했습니다. 셀은 변경하지 않았습니다. 수식 계획을 다시 요청하세요."
@@ -237,4 +242,13 @@ def mark_formula_unknown(formula_job_id: UUID, preview_id: UUID, formula_jobs: d
         raise ConflictError("적용을 시작한 수식만 완료 미확인으로 기록할 수 있습니다.")
     job.status = "UNKNOWN"
     job.error = "수식 적용 완료를 확인하지 못했습니다. 결과 범위를 확인하세요. 자동 재실행하지 않습니다."
+    return public_formula_job(job)
+
+
+def fail_formula_preview(formula_job_id: UUID, preview_id: UUID, error_message: str, formula_jobs: dict) -> dict:
+    job = find_formula_job(formula_jobs, formula_job_id)
+    if (job.preview is None or job.preview.preview_id != preview_id or
+            job.approved_preview_id is not None or job.status not in {"PREVIEW_READY", "FAILED"}):
+        raise ConflictError("적용 전의 현재 수식 미리보기만 실패로 기록할 수 있습니다.")
+    job.status, job.error = "FAILED", error_message
     return public_formula_job(job)

@@ -7,7 +7,7 @@ from api.errors import validation_message
 
 from services.debug_log import job_event
 from services.formula import service
-from services.formula.schemas import CreateFormulaJobRequest, FormulaApprovalRequest, FormulaPreview, FormulaCompletion, FormulaUnknownRequest
+from services.formula.schemas import CreateFormulaJobRequest, FormulaApprovalRequest, FormulaPreview, FormulaCompletion, FormulaUnknownRequest, FormulaPreviewFailure
 
 router = APIRouter(prefix="/formula-jobs", tags=["formula"])
 
@@ -73,3 +73,14 @@ async def unknown_preview(formula_job_id: UUID, preview_id: UUID, request: Reque
         result = service.mark_formula_unknown(formula_job_id, preview_id, request.app.state.formula_jobs)
         event["status"] = job.status
         return result
+
+
+@router.post("/{formula_job_id}/previews/{preview_id}/failed")
+async def failed_preview(formula_job_id: UUID, preview_id: UUID, payload: FormulaPreviewFailure, request: Request):
+    job = service.find_formula_job(request.app.state.formula_jobs, formula_job_id)
+    with job_event("formula.status", job.source, "formula", preview_id=str(preview_id), previous_status=job.status,
+                   reported_status="FAILED", client_error=payload.error_message) as event:
+        async with request.app.state.conversations.edit(str(job.source.conversation_id)):
+            result = service.fail_formula_preview(formula_job_id, preview_id, payload.error_message, request.app.state.formula_jobs)
+            event["status"] = job.status
+            return result

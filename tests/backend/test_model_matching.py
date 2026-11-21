@@ -1,4 +1,12 @@
 import unittest
+import asyncio
+import copy
+import json
+from unittest.mock import AsyncMock
+
+from langchain_core.messages import HumanMessage
+from agents.request_router import route_request
+from models.codex_adapter import CodexModel
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -109,6 +117,50 @@ class ModelMatchingTests(unittest.TestCase):
         self.client.post(self.url('status'),json={'status':'PREVIEW_READY'})
         response=self.client.post(self.url('apply'),json={'mode':'existing','column_id':'model'})
         self.assertEqual(response.status_code,409,response.text)
+
+    def test_explicit_input_routes_to_extraction_and_previews_without_role_change(self):
+        for role, registered in [('reference', None), ('result', 'other')]:
+            with self.subTest(role=role):
+                columns = [dict(column_id='model', header='모델규격명', role=role)]
+                if registered:
+                    columns.append(dict(column_id=registered, header='다른 규격', role='model_spec'))
+                context = {'workspace': {**self.workspace, 'columns': columns, 'target_column_ids': ['model']}}
+                before = copy.deepcopy(context)
+                model = CodexModel('test')
+                model._execute = AsyncMock(return_value=dict(name='find_model_candidates', arguments=json.dumps({
+                    'column_id': 'model', 'extraction_mode': 'pdf', 'output': {'mode': 'new', 'name': '모델'}})))
+                decision, _ = asyncio.run(route_request(SimpleNamespace(model=model, tools_prompt='test'),
+                    [HumanMessage(content='품목검토시트의 규격을 모델규격명에서 추출해 새 모델 열과 옆 그룹 열에 적어줘')],
+                    task_context=context))
+                self.assertEqual(decision.intent, 'operation')
+                self.assertIsNone(decision.workspace_action)
+                self.assertEqual(model._execute.await_count, 1)
+                self.assertEqual(context, before)
+                self.source.update(operation_job_id=str(uuid4()), model_spec_column_id=registered,
+                                   operation=decision.operation.model_dump())
+                self.create()
+                response = self.client.post(self.url('preview'), json={'rows': [
+                    {'excel_row': 2, 'values': ['PLATE SA516-70']}, {'excel_row': 3, 'values': ['UNKNOWN']}],
+                    'selected_count': 2})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual([r['values'] for r in response.json()['rows']], [['SA516-70', 'PDF 분류'], ['', '']])
+
+    def test_explicit_input_and_omitted_input_have_separate_validation(self):
+        workspace = {**self.workspace, 'columns': [dict(column_id='chosen', header='규격 정제', role='reference')],
+                     'target_column_ids': ['chosen']}
+        tool = next(t for t in build_request_tools({'workspace': workspace}) if t.name == 'find_model_candidates')
+        for mode in ['pdf', 'labelled', 'alphanumeric', None]:
+            with self.subTest(mode=mode):
+                result = tool.invoke({'column_id': 'chosen', 'extraction_mode': mode})
+                self.assertEqual(result['operation']['column_ids'], ['chosen'])
+        with self.assertRaisesRegex(ValueError, '현재 작업시트에 없는 열'):
+            tool.invoke({'column_id': 'missing'})
+        with self.assertRaisesRegex(ValueError, '모델규격명 열을 하나'):
+            tool.invoke({})
+        workspace['columns'] += [dict(column_id=c, header=c, role='model_spec') for c in ['a', 'b']]
+        with self.assertRaisesRegex(ValueError, '모델규격명 열을 하나'):
+            tool.invoke({})
+        self.assertEqual(tool.invoke({'column_id': 'chosen'})['operation']['column_ids'], ['chosen'])
 
     def test_tool_defaults_to_pdf_and_explicit_patterns_remain_available(self):
         context={'workspace':{**self.workspace,'columns':[dict(column_id='model',header='모델규격명',role='model_spec')],'target_column_ids':['model']}}

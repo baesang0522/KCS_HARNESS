@@ -2,6 +2,7 @@
 from typing import Literal
 from langchain_core.tools import tool
 from services.errors import SHARED_MESSAGES
+from services.formula.schemas import FormulaOutput
 from services.operations.schemas import Mapping, Operation, OperationOutput, Rule, extraction_column_id
 from services.similarity import SimilaritySettings
 from services.group_review import GroupReviewRequest
@@ -202,10 +203,9 @@ def build_operations_tools(task_context: dict):
     ) -> dict:
         """기본은 확인한 PDF 모델명을 모델규격명 열에서 찾아 모델명·PDF 분류를 새 열에 함께 추출한다.
         미검출은 빈칸이며 라벨 추출을 자동 실행하지 않는다. 사용자가 명시하면 alphanumeric/labelled를 사용한다.
+        명시한 column_id를 역할 변경 없이 사용한다. 생략했을 때만 model_spec 역할의 유일한 열을 사용한다.
         null은 패턴 추천이다. 다른 열과 비교하는 조건부 추출은 formula다. 자동 적용하지 않는다."""
-        expected = extraction_column_id(workspace)
-        if column_id is not None and column_id != expected:
-            raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])
+        expected = column_id if column_id is not None else extraction_column_id(workspace)
         return prepare_operation(
             output=output,
             kind="extract",
@@ -261,12 +261,14 @@ def build_operations_tools(task_context: dict):
     @tool
     def change_output(output: OperationOutput) -> dict:
         """현재 채팅의 정제 또는 수식 미리보기 저장 위치만 바꿔 다시 계산한다. 적용은 하지 않는다.
-        기존 열은 실제 column_id, 새 열은 name/anchor/side를 지정한다."""
+        기존 열은 실제 column_id를 지정한다. 정제의 새 열만 name/anchor/side를 지원한다.
+        수식은 오른쪽 새 열(mode=new) 또는 빈 기존 열만 지원하며 이름 변경은 start_task로 다시 준비한다."""
         pending = workspace and workspace.get("pending_operation")
         if not pending:
             job = task_context.get("active_formula_job")
             if not job or job.get("status") != "PREVIEW_READY":
                 raise ValueError("변경할 미리보기가 없습니다. 작업을 다시 요청하세요.")
+            output = FormulaOutput.model_validate(output.model_dump())
             output_ids = [v for v in [output.column_id, output.anchor] if v]
             if output_ids:
                 resolve_columns(workspace, output_ids)

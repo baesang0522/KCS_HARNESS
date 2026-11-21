@@ -2,7 +2,8 @@
 from langchain_core.tools import tool
 from services.agent_runs.schemas import ReadAction
 from services.errors import RepeatedReadError
-from services.operations.schemas import RowFilter, OperationOutput
+from services.operations.schemas import RowFilter
+from services.formula.schemas import FormulaOutput
 from services.similarity import SimilaritySettings
 from services.workspace import resolve_columns
 
@@ -73,7 +74,7 @@ def execution_tools(context, manual_tools):
         return result
 
     @tool
-    async def calculate_formula(instruction: str, input_column_ids: list[str], output: OperationOutput | None = None,
+    async def calculate_formula(instruction: str, input_column_ids: list[str], output: FormulaOutput | None = None,
                                 reference_sheet_names: list[str] | None = None) -> dict:
         """이번 단계의 구체적인 수식 계산 지시와 입력 열을 채팅 미리보기·확인으로 넘긴다.
         다른 시트의 조회 범위는 reference_sheet_names에 시트 이름을 전달한다.

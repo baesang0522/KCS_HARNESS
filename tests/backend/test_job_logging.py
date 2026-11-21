@@ -2,7 +2,7 @@ import asyncio
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -123,8 +123,53 @@ class JobLoggingTests(unittest.TestCase):
             self.assertTrue(all(e['origin_request_id']==self.origin for e in events))
             self.assertTrue(any(e['event']=='formula.preview.completed' and e['status']=='PREVIEW_READY' for e in events))
 
+    def test_client_preview_failure_logs_the_same_job_and_origin(self):
+        jid=str(uuid4());base='/formula-jobs/'+jid
+        self.post('/formula-jobs',dict(task_type='formula',conversation_id=self.cid,origin_request_id=self.origin,
+            formula_job_id=jid,instruction='계산',worksheet_id='sheet',sheet_name='Sheet1',address='Sheet1!A2:A3',
+            row_start=1,column_start=0,row_count=2,column_count=1,samples=[dict(cells=['1'])]))
+        plan=FormulaPlan(version=1,summary='계산',actions=[dict(target_range='B2:B3',anchor_cell='B2',formula='=A2',mode='fill_down')])
+        with patch('services.formula.service.generate_formula_plan',return_value=plan): result=self.post(base+'/analyze')
+        pid=result['preview']['preview_id']
+        self.post(base+'/previews/'+pid+'/failed',dict(error_message='출력 범위에 기존 값이 있습니다'))
+        event=self.events()[-1]
+        self.assertEqual(event['event'],'formula.status.failed')
+        self.assertEqual(event['job_id'],jid);self.assertEqual(event['origin_request_id'],self.origin)
+        self.assertEqual(event['preview_id'],pid);self.assertEqual(event['status'],'FAILED')
+        self.assertEqual(event['client_error'],'출력 범위에 기존 값이 있습니다')
+
     def test_cancellation_is_logged_and_still_propagates(self):
         with self.assertRaises(asyncio.CancelledError):
             with job_event('operation.preview',CreateOperationJob(**self.source),'operation'): raise asyncio.CancelledError()
         self.assertEqual(self.events()[-1]['error_type'],'CancelledError')
         self.assertFalse(any(e['event'].endswith('.completed') for e in self.events()))
+
+    def test_formula_invalid_json_retry_reaches_approvable_preview_with_same_job(self):
+        jid=str(uuid4());base='/formula-jobs/'+jid
+        self.post('/formula-jobs',dict(task_type='formula',conversation_id=self.cid,origin_request_id=self.origin,
+            formula_job_id=jid,instruction='회사명이 일치하면 Y 아니면 N',worksheet_id='sheet',sheet_name='Sheet1',
+            address='Sheet1!A2:A3',row_start=1,column_start=0,row_count=2,column_count=1,samples=[dict(cells=['ACME'])],
+            reference_sheets=[dict(worksheet_id='ref',sheet_name='거래처검토',address='거래처검토!A1:B10',
+                row_start=0,column_start=0,row_count=10,column_count=2,samples=[dict(cells=['그룹','회사명'])])]))
+        plan=FormulaPlan(version=1,summary='회사명 비교',actions=[dict(target_range='B2:B3',anchor_cell='B2',
+            formula="=IF(COUNTIF('거래처검토'!$B$2:$B$10,A2)>0,\"Y\",\"N\")",mode='fill_down',output_label='분석대상여부')])
+        respond=AsyncMock(side_effect=[SimpleNamespace(content=plan.model_dump_json()+'\n\n설명'),
+                                       SimpleNamespace(content=plan.model_dump_json())])
+        self.app.state.runtime=SimpleNamespace(respond=respond,formula_prompt='test',
+            settings=SimpleNamespace(llm=SimpleNamespace(timeout_seconds=1)))
+        result=self.post(base+'/analyze')
+        self.assertEqual(result['status'],'PREVIEW_READY');self.assertEqual(respond.await_count,2)
+        pid=result['preview']['preview_id'];self.assertIsNone(result['approved_preview_id'])
+        self.assertEqual(self.post(base+'/analyze')['preview']['preview_id'],pid)
+        self.assertEqual(respond.await_count,2)
+        self.assertEqual(len(self.app.state.formula_jobs),1)
+        event=next(e for e in self.events() if e['event']=='formula.plan.validation_failed')
+        self.assertEqual(event['job_id'],jid);self.assertEqual(event['origin_request_id'],self.origin)
+        self.assertTrue(event['will_retry']);self.assertEqual(event['attempt'],1)
+        self.assertNotIn(plan.actions[0].formula,json.dumps(event,ensure_ascii=False))
+        self.assertFalse(any(e['event'].startswith('formula.apply_start') for e in self.events()))
+        phase=base+'/previews/'+pid
+        approved=self.post(phase+'/approve')
+        self.assertEqual(approved['preview_id'],pid)
+        result=self.post(phase+'/complete',dict(targets=[dict(row_start=1,row_count=2,column_start=1)]))
+        self.assertEqual(result['status'],'APPLIED')

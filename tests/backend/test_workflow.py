@@ -244,6 +244,38 @@ class WorkflowTests(unittest.TestCase):
         self.assertIsNone(reply.json()['ui_action'])
         self.assertIn('사용할 열',reply.json()['answer'])
 
+    def test_client_preview_failure_reaches_next_chat_and_requires_new_preparation(self):
+        self.preview()
+        error='수식의 새 결과 열은 작업표 오른쪽 빈 공간에 저장해.'
+        for _ in range(2):
+            reply=self.client.post(self.path+'/failed',json={'error_message':error})
+            self.assertEqual(reply.status_code,200,reply.text)
+            self.assertEqual(reply.json()['status'],'FAILED')
+        self.chat()
+        active=self.context['active_formula_job']
+        self.assertEqual(active['status'],'FAILED');self.assertEqual(active['error'],error)
+        self.assertEqual(active['analysis'],error)
+        record=next(r for r in self.context['execution_history']['records'] if r['kind']=='formula')
+        self.assertEqual(record['status'],'FAILED');self.assertEqual(record['error'],error)
+        self.assertIsNone(record['executed_range'])
+        tools={tool.name:tool for tool in build_request_tools(self.context)}
+        with self.assertRaisesRegex(ValueError,'미리보기가 없습니다'):
+            tools['change_output'].invoke({'output':{'mode':'new'}})
+        self.assertEqual(self.client.post(self.path+'/approve').status_code,409)
+        stale_path=self.path
+        refreshed=self.client.post(self.base+'/analyze').json()
+        self.assertEqual(refreshed['status'],'PREVIEW_READY')
+        self.assertEqual(self.client.post(stale_path+'/failed',json={'error_message':error}).status_code,409)
+        self.assertEqual(self.client.get(self.base).json()['status'],'PREVIEW_READY')
+
+    def test_preview_failure_cannot_downgrade_started_unknown_or_completed_writes(self):
+        self.preview();self.approve()
+        for status in ['APPLYING','UNKNOWN','APPLIED']:
+            job=self.app.state.formula_jobs[self.source['formula_job_id']]
+            job.status=status
+            reply=self.client.post(self.path+'/failed',json={'error_message':'late failure'})
+            self.assertEqual(reply.status_code,409,reply.text);self.assertEqual(job.status,status)
+
     def test_failed_or_uncertain_apply_cannot_complete_reapprove_or_replan(self):
         self.preview(); self.approve()
         self.assertEqual(self.client.post(self.path+'/unknown').json()['status'],'UNKNOWN')

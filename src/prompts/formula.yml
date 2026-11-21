@@ -59,6 +59,8 @@ system: |
 
   출력:
   - Markdown 없이 다음 구조의 JSON 객체만 반환한다. 계획이 있으면 clarification=null이다.
+  - JSON 앞뒤에 설명·인사·완료 문장을 붙이지 않는다. 설명은 summary/warnings, 질문은 clarification 안에만 적는다.
+  - validation_errors가 있으면 직전 응답의 검증 실패 이유다. 원래 instruction·입력 열·참조 시트·전체 행 범위를 유지하고 오류를 수정한 JSON 전체를 다시 반환한다. 검증을 피하려고 필요한 작업을 생략하지 않는다.
   - 확인이 필요하면 같은 구조에서 actions=[], clarification="질문 하나"로 바꾼다.
   {
     "version": 1,

@@ -1,7 +1,8 @@
 """작업 시작·범위·열 역할·문서·AI 의견 도구."""
 from typing import Literal
 from langchain_core.tools import tool
-from services.operations.schemas import Operation, OperationOutput, Rule, RowFilter, FilterGroup, ScopeRequest
+from services.operations.schemas import Operation, Rule, RowFilter, FilterGroup, ScopeRequest
+from services.formula.schemas import FormulaOutput
 from services.recommendation.service import resolve_advice_columns, resolve_advice_subject
 from services.workspace import resolve_columns
 
@@ -20,7 +21,7 @@ def build_workspace_tools(task_context: dict):
                 "investigation", "model_normalization", "counterparty_cleanup", "formula"
             ],
             input_column_ids: list[str] | None = None,
-            output: OperationOutput | None = None,
+            output: FormulaOutput | None = None,
             reference_sheet_names: list[str] | None = None,
     ) -> dict:
         """새 업무를 시작하거나 수식·조건부 비교를 요청한다.
@@ -28,7 +29,8 @@ def build_workspace_tools(task_context: dict):
         현재 작업 시트가 있어도 사용자가 업무 전환을 명시하면 사용한다.
         같은 업무 안의 전처리, 치환, 분리 요청에는 사용하지 않는다.
         다른 시트를 조회하는 수식은 reference_sheet_names에 사용자가 말한 시트 이름을 지정한다.
-        input_column_ids에는 현재 작업표 열만 넣는다. 다른 시트의 열 ID를 사용자에게 요구하지 않는다."""
+        input_column_ids에는 현재 작업표 열만 넣는다. 다른 시트의 열 ID를 사용자에게 요구하지 않는다.
+        수식의 새 열은 output에 mode=new와 name만 지정한다. anchor/side로 중간 삽입 위치를 만들지 않는다."""
         if reference_sheet_names:
             if task_type != "formula" or any(not name.strip() for name in reference_sheet_names):
                 raise ValueError("참조 시트 이름은 수식 요청에만 지정하세요.")

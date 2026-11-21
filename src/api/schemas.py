@@ -4,7 +4,8 @@ from typing import Annotated, Literal
 from services.similarity import SimilaritySettings
 from services.group_review import GroupReviewRequest
 from pydantic import BaseModel, Field, field_validator
-from services.operations.schemas import ColumnId, OperationOutput, Operation, Rule, RowScope, ScopeRequest, WorkspaceContext
+from services.operations.schemas import ColumnId, Operation, Rule, RowScope, ScopeRequest, WorkspaceContext
+from services.formula.schemas import FormulaOutput
 
 
 class ChatRequest(BaseModel):
@@ -27,7 +28,7 @@ class ChatRequest(BaseModel):
 
 class ConfirmSelectionAction(BaseModel):
     reference_sheet_names: list[str] | None = None
-    output: OperationOutput | None = None
+    output: FormulaOutput | None = None
     instruction: str | None = None
     type: Literal["confirm_selection"]
     task_type: Literal[

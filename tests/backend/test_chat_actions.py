@@ -78,3 +78,22 @@ class ChatActionsTests(unittest.TestCase):
         decision=asyncio.run(tools['calculate_formula'].ainvoke(dict(instruction='공급자명 길이 계산',input_column_ids=['source'],output=dict(mode='existing',column_id='result'))))
         self.assertEqual(decision['formula_output']['column_id'],'result')
         self.assertEqual(decision['formula_instruction'],'공급자명 길이 계산')
+
+    def test_formula_outputs_reject_unsupported_placement_before_creating_ui_actions(self):
+        tools=self.tools(active_formula_job=dict(formula_job_id=str(uuid4()),status='PREVIEW_READY'))
+        for output in [dict(mode='new',anchor='source'),dict(mode='new',side='before'),
+                       dict(mode='existing',column_id='result',score_column_id='source')]:
+            with self.assertRaises(ValidationError):
+                tools['start_task'].invoke(dict(task_type='formula',input_column_ids=['source'],output=output))
+            with self.assertRaises(ValidationError): tools['change_output'].invoke(dict(output=output))
+        result=tools['start_task'].invoke(dict(task_type='formula',input_column_ids=['source'],
+            reference_sheet_names=['거래처검토'],output=dict(mode='new',name='작업대상여부')))
+        self.assertEqual(result['formula_output']['name'],'작업대상여부')
+        self.assertIsNone(result['formula_output']['anchor'])
+        schema=tools['start_task'].args_schema.model_json_schema()['$defs']['FormulaOutput']
+        self.assertEqual(schema['properties']['anchor']['type'],'null')
+        self.assertEqual(schema['properties']['side']['const'],'after')
+        # Operation placement remains available for the existing preprocessing writer.
+        operation=tools['preprocess'].invoke(dict(column_id='source',rules=[dict(operation='trim')],
+            output=dict(mode='new',anchor='source',side='before')))
+        self.assertEqual(operation['operation']['output']['anchor'],'source')

@@ -1,9 +1,9 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {createDOM}=require('../helpers/taskpane_dom.cjs');
 const {createInvestigationHost}=require('../helpers/investigation_host.cjs');
-async function setup(values=['SA516-70','MODEL: UNKNOWN','SA516-70','SM490A / SA516-70','']){
+async function setup(values=['SA516-70','MODEL: UNKNOWN','SA516-70','SM490A / SA516-70',''],role='model_spec'){
  const h=createDOM(),host=createInvestigationHost(),f=host.workspace(['id','모델규격명','메모'],values.map((v,i)=>[i+1,v,'메모'+i]));
- f.work.columns[0].role='model_spec';
+ f.work.columns[0].role=role;
  let stored={...f.work,workspace_id:'work',target:f.target},busy=false,controller,job;
  const requests=[],completed=[];h.sandbox.Excel=host.Excel;h.sandbox.Office={context:{requirements:{isSetSupported:()=>true}}};
  h.window.workspaceStore={current:async()=>stored,save:async work=>{stored=structuredClone(work);}};
@@ -62,4 +62,20 @@ test('unique model values are batched without dropping rows, and cancellation le
  await f.h.messages.command('적용');assert.equal(f.sheet.cells.length,1005);assert(f.sheet.cells.slice(1).every(r=>r[2]===''&&r[3]===''));
  const g=await setup(values);g.h.cancelOnPreview=true;const before=structuredClone(g.sheet.cells);await g.preview();
  assert.deepEqual(g.sheet.cells,before);assert(g.requests.some(r=>r.body.status==='CANCELLED'));
+});
+
+test('explicit reference or result input reaches PDF preview and apply without assigning a role',async()=>{
+ for(const role of ['reference','result']){
+  const f=await setup(['SA516-70','UNKNOWN'],role),before=structuredClone(f.sheet.cells);
+  await f.preview({mode:'new',name:'모델'});
+  const request=f.requests.find(r=>r.url==='/operation-jobs').body;
+  assert.equal(request.model_spec_column_id,null);
+  assert.deepEqual(request.operation.column_ids,[f.work.columns[0].column_id]);
+  assert.deepEqual(f.sheet.cells,before);
+  await f.h.messages.command('적용');
+  assert.deepEqual(f.sheet.cells[0],['id','모델규격명','모델','모델 종류','메모']);
+  assert.deepEqual(f.sheet.cells.slice(1).map(r=>r.slice(2,4)),[['SA516-70','열처리 강종'],['','']]);
+  assert.equal(f.stored.columns.find(c=>c.column_id===request.operation.column_ids[0]).role,role);
+  assert(f.requests.some(r=>r.body.status==='APPLIED'));
+ }
 });

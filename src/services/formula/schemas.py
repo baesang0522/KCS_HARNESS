@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from services.operations.schemas import OperationOutput
 
 
 CellText = Annotated[str, Field(max_length=1000)]
@@ -323,6 +324,18 @@ class FormulaJob(BaseModel):
     error: str = ""
     result: FormulaCompletion | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class FormulaOutput(OperationOutput):
+    """수식 결과는 오른쪽 새 열 또는 비어 있는 기존 열에 저장한다."""
+    anchor: None = None
+    side: Literal["after"] = "after"
+    score_column_id: None = None
+
+
+class FormulaPreviewFailure(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    error_message: str = Field(min_length=1)
 
 
 class FormulaUnknownRequest(BaseModel):

@@ -50,7 +50,7 @@ class CreateOperationJob(StrictModel):
         self.operation.validate_ready()
         if self.operation.condition and self.operation.condition_scope == "all" and self.row_filter is not None:
             raise ValueError("전체 범위 요청에는 기존 행 필터를 적용하지 않습니다.")
-        if self.operation.kind in {"extract", "dimensions"} and (
+        if self.operation.kind == "dimensions" and (
             self.model_spec_column_id is None
             or self.operation.column_ids != [self.model_spec_column_id]
         ):

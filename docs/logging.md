@@ -52,7 +52,9 @@ operation.status.completed         origin_request_id=R job_id=J status=APPLIED
 
 쓰기 전 증거 저장은 `write_recovery.evidence`, 이후 읽기 전용 대조·사용자 확인은 `write_recovery.check`로 남긴다. 후자는 `method`가 `comparison` 또는 `user`이며 `conclusion`과 최종 상태를 기록한다. 복구 확인으로 `APPLIED`가 돼도 셀을 다시 작성한 것은 아니다.
 
-프런트가 기존 실패 보고를 보낼 수 있으면 오류 문구를 `client_error`로 기록한다. 통신이 완전히 끊겨 보고가 도착하지 않으면 서버에는 마지막 수신 상태만 남는다. 새로운 진단 요청이나 자동 재시도는 추가하지 않는다. Excel 쓰기 이전의 모든 화면 오류·사용자 조작을 별도로 수집하는 기능은 아니다.
+프런트가 기존 실패 보고를 보낼 수 있으면 오류 문구를 `client_error`로 기록한다. 통신이 완전히 끊겨 보고가 도착하지 않으면 서버에는 마지막 수신 상태만 남는다. 수식 계획 후 출력 위치 확인·미리보기 검증 실패와 취소는 `/formula-jobs/{job_id}/previews/{preview_id}/failed`로 보고한다. `formula.status.failed`에 `status=FAILED`, `client_error`와 기존 요청 연결 ID가 남는다. 이미 적용을 시작한 작업이나 다른 미리보기 ID는 실패 보고로 덮어쓸 수 없다. Excel 쓰기 자동 재시도나 모든 화면 오류의 별도 수집은 하지 않는다.
+
+수식 계획 검증 실패는 `formula.plan.validation_failed`에 같은 `job_id`·`origin_request_id`, `attempt`, `validation_errors`, `will_retry`로 기록한다. 첫 실패는 같은 입력으로 한 번 재생성하며, 두 번째 실패는 중단한다. 응답 원문은 이 이벤트에 복사하지 않는다. 성공 여부는 뒤따르는 `formula.preview.completed` 또는 `formula.preview.failed`로 확인한다. 계획 재생성은 Excel 쓰기 재시도가 아니다.
 
 ## 데이터와 시간의 의미
 

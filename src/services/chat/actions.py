@@ -1,7 +1,8 @@
 from typing import Literal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
-from services.operations.schemas import ColumnId, Rule, OperationOutput
+from services.operations.schemas import ColumnId, Rule
+from services.formula.schemas import FormulaOutput
 
 class DocumentAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -24,4 +25,4 @@ class FormulaOutputAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: Literal["formula_output"]
     formula_job_id: UUID
-    output: OperationOutput
+    output: FormulaOutput

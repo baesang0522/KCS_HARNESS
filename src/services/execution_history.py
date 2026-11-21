@@ -37,7 +37,7 @@ def execution_history_context(operation_jobs: dict, formula_jobs: dict, *, conve
             results.append({**column, 'purpose': 'data', 'can_continue': job.status == 'APPLIED' and column['exists']})
         records.append({
             'job_id': str(job.source.formula_job_id), 'created_at': job.created_at.isoformat(),
-            'status': job.status, 'kind': 'formula', 'instruction': job.source.instruction,
+            'status': job.status, 'kind': 'formula', 'instruction': job.source.instruction, 'error': job.error or None,
             'input_columns': [column_info(column.column_id) for column in job.source.input_columns],
             'settings_excerpt': settings[:1600], 'settings_truncated': len(settings) > 1600,
             'output_name': ', '.join(action.output_label for action in plan.actions) if plan else None,

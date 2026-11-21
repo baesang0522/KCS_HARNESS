@@ -190,4 +190,32 @@ class SupplierMatchingTests(unittest.TestCase):
         self.assertEqual(tool.invoke({})['operation']['similarity_method'],'auto')
         self.assertEqual(tool.invoke({'method':'levenshtein'})['operation']['similarity_method'],'levenshtein')
 
+
+    def test_existing_match_then_nonblank_conditional_update_preserves_threshold_and_target(self):
+        from services.operations.jobs import CreateOperationJob, OperationJob, JobPreview, preview_job
+        from services.operations.schemas import OperationRequest
+        from services.operations.service import execute
+        context={'workspace':{**self.workspace,'columns':[
+            {'column_id':'company','header':'해외공급자상호 정제','role':'company_name'},
+            {'column_id':'flag','header':'작업대상','role':'result'}], 'target_column_ids':['company']}}
+        tools={tool.name:tool for tool in execution_tools(context,build_request_tools(context))}
+        matching=tools['match_suppliers'].invoke({'column_id':'company','output':{'mode':'new','name':'이번 거래처 매칭'}})['operation']
+        self.assertEqual(matching['similarity_method'],'auto')
+        self.assertEqual(matching['output']['mode'],'new')
+        job=OperationJob(source=CreateOperationJob(**(self.source|{'operation':matching})),
+            supplier_references=[{'group':'대상 회사','company_name':'ABCDEFGHIJ'}])
+        result=preview_job(job,JobPreview(rows=[{'excel_row':i+2,'values':[value]} for i,value in enumerate(
+            ['ABCDEFGHIJ','ABCDEFGHIx','ABCDEFGHxx',''])]))
+        self.assertEqual([row.values[0] for row in result.rows],['대상 회사','대상 회사','',''])
+        context['workspace']['columns'] += [{'column_id':'matched-group','header':'이번 거래처 매칭','role':'result'}]
+        tools={tool.name:tool for tool in execution_tools(context,build_request_tools(context))}
+        update=tools['update_matching_rows'].invoke(dict(condition_column_id='matched-group',operator='not_blank',value='',
+            destination_column_id='flag',assigned_value='Y',scope='current'))['operation']
+        selected=[Row(excel_row=row.excel_row,values=[row.values[0]]) for row in result.rows if row.values[0]]
+        changed=execute(OperationRequest(operation=update,rows=selected))
+        self.assertEqual([(row.excel_row,row.values) for row in changed.rows],[(2,['Y']),(3,['Y'])])
+        self.assertEqual(update['destination_column_id'],'flag');self.assertEqual(update['condition_scope'],'current')
+        with self.assertRaises(ValidationError):
+            OperationRequest(operation=update,rows=[{'excel_row':4,'values':['']}])
+
 if __name__=='__main__': unittest.main()
