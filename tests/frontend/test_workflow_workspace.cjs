@@ -4,11 +4,11 @@ const vm=require('node:vm');
 const fs=require('node:fs');
 const path=require('node:path');
 const {createHost}=require('../helpers/excel_mock.cjs');
-async function setup({rows=90000,cachedRows=90000}={}) {
+async function setup({rows=90000,cachedRows=90000,rowFilter=null}={}) {
     const columns=[['declared',1,'declared_name'],['trade',2,'trade_name'],['model',3,'model_spec'],
         ['grouped',5,'result'],['replaced',6,'result'],['cleaned',25,'result']].map(([column_id,column_index,role])=>({column_id,column_index,role,header:column_id,description:''}));
     const saved={workspace_id:'workspace',worksheet_id:'sheet',table_id:'table',task_type:'model_normalization',
-        source_row_column_id:'identity',sheet_name:'Sheet1',row_count:90000,columns,
+        source_row_column_id:'identity',sheet_name:'Sheet1',row_count:90000,columns,row_filter:rowFilter,
         target_column_ids:['replaced'],last_result_column_ids:['replaced'],target:{row_start:1,row_count:90000}};
     const h={columns:structuredClone(columns),selection:null,status:[],configured:null};
     let handlers,selected=['replaced'];
@@ -63,7 +63,7 @@ test('column movement or rename after planning blocks approval',async()=>{
     await assert.rejects(()=>h.controller.validateFormulaSource(selection),/바뀌었습니다/);
 });
 test('manual source reselection inside workspace keeps stable column IDs and chosen rows',async()=>{
-    const h=await setup();h.selection={row_start:20,row_count:50,columns:[h.columns[1],h.columns[5]]};
+    const h=await setup({rowFilter:{column_id:'trade',operator:'equals',value:'A'}});h.selection={row_start:20,row_count:50,columns:[h.columns[1],h.columns[5]]};
     const selection=await h.controller.formulaTarget(null,true);
     assert.equal(selection.row_start,20);assert.equal(selection.row_count,50);
     assert.equal(selection.workspace_id,'workspace');
@@ -93,8 +93,8 @@ test('workspace restoration notifies reference documents with identity and no ce
 });
 
 
-test('automatic formula scope uses all current rows, ignoring old range and active Excel cell',async()=>{
-    const h=await setup({rows:3092,cachedRows:1});
+test('automatic formula scope uses all current rows despite filter, old range and active Excel cell',async()=>{
+    const h=await setup({rows:3092,cachedRows:1,rowFilter:{column_id:'trade',operator:'equals',value:'A'}});
     h.selection={row_start:150,row_count:1,columns:[h.columns[4]]};
     const selection=await h.controller.formulaTarget({workspace_id:'workspace',column_ids:['model']});
     assert.equal(selection.row_start,1);assert.equal(selection.row_count,3092);

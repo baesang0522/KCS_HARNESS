@@ -29,10 +29,11 @@ function createInvestigationHost() {
     function addSheet(name, cells=[]) {
         const sheet={id:'sheet-'+ ++next,name,cells:structuredClone(cells),formats:[],protected:false,visibility:'Visible',load(){},activate(){host.active=sheet;},
             getRangeByIndexes:(...args)=>range(sheet,...args),getRange:(address)=>{
-                const match=address.match(/^([A-Z]+)([0-9]+)$/);
+                const match=address.match(/^([A-Z]+)([0-9]+)(?::([A-Z]+)([0-9]+))?$/);
                 if(!match)return {columnHidden:false,format:{}};
                 const c=[...match[1]].reduce((v,ch)=>v*26+ch.charCodeAt(0)-64,0)-1;
-                return range(sheet,Number(match[2])-1,c,1,1);
+                const end=match[3] ? [...match[3]].reduce((v,ch)=>v*26+ch.charCodeAt(0)-64,0)-1 : c;
+                return range(sheet,Number(match[2])-1,c,Number(match[4] || match[2])-Number(match[2])+1,end-c+1);
             },freezePanes:{freezeRows(){}},
             getUsedRangeOrNullObject:()=>Object.assign(range(sheet,0,0,sheet.cells.length,Math.max(0,...sheet.cells.map(r=>r.length))),{isNullObject:!sheet.cells.length}),
             protection:{protect(){sheet.protected=true;}},isNullObject:false};

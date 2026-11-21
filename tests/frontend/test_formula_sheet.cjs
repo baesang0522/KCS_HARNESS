@@ -175,8 +175,9 @@ test('failed value paste reports saved count and does not return successful comp
 test('formula chat explains planned calculation before approval and revokes the applied offer',async()=>{
  const {createDOM}=require('../helpers/taskpane_dom.cjs'),h=createDOM();h.load('formula/formula_ui.js');
  const ui=h.window.createFormulaUI(h.messages);let applied=0;ui.bind({apply:()=>{applied++;}});
- ui.showPreview('계산',{address:'A2:A4'}, {plan:{actions:[{output_label:'값',target_range:'B2:B4',formula:'=A2'}]}},{address:'B2:B4',row_count:3});
+ ui.showPreview('계산',{workspace_id:'work',address:'A2:A4'}, {plan:{actions:[{output_label:'값',target_range:'B2:B4',formula:'=A2'}]}},{address:'B2:B4',row_count:3});
  assert.match(h.chatText(),/아직 셀은 변경하지/);assert.match(h.chatText(),/계산한 뒤 결과값으로 저장/);
+ assert.match(h.chatText(),/제외되거나 숨겨진 행/);assert.match(h.chatText(),/기존 필터 조건은 유지/);
  assert.equal(applied,0);await h.messages.command('적용');assert.equal(applied,1);
  ui.setApplied();assert.equal(h.action('적용'),undefined);
 });

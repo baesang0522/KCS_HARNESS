@@ -335,3 +335,30 @@ test('PDF company then numeric item selection can revisit unknowns and reselect 
  assert.deepEqual(f.stored.selection_stages.at(-1).selected_ids,[1,2]);assert.equal(f.stored.selection_stages.at(-1).pending_ids.length,0);
  assert.equal(f.stored.selection_stages.at(-1).status,'applied');assert.equal(f.sheet.cells.find(r=>r[0]===4)[4],'0.75');
 });
+
+
+test('whole-table formula preserves company candidates and intersects item results only within them',async()=>{
+ const f=await setup();
+ await f.change('replace','회사','A');
+ const filter=structuredClone(f.stored.row_filter),stages=structuredClone(f.stored.selection_stages);
+ const selection=await f.controller.formulaTarget({workspace_id:'work',column_ids:[f.ids['국가']]});
+ selection.sheet_name=f.sheet.name;
+ assert.equal(selection.row_start,1);assert.equal(selection.row_count,4);
+ await f.controller.validateFormulaSource(selection);
+ f.sheet.cells.slice(1).forEach(row=>{row[4]='';});
+ const plan={actions:[{target_range:'E2:E5',output_label:'품목 판별',formula:'=IF(C2="KR","Y","N")'}]};
+ await f.controller.prepareFormulaOutput({plan},selection);
+ // Excel calculation is mocked here; formula_sheet tests cover writing and freezing the full range.
+ f.sheet.cells.slice(1).forEach(row=>{row[4]=row[2]==='KR'?'Y':'N';});
+ const result={targets:[{row_start:1,row_count:4,column_start:4,column_count:1}]};
+ const ids=await f.controller.formulaResultColumns(result,selection);
+ await f.controller.formulaResult(result,selection,ids);
+ assert.deepEqual(f.sheet.cells.slice(1).map(row=>row[4]),['N','Y','Y','N']);
+ assert.deepEqual(f.stored.row_filter,filter);assert.deepEqual(f.stored.selection_stages,stages);
+ assert.deepEqual(Array.from((await f.controller.context()).review_required_column_ids),[]);
+ assert.match(await f.change('intersect','결과','Y'),/1행/);
+ assert.deepEqual(f.stored.selection_stages.at(-1).selected_ids,[3]);
+ // Inputs outside the company candidates still belong to the whole-table formula result.
+ f.sheet.cells[2][2]='CN';
+ assert.deepEqual(Array.from((await f.controller.context()).review_required_column_ids),[f.ids['결과']]);
+});

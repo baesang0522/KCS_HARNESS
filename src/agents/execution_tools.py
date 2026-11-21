@@ -77,7 +77,7 @@ def execution_tools(context, manual_tools):
                                 reference_sheet_names: list[str] | None = None) -> dict:
         """이번 단계의 구체적인 수식 계산 지시와 입력 열을 채팅 미리보기·확인으로 넘긴다.
         다른 시트의 조회 범위는 reference_sheet_names에 시트 이름을 전달한다.
-        전체 조사 목표를 그대로 넘기지 않는다. 조건 범위 수식의 기존 차단은 유지한다."""
+        전체 조사 목표를 그대로 넘기지 않는다. 수식은 필터에서 제외된 행을 포함한 작업표 전체 행에 계산하며 기존 필터는 유지한다."""
         if not instruction.strip() or len(instruction) > 8000:
             raise ValueError("이번 수식 계산 지시를 구체적으로 작성하세요.")
         start = next(item for item in manual_tools if item.name == "start_task")

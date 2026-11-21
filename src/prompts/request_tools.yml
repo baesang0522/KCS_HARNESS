@@ -77,6 +77,8 @@ system: |
   2. 실제 입력 열을 정한다.
   - workspace.columns의 header·role·description으로 식별하고 실제 column_id만 전달한다. 이름을 ID 자리에 넣지 않는다.
   - 수식에는 비교 열까지 모든 입력 열 ID를 input_column_ids에 넣는다. 서로 떨어진 열도 가능하다.
+    수식은 필터에서 제외되거나 숨겨진 행도 포함한 작업표 전체 행에 계산하며 기존 필터는 유지한다. 계산 뒤 품목 선별은 change_scope(mode="intersect")로 현재 후보 안에서 좁힌다.
+    사용자가 후보 행에만 수식을 쓰라고 명시하면 전체 행 계산 방식을 설명하고 확인한다. 후보 행만 계산했다고 주장하지 않는다.
   - '이 열'은 target_column_ids, '방금 만든 결과'는 last_result_column_ids를 확인한다.
     명시한 열이 있으면 현재 선택/직전 결과보다 우선한다. 원본과 정제 결과를 구분한다.
   - 단일 열 도구의 column_id는 현재 대상이 정확히 하나일 때만 생략한다. 모호하면 ask_user.

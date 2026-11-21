@@ -48,7 +48,7 @@ def build_workspace_tools(task_context: dict):
                 raise ValueError("수식 입력은 최대 20열입니다.")
             names = [next(column.get("header", column["column_id"]) for column in workspace["columns"]
                           if str(column["column_id"]) == column_id) for column_id in input_column_ids]
-            answer = "작업표의 ‘" + " · ".join(names) + "’ 열을 찾아 현재 데이터 전체 행으로 수식을 준비합니다. Excel에서 열을 따로 선택할 필요는 없습니다. 적용 전에 결과를 확인해 주세요."
+            answer = "작업표의 ‘" + " · ".join(names) + "’ 열을 찾아 필터로 제외되거나 숨겨진 행을 포함한 현재 데이터 전체 행으로 수식을 준비합니다. 기존 필터 조건은 유지합니다. Excel에서 열을 따로 선택할 필요는 없습니다. 적용 전에 결과를 확인해 주세요."
         elif input_column_ids is not None:
             raise ValueError("작업 표의 수식 요청에만 입력 열 ID를 지정하세요.")
         return {

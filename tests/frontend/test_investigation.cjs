@@ -182,17 +182,6 @@ test('model extraction suggestions receive only selected rows from the shared re
     assert.deepEqual(sent.values,['AB1','CD2']);
 });
 
-test('filtered formula setup and application stop before any Excel calls',async()=>{
-    const h=createInvestigationHost();h.load('formula/workspace_formula.js');const f=fixture();
-    f.work.workspace_id='work';
-    const formulas=h.window.createWorkspaceFormula({getWorkspace:()=>f.work,getTarget:()=>f.target,getLastFormula:()=>null});
-    const selection={workspace_id:'work',worksheet_id:f.work.worksheet_id,table_id:f.work.table_id};
-    await assert.rejects(()=>formulas.formulaTarget(selection,false),/조건 범위/);
-    await assert.rejects(()=>formulas.validateFormulaSource(selection),/조건이 설정/);
-    await assert.rejects(()=>formulas.prepareFormulaOutput({},selection),/조건이 설정/);
-    assert.equal(h.syncs,0);
-});
-
 test('initial setup allows a user column without any business role',async()=>{
     const {createDOM}=require('../helpers/taskpane_dom.cjs'),h=createDOM();
     h.window.workspaceProfiles={investigation:{roles:[{key:'company_name',labels:['공급자명']},{key:'model_spec',labels:['모델규격']}]}};
