@@ -88,6 +88,24 @@
         if (workspace.result_dependencies) workspace.result_dependencies = records.filter(function (record) { return record.output_ids.length; });
         return before !== JSON.stringify(workspace.result_dependencies || []);
     }
+    async function reconcileStages(workspace, versions) {
+        var changed = false, stale = new Set();
+        var known = new Set(workspace.columns.map(function (column) { return String(column.column_id); }));
+        for (var stage of workspace.selection_stages || []) {
+            var reason = stage.review_reason;
+            if (stage.status !== 'needs_review') {
+                if (stage.parent_id && stale.has(stage.parent_id)) reason = '이전 선별 단계가 바뀌었습니다.';
+                else if (versions !== null && (stage.request.condition_ids || []).some(function (id) {
+                    return !stage.request.condition_versions || versions[id] !== stage.request.condition_versions[id];
+                })) reason = 'PDF 조건이 수정되거나 삭제되었습니다.';
+                else if (referenced(stage.evidence).some(function (id) { return !known.has(id); })) reason = '조건 열이 삭제되었습니다.';
+                else if ((await read(workspace, stage.evidence)).digest !== stage.evidence.digest) reason = '선별 입력값이나 후보 행이 바뀌었습니다.';
+                if (reason) { stage.status = 'needs_review'; stage.review_reason = reason; changed = true; }
+            }
+            if (stage.status === 'needs_review') stale.add(stage.stage_id);
+        }
+        return changed;
+    }
     function required(workspace) {
         return Array.from(new Set((workspace.result_dependencies || []).filter(function (record) { return record.needs_review; }).flatMap(function (record) { return record.output_ids; })));
     }
@@ -136,5 +154,5 @@
         }
         return records;
     }
-    window.resultDependencies = {fromSnapshot: fromSnapshot, formulaResults: formulaResults, referencesOutput: referencesOutput, read: read, register: register, reconcile: reconcile, required: required, formula: formula};
+    window.resultDependencies = {reconcileStages: reconcileStages,fromSnapshot: fromSnapshot, formulaResults: formulaResults, referencesOutput: referencesOutput, read: read, register: register, reconcile: reconcile, required: required, formula: formula};
 })();

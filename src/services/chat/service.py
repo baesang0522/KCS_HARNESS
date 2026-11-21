@@ -7,6 +7,7 @@ from services.recommendation.service import resolve_advice_columns, resolve_advi
 from repositories.conversation_repository import StoredTurn
 from services.errors import MODEL_RESPONSE_ERROR, ConflictError, ModelProcessingError
 from services.investigation.service import investigation_context
+from services.debug_log import log_event
 from services.formula.service import formula_job_context
 from services.execution_history import execution_history_context, same_formula_workspace
 
@@ -35,6 +36,9 @@ def build_task_context(state, formula_jobs: dict, *, operation_jobs: dict,
     if not same_formula_workspace(formula_job, conversation_id, workspace):
         formula_job = None
 
+    for stage in (workspace or {}).get("selection_stages", []):
+        log_event("selection.stage_observed", conversation_id=conversation_id,
+                  workspace_id=workspace["workspace_id"], **stage)
     return {
         "pending_intent": state.pending_intent,
         "task_type": (

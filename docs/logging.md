@@ -69,3 +69,8 @@ operation.status.completed         origin_request_id=R job_id=J status=APPLIED
 - `services/operations/jobs.py`, `services/formula/schemas.py`: 선택적 출처·진단 입력 필드.
 - `api/operation_jobs.py`, `formula_jobs.py`, `write_recovery.py`, `agent_runs.py`: 기존 검증·상태 전환 주변의 로그.
 - `services/debug_log.py`: 공통 JSON 출력, 비밀 필드 마스킹, 단계별 시간·오류 기록.
+
+
+## 선별 단계
+
+`selection.stage_observed`는 다음 채팅/에이전트 문맥에서 관측한 저장된 선별 단계 요약이다. `stage_id`, `parent_id`, `origin_request_id`, 조건 ID·버전·비교 규칙, 포함/제외/보류 건수와 재검토 사유를 포함한다. 행 원문이나 전체 행 ID 목록은 보내지 않는다. 같은 단계를 여러 요청에서 다시 관측할 수 있으므로 새 적용 횟수로 합산하지 않는다. 이 이벤트는 셀 쓰기 완료 이벤트가 아니며 PDF의 전체 요건 충족도 의미하지 않는다.

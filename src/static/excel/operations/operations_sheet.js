@@ -1,9 +1,33 @@
 "use strict";
 (function () {
     var table = window.workspaceTable, batchSize = table.batchSize;
+    function numeric(value) {
+        var text = String(value).trim();
+        if (!/^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(text) || !Number.isFinite(Number(text))) return null;
+        var parts = text.toLowerCase().split('e'), mantissa = parts[0], negative = mantissa[0] === '-';
+        mantissa = mantissa.replace(/^[+-]/, '');
+        var decimal = mantissa.indexOf('.'), digits = mantissa.replace('.', '').replace(/^0+/, '');
+        if (!digits) return {sign: 0, digits: '0', magnitude: 0n};
+        var power = BigInt(parts[1] || '0') - BigInt(decimal < 0 ? 0 : mantissa.length - decimal - 1);
+        return {sign: negative ? -1 : 1, digits: digits, magnitude: BigInt(digits.length) + power};
+    }
+    function compareNumbers(a, b) {
+        if (a.sign !== b.sign) return a.sign > b.sign ? 1 : -1;
+        if (!a.sign) return 0;
+        if (a.magnitude !== b.magnitude) return (a.magnitude > b.magnitude ? 1 : -1) * a.sign;
+        var length = Math.max(a.digits.length, b.digits.length), left = a.digits.padEnd(length, '0'), right = b.digits.padEnd(length, '0');
+        return (left === right ? 0 : left > right ? 1 : -1) * a.sign;
+    }
     function matches(value, filter) {
         if (!filter) return true;
         value = String(value); var wanted = String(filter.value || '');
+        if (['gt', 'gte', 'lt', 'lte'].includes(filter.operator)) {
+            var actual = numeric(value), expected = numeric(wanted);
+            if (!expected) throw new Error('숫자 비교 기준을 확인하세요.');
+            if (!actual) return null;
+            var compared = compareNumbers(actual, expected);
+            return {gt: compared > 0, gte: compared >= 0, lt: compared < 0, lte: compared <= 0}[filter.operator];
+        }
         if (filter.operator === 'equals') return value === wanted;
         if (filter.operator === 'not_equals') return value !== wanted;
         if (filter.operator === 'contains') return value.includes(wanted);
@@ -11,31 +35,54 @@
         if (filter.operator === 'not_blank') return !!value.trim();
         throw new Error('지원하지 않는 행 조건입니다.');
     }
+    function evaluatePredicate(filter, value) {
+        if (filter.column_id) return matches(value(filter.column_id), filter);
+        var results = filter.conditions.map(function (part) { return evaluatePredicate(part, value); });
+        if (filter.operator === 'all') return results.includes(false) ? false : results.includes(null) ? null : true;
+        return results.includes(true) ? true : results.includes(null) ? null : false;
+    }
     function filterColumns(filter) {
         if (!filter) return [];
-        if (filter.column_id) return [filter.column_id];
+        if (filter.row_ids) {
+            if (!Array.isArray(filter.row_ids) || new Set(filter.row_ids).size !== filter.row_ids.length ||
+                filter.row_ids.some(function (id) { return !Number.isSafeInteger(id) || id < 1; })) throw new Error('선별 행 식별값을 확인하세요.');
+            return [];
+        }
+        if (filter.column_id) {
+            if (typeof filter.value !== 'string' || filter.value.length > 32767 ||
+                (!['blank', 'not_blank'].includes(filter.operator) && !filter.value.trim())) throw new Error('비교할 값을 확인하세요.');
+            matches('', filter);
+            return [filter.column_id];
+        }
+        if (['all', 'any'].includes(filter.operator)) {
+            if (!Array.isArray(filter.conditions) || !filter.conditions.length) throw new Error('복합 조건을 지정하세요.');
+            return Array.from(new Set(filter.conditions.flatMap(filterColumns)));
+        }
         if (!Array.isArray(filter.steps) || !filter.steps.length) throw new Error('작업 범위 조건을 다시 지정하세요.');
         return Array.from(new Set(filterColumns(filter.base).concat(filter.steps.flatMap(function (step) {
-            if (!['include', 'exclude'].includes(step.mode) || !step.condition || !step.condition.column_id) throw new Error('지원하지 않는 범위 결합입니다.');
-            return [step.condition.column_id];
+            if (!['include', 'exclude', 'intersect'].includes(step.mode) || !step.condition) throw new Error('지원하지 않는 범위 결합입니다.');
+            return filterColumns(step.condition);
         }))));
     }
     function compileFilter(filter) {
         filterColumns(filter);
         if (!filter) return function () { return true; };
-        if (filter.column_id) return function (value) { return matches(value(filter.column_id), filter); };
+        if (filter.row_ids) { var selectedIds = new Set(filter.row_ids); return function (value, identity) { return selectedIds.has(identity); }; }
+        if (filter.column_id || filter.conditions) return function (value) { return evaluatePredicate(filter, value) === true; };
         var base = compileFilter(filter.base), ids = filter.base_ids === null || filter.base_ids === undefined ? null : new Set(filter.base_ids);
         return function (value, identity) {
             var selected = (!ids || ids.has(identity)) && base(value, identity);
             filter.steps.forEach(function (step) {
-                var matched = matches(value(step.condition.column_id), step.condition);
-                selected = step.mode === 'include' ? selected || matched : selected && !matched;
+                var matched = evaluatePredicate(step.condition, value);
+                selected = step.mode === 'include' ? selected || matched === true : step.mode === 'intersect' ? selected && matched === true : selected && matched === false;
             });
             return selected;
         };
     }
     function filterKey(filter) {
         if (!filter) return 'null';
+        if (filter.row_ids) return JSON.stringify(['rows', filter.row_ids.slice().sort(function (a, b) { return a - b; })]);
+        if (filter.conditions) return JSON.stringify([filter.operator, filter.conditions.map(filterKey)]);
         if (filter.column_id) return JSON.stringify([filter.column_id, filter.operator, filter.value || '']);
         return JSON.stringify([filterKey(filter.base), filter.steps.map(function (step) {
             return [step.mode, filterKey(step.condition)];
@@ -43,10 +90,12 @@
     }
     function describeFilter(filter, columns) {
         if (!filter) return '전체 행';
+        if (filter.row_ids) return '기록된 후보 ' + filter.row_ids.length + '행';
+        if (filter.conditions) return '(' + filter.conditions.map(function (part) { return describeFilter(part, columns); }).join(filter.operator === 'all' ? ' AND ' : ' OR ') + ')';
         if (!filter.column_id) return '(' + describeFilter(filter.base, columns) + (filter.base_ids == null ? '' : ' · 기존 행 범위') + ')' +
-            filter.steps.map(function (step) { return (step.mode === 'include' ? ' + 포함: ' : ' − 제외: ') + describeFilter(step.condition, columns); }).join('');
+            filter.steps.map(function (step) { return (step.mode === 'include' ? ' + 포함: ' : step.mode === 'intersect' ? ' ∩ 좁히기: ' : ' − 제외: ') + describeFilter(step.condition, columns); }).join('');
         var column = columns.find(function (c) { return String(c.column_id) === filter.column_id; });
-        var labels = {equals: '같음', not_equals: '다름', contains: '포함', blank: '빈칸', not_blank: '빈칸 아님'};
+        var labels = {equals: '같음', not_equals: '다름', contains: '포함', blank: '빈칸', not_blank: '빈칸 아님', gt: '초과', gte: '이상', lt: '미만', lte: '이하'};
         return (column ? column.header : '삭제된 열') + ' · ' + labels[filter.operator] +
             (['blank', 'not_blank'].includes(filter.operator) ? '' : ' · ' + JSON.stringify(filter.value));
     }
@@ -286,5 +335,5 @@
             }
         });
     }
-    window.operationsSheet = {uniqueNames: uniqueNames, read: read, write: write, matches: matches, filterColumns: filterColumns, compileFilter: compileFilter, filterKey: filterKey, describeFilter: describeFilter};
+    window.operationsSheet = {uniqueNames: uniqueNames, read: read, write: write, matches: matches, evaluatePredicate: evaluatePredicate, filterColumns: filterColumns, compileFilter: compileFilter, filterKey: filterKey, describeFilter: describeFilter};
 })();

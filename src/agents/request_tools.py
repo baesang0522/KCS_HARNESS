@@ -18,7 +18,7 @@ def build_request_tools(task_context: dict):
         tools.extend([
             # 묶음 검토 보류(2026-11-18): 재사용 여부 검토 후 불필요하면 삭제. 기존 저장 정보는 보존.
             # available["set_value"],
-            available["change_scope"],
+            available["change_scope"], available["revisit_selection"],
             available["change_output"],
             available["set_column_role"],
             available["update_matching_rows"],

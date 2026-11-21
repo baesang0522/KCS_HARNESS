@@ -1,7 +1,7 @@
 """작업 시작·범위·열 역할·문서·AI 의견 도구."""
 from typing import Literal
 from langchain_core.tools import tool
-from services.operations.schemas import Operation, OperationOutput, Rule, RowFilter, ScopeRequest
+from services.operations.schemas import Operation, OperationOutput, Rule, RowFilter, FilterGroup, ScopeRequest
 from services.recommendation.service import resolve_advice_columns, resolve_advice_subject
 from services.workspace import resolve_columns
 
@@ -55,27 +55,49 @@ def build_workspace_tools(task_context: dict):
 
 
     @tool
-    def change_scope(mode: Literal["replace", "include", "exclude", "clear"],
+    def change_scope(mode: Literal["replace", "include", "exclude", "intersect", "clear"],
                      column_id: str | None = None,
-                     operator: Literal["equals", "not_equals", "contains", "blank", "not_blank"] = "equals",
-                     value: str = "") -> dict:
+                     operator: Literal["equals", "not_equals", "contains", "blank", "not_blank", "gt", "gte", "lt", "lte"] = "equals",
+                     value: str = "", predicate: FilterGroup | None = None,
+                     condition_ids: list[str] | None = None, note: str = "") -> dict:
         """작업 대상 범위만 변경한다. 셀 값이나 결과 열은 쓰지 않는다.
         현재 대상에 조건 일치 행 추가는 include, 그중 제외는 exclude, 새 조건으로 지정은 replace,
-        전체 행으로 돌아가기는 clear다. 정확한 문자열·빈칸 조건만 받으며 기업 동일성을 추측하지 않는다."""
+        현재 후보 중 일치 행만 남기는 것은 intersect, 전체 행으로 돌아가기는 clear다. 숫자 비교는 단위를 정리한 열에 gt/gte/lt/lte를 쓴다.
+        복합 조건은 predicate의 all(AND)/any(OR)로 묶고 column_id와 함께 쓰지 않는다.
+        PDF 조건 적용은 condition_ids에 확인된 조건 ID와 note에 열·단위·사용자 확인 기준을 남긴다.
+        기업 동일성·기업별 품목 관계를 추측하지 않는다."""
         if not workspace:
             raise ValueError("먼저 작업 시트를 준비하세요.")
         if mode == "clear":
-            if column_id is not None or value or operator != "equals":
+            if column_id is not None or value or operator != "equals" or predicate or condition_ids:
                 raise ValueError("전체 행으로 돌아갈 때는 조건을 지정하지 마세요.")
             condition = None
+        elif predicate is not None:
+            if column_id is not None or value or operator != "equals":
+                raise ValueError("복합 조건과 단일 조건을 동시에 지정하지 마세요.")
+            condition = predicate
+            resolve_columns(workspace, condition.column_ids)
         else:
             if column_id is None:
                 raise ValueError("범위를 판단할 조건 열을 지정하세요.")
             resolve_columns(workspace, [column_id])
             condition = RowFilter(column_id=column_id, operator=operator, value=value)
-        request = ScopeRequest(mode=mode, condition=condition)
+        request = ScopeRequest(mode=mode, condition=condition, condition_ids=condition_ids or [], note=note)
+        from services.investigation.bindings import bind_scope
+        bind_scope(request, task_context.get("investigation"))
         return {"intent": "scope", "scope_change": request.model_dump(),
                 "answer": "현재 값을 읽어 작업 범위를 변경할게요. 셀 값은 바꾸지 않아요."}
+
+
+    @tool
+    def revisit_selection(stage_id: str, rows: Literal["pending", "input"] = "pending") -> dict:
+        """저장된 단계의 보류 행 또는 입력 후보로 돌아간다. 현재 값으로 다시 정제·선별하며 과거 셀을 복원하지 않는다.
+        stage_id는 workspace.selection_stages의 실제 ID다. pending은 보류 행, input은 그 단계의 전체 입력 행이다."""
+        if not workspace or not any(item["stage_id"] == stage_id for item in workspace.get("selection_stages", [])):
+            raise ValueError("현재 작업표의 선별 단계 ID를 지정하세요.")
+        request = ScopeRequest(mode="revisit", stage_id=stage_id, revisit=rows)
+        return {"intent": "scope", "scope_change": request.model_dump(),
+                "answer": "기록된 행 식별값으로 재검토 범위를 준비할게. 기존 셀 값은 유지해."}
 
 
     @tool
@@ -126,5 +148,5 @@ def build_workspace_tools(task_context: dict):
 
 
     return {item.name: item for item in [
-        open_investigation, start_task, change_scope, recommend_preprocessing, set_column_role, review_document
+        open_investigation, start_task, change_scope, revisit_selection, recommend_preprocessing, set_column_role, review_document
     ]}

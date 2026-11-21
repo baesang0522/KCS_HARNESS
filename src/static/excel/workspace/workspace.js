@@ -55,6 +55,8 @@
             finalized: async function (ids, count, snapshot) {
                 await refresh();
                 if (dependencies.required(workspace).some(function (id) { return ids.includes(id); })) throw new Error("입력이나 범위가 바뀐 결과입니다. 재처리한 뒤 다시 확정하세요.");
+                var latestStage = (workspace.selection_stages || []).slice(-1)[0];
+                if (latestStage && latestStage.status === "needs_review") throw new Error("선별 결과 재검토를 먼저 완료하세요.");
                 var record = await dependencies.fromSnapshot(snapshot, []);
                 finalized = {column_ids: ids, row_count: count, at: new Date().toISOString(), evidence: record}; await save();
                 showFinal();
@@ -151,6 +153,12 @@
                 ui.current(workspace, target);
                 if (lostTarget) ui.status("삭제된 열을 작업 대상에서 제외했습니다. 남아 있는 열로 이어서 작업할 수 있습니다.");
                 await save();
+            }
+            var linkedStages = (workspace.selection_stages || []).some(function (stage) { return (stage.request.condition_ids || []).length; });
+            var versions = linkedStages && options.getConditionVersions ? await options.getConditionVersions() : null;
+            if ((workspace.selection_stages || []).length && await dependencies.reconcileStages(workspace, versions)) {
+                finalized = null; await save();
+                ui.status("선별 조건이나 입력이 바뀌었습니다. 기록된 입력 후보로 돌아가 다시 확인하세요.");
             }
             if (await dependencies.reconcile(workspace)) {
                 if (finalized && finalized.column_ids.some(function (id) { return dependencies.required(workspace).includes(id); })) finalized = null;
@@ -373,16 +381,25 @@
             }
             await refresh();
             check();
+            var stages = workspace.selection_stages || [], latest = stages[stages.length - 1];
+            var versions = options.getConditionVersions ? await options.getConditionVersions() : null;
+            window.workspaceActions.validateBinding(request, versions);
             var previous = workspace.row_filter || null, previousTarget = target;
             var selection = await window.workspaceActions.prepareScope(workspace, target, request, check);
             var next = selection.filter, nextTarget = selection.target;
             check();
+            window.workspaceActions.validateBinding(request, options.getConditionVersions ? await options.getConditionVersions() : null);
+            check();
+            selection.stage.stage_id = options.api.newRequestId();
+            selection.stage.parent_id = latest && ["intersect", "include", "exclude"].includes(request.mode) ? latest.stage_id : null;
+            selection.stage.origin_request_id = expected && expected.origin_request_id || null;
             operations.invalidate(); lastFormula = finalized = null;
             workspace.row_filter = next; target = nextTarget;
-            try { await save(); } catch (error) { workspace.row_filter = previous; target = previousTarget; workspace.target = previousTarget; throw error; }
+            workspace.selection_stages = stages.concat(selection.stage);
+            try { await save(); } catch (error) { workspace.row_filter = previous; target = previousTarget; workspace.target = previousTarget; workspace.selection_stages = stages; throw error; }
             await refresh();
             display(operations.targets());
-            var message = "작업 범위: " + sheet.describeFilter(next, workspace.columns) + " · " + selection.row_count.toLocaleString() + "행. 셀 값은 변경하지 않았습니다.";
+            var message = "작업 범위: " + sheet.describeFilter(next, workspace.columns) + " · " + selection.before_count.toLocaleString() + "행 → " + selection.row_count.toLocaleString() + "행 · 보류 " + selection.stage.pending_ids.length + "행. 셀 값은 변경하지 않았습니다.";
             ui.status(message);
             return message;
         }
@@ -506,6 +523,7 @@
                 await refresh();
                 var sampleRows = await operations.sampleRows();
                 return {workspace_id: workspace.workspace_id, pending_operation: operations.pending(),
+                    selection_stages: window.workspaceActions.stageSummaries(workspace),
                     review_required_column_ids: dependencies.required(workspace),
                     row_filter: workspace.row_filter || null, advice_subject: workspace.advice_subject || (workspace.task_type === "model_normalization" ? "model" : "company"),
                     task_type: workspace.task_type, worksheet_id: workspace.worksheet_id,

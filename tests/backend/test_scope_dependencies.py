@@ -24,7 +24,7 @@ class ScopeDependenciesTests(unittest.TestCase):
     def test_scope_tool_resolves_columns_and_returns_a_scope_action_without_operations(self):
         workspace=self.workspace()
         tool=next(tool for tool in build_request_tools({'workspace':workspace}) if tool.name=='change_scope')
-        for mode in ['replace','include','exclude']:
+        for mode in ['replace','include','exclude','intersect']:
             card=tool.invoke(dict(mode=mode,column_id='company',operator='equals',value='B'))
             decision=RequestDecision.model_validate(card)
             self.assertEqual(decision.scope_change.mode,mode)

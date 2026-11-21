@@ -2,32 +2,68 @@
 (function () {
     // 작업표 상태를 보관하지 않는다. 저장·복원은 workspace 컨트롤러가 맡는다.
     async function prepareScope(workspace, target, request, check) {
-        var sheet = window.operationsSheet;
-        if (!["replace", "include", "exclude", "clear"].includes(request.mode)) throw new Error("지원하지 않는 범위 변경입니다.");
-        var filter = request.condition;
-        if (request.mode !== "clear") {
-            if (!filter || !workspace.columns.some(function (c) { return String(c.column_id) === filter.column_id; })) throw new Error("조건 열을 다시 선택하세요.");
-            if (!["equals", "not_equals", "contains", "blank", "not_blank"].includes(filter.operator)) throw new Error("조건을 다시 선택하세요.");
-            if (typeof filter.value !== "string" || filter.value.length > 32767) throw new Error("비교할 값을 확인하세요.");
-            if (!["blank", "not_blank"].includes(filter.operator) && !filter.value.trim()) throw new Error("비교할 값을 입력하세요. 빈 셀은 ‘빈칸’ 조건을 선택하세요.");
-        } else if (filter) throw new Error("전체 행으로 돌아갈 때는 조건을 지정하지 마세요.");
-        var previous = workspace.row_filter || null;
+        var sheet = window.operationsSheet, dependencies = window.resultDependencies;
+        if (!["replace", "include", "exclude", "intersect", "clear", "revisit"].includes(request.mode)) throw new Error("지원하지 않는 범위 변경입니다.");
+        var filter = request.condition, ids = [], previous = workspace.row_filter || null;
+        if (!["clear", "revisit"].includes(request.mode)) {
+            if (!filter || (!filter.column_id && !filter.conditions)) throw new Error("조건 열을 다시 선택하세요.");
+            ids = sheet.filterColumns(filter);
+            if (ids.some(function (id) { return !workspace.columns.some(function (c) { return String(c.column_id) === id; }); })) throw new Error("조건 열을 다시 선택하세요.");
+        } else if (filter) throw new Error("범위 복귀에는 새 조건을 지정하지 마세요.");
         var next = request.mode === "clear" ? null : filter, nextTarget = target;
-        if (["include", "exclude"].includes(request.mode)) {
-            var current = await sheet.read(workspace, target, [], function () {}, check, null, null, null, null, true);
-            next = previous && previous.steps && !current.range_ids ? JSON.parse(JSON.stringify(previous)) : {base: previous, steps: [], base_ids: current.range_ids};
-            // 정렬 후에도 기존 선택 행을 유지하고, 추가 조건은 전체 작업표에서 찾는다.
-            next.steps.push({mode: request.mode, condition: filter});
-        }
-        if (["include", "exclude", "clear"].includes(request.mode)) {
+        if (request.mode !== "replace") {
             var whole = await Excel.run(async function (context) {
                 var info = await window.workspaceTable.layout(context, workspace);
                 return {row_start: info.body.rowIndex, row_count: info.body.rowCount};
             });
             nextTarget = Object.assign({}, target, whole);
         }
+        var before = await sheet.read(workspace, ["clear", "revisit"].includes(request.mode) ? nextTarget : target, ids, function () {}, check, null, null, null, null, true);
+        if (["include", "exclude", "intersect"].includes(request.mode)) {
+            next = request.mode === "intersect" ? {base: previous, steps: [], base_ids: before.rows.map(function (row) { return row.identity; })} :
+                previous && previous.steps && !before.range_ids ? JSON.parse(JSON.stringify(previous)) : {base: previous, steps: [], base_ids: before.range_ids};
+            next.steps.push({mode: request.mode, condition: filter});
+        }
+
+        if (request.mode === "revisit") {
+            var source = (workspace.selection_stages || []).find(function (stage) { return stage.stage_id === request.stage_id; });
+            if (!source || !["pending", "input"].includes(request.revisit)) throw new Error("재검토할 선별 단계를 확인하세요.");
+            next = {row_ids: (request.revisit === "pending" ? source.pending_ids : source.input_ids).slice()};
+        }
+        var input = before;
+        if (["replace", "include", "clear", "revisit"].includes(request.mode)) {
+            input = await sheet.read(Object.assign({}, workspace, {row_filter: request.mode === "revisit" ? next : null}), nextTarget, ids, function () {}, check, null, null, null, null, true);
+            if (request.mode === "revisit" && input.rows.length !== next.row_ids.length) throw new Error("기록된 후보 행이 삭제되었습니다. 현재 원본 범위를 다시 확인하세요.");
+        }
         var selected = await sheet.read(Object.assign({}, workspace, {row_filter: next}), nextTarget, [], function () {}, check, null, null, null, null, true);
-        return {filter: next, target: nextTarget, row_count: selected.rows.length};
+        var selectedIds = new Set(selected.rows.map(function (row) { return row.identity; })), pending = [], excluded = [];
+        input.rows.forEach(function (row) {
+            if (selectedIds.has(row.identity)) return;
+            var result = filter ? sheet.evaluatePredicate(filter, function (id) { return row.values[ids.indexOf(id)]; }) : false;
+            (result === null ? pending : excluded).push(row.identity);
+        });
+        var evidence = await dependencies.fromSnapshot(input, []);
+        if ((await dependencies.read(workspace, evidence)).digest !== evidence.digest) throw new Error("선별 중 입력값이나 후보가 바뀌었습니다. 다시 요청하세요.");
+        return {filter: next, target: nextTarget, row_count: selected.rows.length, before_count: before.rows.length,
+            stage: {request: JSON.parse(JSON.stringify(request)), status: "applied", review_reason: "", at: new Date().toISOString(),
+                input_ids: input.rows.map(function (row) { return row.identity; }), selected_ids: Array.from(selectedIds),
+                excluded_ids: excluded, pending_ids: pending, evidence: evidence}};
+    }
+
+    function stageSummaries(workspace) {
+        return (workspace.selection_stages || []).map(function (stage) {
+            return {stage_id: stage.stage_id, parent_id: stage.parent_id, origin_request_id: stage.origin_request_id,
+                request: stage.request, status: stage.status, review_reason: stage.review_reason, at: stage.at,
+                input_count: stage.input_ids.length, selected_count: stage.selected_ids.length,
+                excluded_count: stage.excluded_ids.length, pending_count: stage.pending_ids.length};
+        });
+    }
+
+    function validateBinding(request, versions) {
+        var ids = request.condition_ids || [], expected = request.condition_versions || {};
+        if (ids.some(function (id) { return !versions || !expected[id] || versions[id] !== expected[id]; })) {
+            throw new Error("PDF 조건이 바뀌었거나 확인되지 않았습니다. 최신 조건으로 다시 요청하세요.");
+        }
     }
 
     function assignRole(workspace, role, profiles) {
@@ -57,5 +93,5 @@
         }
     }
 
-    window.workspaceActions = {prepareScope: prepareScope, assignRole: assignRole, importColumns: importColumns};
+    window.workspaceActions = {prepareScope: prepareScope, stageSummaries: stageSummaries, validateBinding: validateBinding, assignRole: assignRole, importColumns: importColumns};
 })();

@@ -154,7 +154,12 @@
             return state ? {ready: Object.prototype.hasOwnProperty.call(state.document_notes, did) && readySheets.has(did),
                 count: (state.reviews[did] || []).length, warnings: state.document_notes[did] || []} : {ready: false, count: 0, warnings: []};
         }
-        return {load: load, refresh: refresh, prepare: prepare, bind: bind, validateWorkspace: validateWorkspace,
+        async function conditionVersions() {
+            if (!cid) return null;
+            await refresh();
+            return Object.assign({}, state.condition_versions || {});
+        }
+        return {conditionVersions: conditionVersions, load: load, refresh: refresh, prepare: prepare, bind: bind, validateWorkspace: validateWorkspace,
             extract: extract, apply: apply, previewApply: previewApply, info: info, ensureSynced: ensureSynced,
             open: async function () { show(); await refresh(); }};
     };

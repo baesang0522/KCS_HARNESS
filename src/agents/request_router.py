@@ -123,7 +123,9 @@ async def route_request(runtime, messages, *, task_context: dict, log_context=No
         if not workspace:
             raise ValueError(SHARED_MESSAGES["WORKSPACE_SETUP_REQUIRED"])
         if decision.scope_change.condition:
-            resolve_columns(workspace, [decision.scope_change.condition.column_id])
+            resolve_columns(workspace, decision.scope_change.condition.column_ids)
+        from services.investigation.bindings import bind_scope
+        bind_scope(decision.scope_change, task_context.get("investigation"))
 
     if decision.similarity:
         decision.similarity.check_workspace(workspace)

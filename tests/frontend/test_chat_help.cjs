@@ -175,7 +175,7 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
     h.window.apiClient.requestJson=async url=>url==='/chat'?{answer:'범위 확인',ui_action:scopeAction}:{documents:[]};
     h.document.getElementById('message').value='중국 제외';await h.document.getElementById('composer').emit('submit');
     await new Promise(resolve=>setImmediate(resolve));
-    assert.deepEqual(scopeRequest,{request:scopeAction.request,expected:scopeAction});
+    assert.deepEqual(JSON.parse(JSON.stringify(scopeRequest)),{request:scopeAction.request,expected:{...scopeAction,origin_request_id:"id"}});
     assert.match(h.document.getElementById('conversation').textContent,/범위 변경 완료/);
     for(const action of [
         {type:'open_group_review',column_ids:['company'],request:{match_text:'JIANGSU',output_name:'분석대상',assigned_value:'분석대상'}},

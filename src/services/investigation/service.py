@@ -137,6 +137,8 @@ def review_rows(state, document_id):
 
 def public_investigation(state):
     result = state.model_dump(mode="json", exclude={"extracted_conditions"})
+    from services.investigation.bindings import condition_version
+    result["condition_versions"] = {str(item.condition_id): condition_version(item) for item in state.conditions}
     result["reviews"] = {did: [row.model_dump(mode="json") for row in review_rows(state, did)] for did in state.document_notes}
     return result
 
@@ -183,6 +185,10 @@ def save_review(conversation, document_id, payload):
         raise ConflictError("이 검토 시트를 만든 뒤 서버의 내용이 바뀌었습니다. 수정한 시트는 유지했습니다. 현재 추출 내용을 확인하세요.")
     originals = {row_key(ReviewRow(target=item.target, source_pages=item.source_pages)): item
                  for item in state.extracted_conditions.get(document_id, []) if item.target}
+    previous = {}
+    for item in state.conditions:
+        if belongs_to_document(item, document_id) and item.target:
+            previous.setdefault(row_key(ReviewRow(target=item.target, source_pages=item.source_pages)), []).append(item)
     next_state = state.model_copy(deep=True)
     next_state.conditions = [item for item in next_state.conditions if not belongs_to_document(item, document_id)]
     for row in payload.rows:
@@ -194,6 +200,11 @@ def save_review(conversation, document_id, payload):
             source_document_id=document.document_id, source_pages=sorted(set(row.source_pages)),
             evidence=original.evidence if original else [], uncertainty=original.uncertainty if original else "",
             status="confirmed", edited=original is None)
+        unchanged = previous.get(row_key(row), [])
+        if unchanged:
+            old = unchanged.pop(0)
+            condition.condition_id = old.condition_id
+            condition.column_ids = list(old.column_ids)
         issue = source_issue(condition, conversation, state.workspace)
         if issue:
             raise ConflictError(issue)

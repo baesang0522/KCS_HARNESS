@@ -20,3 +20,14 @@ def resolve_columns(
         raise ValueError("현재 작업 표에 없는 열입니다.")
 
     return selected
+
+
+def summarize_row_scopes(value):
+    """모델에는 고정 행의 개수만 설명하고, 실행·검증용 행 ID 목록은 원본 문맥에 유지한다."""
+    if isinstance(value, dict):
+        return {(key + "_count" if key in {"row_ids", "base_ids"} and isinstance(item, list) else key):
+                (len(item) if key in {"row_ids", "base_ids"} and isinstance(item, list) else summarize_row_scopes(item))
+                for key, item in value.items()}
+    if isinstance(value, list):
+        return [summarize_row_scopes(item) for item in value]
+    return value

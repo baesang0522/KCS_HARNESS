@@ -19,5 +19,5 @@ export KCS_ENV=external
 printf '\n외부용 서버 시작 (Codex CLI 연결)\n'
 printf '화면: http://localhost:8000/static/excel/taskpane-current.html\n'
 printf 'API: http://localhost:8000/docs\n'
-printf '종료: Ctrl+C / 모델 호출에는 codex login이 필요해.\n\n'
+printf '종료: Ctrl+C / \n\n'
 exec .venv/bin/python -m uvicorn main:app --app-dir "$PROJECT_DIR/src" --host 127.0.0.1 --port 8000 --workers 1

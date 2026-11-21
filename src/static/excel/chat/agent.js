@@ -101,7 +101,7 @@
                         })(verify, result.verify);
                     } else if (step.action.type === "change_scope") {
                         chat.checkRequest(request);
-                        receipt.message = await options.getWorkspace().changeScope(step.action.request, step.action, function () { chat.checkRequest(request); });
+                        receipt.message = await options.getWorkspace().changeScope(step.action.request, Object.assign({}, step.action, {origin_request_id: step.origin_request_id || origin}), function () { chat.checkRequest(request); });
                         verify = null;
                     } else throw new Error("지원하지 않는 조사 실행입니다.");
                 }

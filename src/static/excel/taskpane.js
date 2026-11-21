@@ -76,7 +76,7 @@
             return;
         }
         if (action.type === 'workspace_action') { await workspace.assignRole(action); return; }
-        if (action.type === 'change_scope') { completeTask(await workspace.changeScope(action.request, action)); return; }
+        if (action.type === 'change_scope') { completeTask(await workspace.changeScope(action.request, Object.assign({}, action, {origin_request_id: originRequestId}))); return; }
         if (action.type === 'configure_similarity') { await workspace.configureSimilarity(action.similarity); return; }
         if (action.type === 'configure_operation') {
             if (action.operation.kind === 'set' && !action.operation.condition) throw new Error('후보를 선택해 표시하는 기능은 보류 중이야. 조건 없는 전체 행 변경은 실행하지 않아.');
@@ -104,6 +104,7 @@
         onRecovered: function (receipt) { return workspace.recovered(receipt); }});
     workspace = window.createWorkspaceController({messages: messages, recovery: recovery, api: api,
         beforeApply: function () { return investigation.ensureSynced(); },
+        getConditionVersions: function () { return investigation ? investigation.conditionVersions() : null; },
         enterConversation: chat.enterConversation, showWorkspace: function () { workspace.dismiss(); }, complete: completeTask,
         onJobCreated: function (kind, id) { return agent && agent.bind(kind, id); }, isBusy: chat.isBusy, setBusy: chat.setBusy,
         getConversationId: chat.getConversationId, newInvestigation: chat.newConversation,

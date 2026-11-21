@@ -1,5 +1,6 @@
 """선정된 데이터를 검토하고 제안을 종합·근거 확인한다."""
 from services.errors import MODEL_RESPONSE_ERROR
+from services.workspace import summarize_row_scopes
 from models.structured import ask, available_bytes, batches
 from services.recommendation.selection import top_model_combinations
 from services.recommendation.schemas import AdviceRequest, Review
@@ -47,7 +48,7 @@ async def generate_advice(
         "columns": columns,
     }
     if workspace.get("row_filter"):
-        base["row_filter"] = workspace["row_filter"]
+        base["row_filter"] = summarize_row_scopes(workspace["row_filter"])
     if workspace["task_type"] == "investigation":
         base["advice_subject"] = workspace.get("advice_subject", "company")
     if selection is not None:

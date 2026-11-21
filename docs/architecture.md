@@ -141,3 +141,10 @@ API 경로·저장 데이터·도구 이름과 인자는 파일 이동만으로 
 `services/chat/service.py`는 기존 채팅 처리, `state.py`는 대화 작업 상태, `actions.py`는 화면 동작 형식을 담당한다. 기존 함수·자료형은 유지하고 호출부·테스트·평가 스크립트의 import를 갱신했다.
 
 채팅 ID 전달 → 작업 생성 → 미리보기 → 적용 시작 → Excel 완료 보고 → 복구 확인의 로그는 [로그 안내](logging.md)를 따른다. 에이전트의 `origin_request_id`는 왕복·취소에 쓰는 `request_id`와 별도다. 정제·수식 작업은 선택적인 출처 ID를 보관하고, 서버 API가 기존 상태 전환을 관측한다. 추가 네트워크 요청이나 LangSmith 의존성·연동은 없다.
+
+
+## PDF 조건과 선별 단계 연결
+
+`agents/tools/workspace.py`의 `change_scope` → `investigation/bindings.py` 조건 검증·해시 → 기존 채팅/에이전트 범위 액션 → `workspace_actions.prepareScope` 실제 값 조회·분류 → `workspace.changeScope` 범위와 단계 기록의 동시 저장 순서다. `revisit_selection`도 같은 경로에서 기록된 행 ID로 재검토 범위를 만든다.
+
+`operations/schemas.py`가 수치/복합 조건, 행 ID 범위, 단계 요약을 정의한다. `operations_sheet.js`는 공통 조건 평가(일치/불일치/판단 불가)를 담당하고 `result_dependencies.js`는 기존 결과 의존성과 함께 선별 단계의 입력·PDF 변경 및 후속 단계 재검토를 확인한다. PDF 상태 해시 조회는 기존 조사 조회 API를 사용한다. 단계 요약만 채팅 문맥과 로그로 전달하며 전체 단계 행 목록은 통합문서 설정에 남는다. 현재 범위의 실행용 행 ID는 API에서 유지하고 `services/workspace.summarize_row_scopes`로 모델 입력만 개수로 요약한다. 상세 동작은 [단계별 선별](condition-workflow.md)에 있다.

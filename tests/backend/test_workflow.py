@@ -52,7 +52,9 @@ class WorkflowTests(unittest.TestCase):
         action = response.json()['ui_action']
         self.assertEqual(action['type'],'change_scope')
         self.assertEqual(action['expected_filter'],self.workspace['row_filter'])
-        self.assertEqual(action['request'],dict(mode='include',condition=dict(column_id='model',operator='equals',value='B')))
+        self.assertEqual(action['request']['mode'], 'include')
+        self.assertEqual(action['request']['condition'], dict(column_id='model',operator='equals',value='B'))
+        self.assertEqual(action['request']['condition_ids'], [])
         self.assertEqual(self.app.state.operation_jobs,{})
 
     def test_stale_review_decision_is_explained_without_ui_action(self):

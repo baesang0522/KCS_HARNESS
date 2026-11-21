@@ -1,5 +1,8 @@
 """화면과 자연어 요청이 공유하는 연산 계약."""
 from uuid import UUID
+from decimal import Decimal, InvalidOperation
+import re
+import math
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -60,22 +63,62 @@ class Rule(StrictModel):
 
 class RowFilter(StrictModel):
     column_id: ColumnId
-    operator: Literal["equals", "not_equals", "contains", "blank", "not_blank"]
+    operator: Literal["equals", "not_equals", "contains", "blank", "not_blank", "gt", "gte", "lt", "lte"]
     value: Text = ""
 
+
+    @model_validator(mode="after")
+    def validate_number(self):
+        if self.operator in {"gt", "gte", "lt", "lte"} and self.number(self.value) is None:
+            raise ValueError("숫자 비교 기준은 단위를 정리한 유한한 숫자로 지정하세요.")
+        return self
+
+    @staticmethod
+    def number(value):
+        text = str(value).strip()
+        if not re.fullmatch(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", text):
+            return None
+        try:
+            result = Decimal(text)
+            return result if result.is_finite() and math.isfinite(float(result)) else None
+        except (InvalidOperation, OverflowError, ValueError):
+            return None
+
+    def matches(self, value):
+        if self.operator in {"gt", "gte", "lt", "lte"}:
+            actual, wanted = self.number(value), self.number(self.value)
+            if actual is None:
+                return None
+            return {"gt": actual > wanted, "gte": actual >= wanted,
+                    "lt": actual < wanted, "lte": actual <= wanted}[self.operator]
+        return {"equals": value == self.value, "not_equals": value != self.value,
+                "contains": self.value in value, "blank": not value.strip(),
+                "not_blank": bool(value.strip())}[self.operator]
 
     @property
     def column_ids(self) -> list[str]:
         return [self.column_id]
 
 
+class FilterGroup(StrictModel):
+    operator: Literal["all", "any"]
+    conditions: list["RowFilter | FilterGroup"] = Field(min_length=1)
+
+    @property
+    def column_ids(self) -> list[str]:
+        return list(dict.fromkeys(key for item in self.conditions for key in item.column_ids))
+
+
+Predicate = RowFilter | FilterGroup
+
+
 class ScopeStep(StrictModel):
-    mode: Literal["include", "exclude"]
-    condition: RowFilter
+    mode: Literal["include", "exclude", "intersect"]
+    condition: Predicate
 
 
 class CombinedRowFilter(StrictModel):
-    base: "RowFilter | CombinedRowFilter | None" = None
+    base: "RowFilter | FilterGroup | RowIdentities | CombinedRowFilter | None" = None
     steps: list[ScopeStep] = Field(min_length=1)
     base_ids: list[Annotated[int, Field(gt=0)]] | None = None
 
@@ -88,22 +131,50 @@ class CombinedRowFilter(StrictModel):
     @property
     def column_ids(self) -> list[str]:
         return list(dict.fromkeys((self.base.column_ids if self.base else []) +
-                                  [step.condition.column_id for step in self.steps]))
+                                  [key for step in self.steps for key in step.condition.column_ids]))
 
 
-RowScope = RowFilter | CombinedRowFilter
+class RowIdentities(StrictModel):
+    row_ids: list[Annotated[int, Field(gt=0)]]
+
+    @model_validator(mode="after")
+    def unique_ids(self):
+        if len(self.row_ids) != len(set(self.row_ids)):
+            raise ValueError("선별 행 식별값이 중복되었습니다.")
+        return self
+
+    @property
+    def column_ids(self) -> list[str]:
+        return []
+
+
+RowScope = RowFilter | FilterGroup | RowIdentities | CombinedRowFilter
 
 
 class ScopeRequest(StrictModel):
-    mode: Literal["replace", "include", "exclude", "clear"]
-    condition: RowFilter | None = None
+    mode: Literal["replace", "include", "exclude", "intersect", "clear", "revisit"]
+    condition: Predicate | None = None
+    condition_ids: list[str] = Field(default_factory=list)
+    condition_versions: dict[str, str] = Field(default_factory=dict)
+    note: str = Field(default="", max_length=2000)
+    stage_id: str | None = None
+    revisit: Literal["pending", "input"] = "pending"
 
     @model_validator(mode="after")
     def validate_condition(self):
-        if (self.mode == "clear") != (self.condition is None):
+        if (self.mode in {"clear", "revisit"}) != (self.condition is None):
             raise ValueError("전체 범위 해제 외에는 조건을 지정하세요.")
-        if self.condition and self.condition.operator not in {"blank", "not_blank"} and not self.condition.value.strip():
-            raise ValueError("비교할 값을 입력하세요. 빈 셀은 빈칸 조건을 사용하세요.")
+        if (self.mode == "revisit") != (self.stage_id is not None):
+            raise ValueError("재검토할 선별 단계 ID를 지정하세요.")
+        if self.mode in {"clear", "revisit"} and (self.condition_ids or self.condition_versions):
+            raise ValueError("범위 복귀는 PDF 조건을 새로 적용하지 않습니다.")
+        pending = [self.condition] if self.condition else []
+        while pending:
+            condition = pending.pop()
+            if isinstance(condition, FilterGroup):
+                pending.extend(condition.conditions)
+            elif condition.operator not in {"blank", "not_blank"} and not condition.value.strip():
+                raise ValueError("비교할 값을 입력하세요. 빈 셀은 빈칸 조건을 사용하세요.")
         return self
 
 
@@ -272,9 +343,7 @@ class OperationRequest(StrictModel):
             condition = self.operation.condition
             for row in self.rows:
                 value = row.values[0]
-                matched = {"equals": value == condition.value, "not_equals": value != condition.value,
-                           "contains": condition.value in value, "blank": not value.strip(),
-                           "not_blank": bool(value.strip())}[condition.operator]
+                matched = condition.matches(value)
                 if not matched:
                     raise ValueError("요청한 조건에 맞지 않는 행이 포함되어 있습니다.")
         return self
@@ -301,7 +370,22 @@ class SampleRow(StrictModel):
     truncated: bool = False
 
 
+class SelectionStageSummary(StrictModel):
+    stage_id: str
+    parent_id: str | None = None
+    origin_request_id: str | None = None
+    request: ScopeRequest
+    status: Literal["applied", "needs_review"]
+    review_reason: str = ""
+    input_count: int = Field(ge=0)
+    selected_count: int = Field(ge=0)
+    excluded_count: int = Field(ge=0)
+    pending_count: int = Field(ge=0)
+    at: str
+
+
 class WorkspaceContext(StrictModel):
+    selection_stages: list[SelectionStageSummary] = Field(default_factory=list)
     pending_operation: Operation | None = None
     row_start: int | None = Field(default=None, ge=0, lt=1048576)
     workspace_id: UUID

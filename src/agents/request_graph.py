@@ -1,3 +1,4 @@
+from services.workspace import summarize_row_scopes
 import json
 from time import perf_counter
 from uuid import uuid4
@@ -47,6 +48,7 @@ async def run_request_graph(runtime, messages, task_context: dict, *, log_contex
         if task_context.get("agent_run", {}).get("code_grouping_request"):
             prompt += "\n\n" + load_agent_prompt(Path(__file__).resolve().parents[1] / "prompts/code_grouping.yml").render()
         tools = execution_tools(task_context, tools)
+    model_context = summarize_row_scopes(task_context)
     tools_by_name = {item.name: item for item in tools}
     model = runtime.model.bind_tools(
         tools,
@@ -57,7 +59,7 @@ async def run_request_graph(runtime, messages, task_context: dict, *, log_contex
     async def call_model(state: RequestState):
         started = perf_counter()
         log_event("model.started", **ids, attempt=state["failures"] + 1,
-                  task_context=task_context,
+                  task_context=model_context,
                   messages=[{"role": message.type, "content": message.content}
                             for message in state["messages"][2:]],
                   tools=list(tools_by_name))
@@ -186,7 +188,7 @@ async def run_request_graph(runtime, messages, task_context: dict, *, log_contex
                 SystemMessage(content=prompt),
                 HumanMessage(
                     content=json.dumps(
-                        {"task_context": task_context},
+                        {"task_context": model_context},
                         ensure_ascii=False,
                     )
                 ),

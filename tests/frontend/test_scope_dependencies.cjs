@@ -2,7 +2,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {createDOM}=require('../helpers/taskpane_dom.cjs');
 const {createInvestigationHost}=require('../helpers/investigation_host.cjs');
 const noop=()=>{};
-async function setup({count=4,targetCount=count}={}){
+async function setup({count=4,targetCount=count,versions=null}={}){
  const h=createDOM(),host=createInvestigationHost();
  const rows=Array.from({length:count},(_,i)=>[i+1,i%2?'B':'A',i%3?'KR':'CN',i%2?'N':'Y','old','memo','down']);
  const f=host.workspace(['id','회사','국가','판정','결과','메모','후속'],rows);
@@ -11,7 +11,8 @@ async function setup({count=4,targetCount=count}={}){
  h.window.workspaceStore={current:async()=>stored,save:async work=>{if(failSave)throw Error('저장 실패');stored=structuredClone(work);}};
  h.window.createMappingEditor=()=>({reset(){},get:()=>[],set(){},catalog(){},bind(){}});
  h.window.createSimilarityController=()=>({reset(){},show(){},busy(){}});
- const api={newRequestId:()=> 'job',requestJson:async(url,options)=>{
+ let requestNumber=0;
+ const api={newRequestId:()=> 'request-'+(++requestNumber),requestJson:async(url,options)=>{
   const body=JSON.parse(options.body);
   if(url==='/operation-jobs'){job={source:body};return job;}
   if(url.includes('/preview'))return {headers:['지정값'],changed_count:body.rows.length,rows:body.rows.map(row=>({...row,values:[job.source.operation.assigned_value]}))};
@@ -21,7 +22,7 @@ async function setup({count=4,targetCount=count}={}){
  'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js',
  'workspace/result_dependencies.js','workspace/workspace_actions.js','workspace/workspace.js'].forEach(h.load);
  const messages=[];
- controller=h.window.createWorkspaceController({messages:h.messages,api,getConversationId:()=> 'conversation',isBusy:()=>busy,
+ controller=h.window.createWorkspaceController({messages:h.messages,api,getConditionVersions:async()=>versions,getConversationId:()=> 'conversation',isBusy:()=>busy,
  setBusy:value=>{busy=value;controller?.setBusy(value);},complete:message=>messages.push(message),enterConversation:noop,
  beforeWorkspaceChange:target=>{if(!target)throw Error('기존 조사에 연결됨');},
  newInvestigation:async()=>{if(h.rejectNew)throw Error('새 조사 연결 실패');messages.push('새 조사 생성');controller.reset();}});
@@ -226,4 +227,111 @@ test('role changes stay in the workspace owner and roll back when saving fails w
  assert.equal(f.stored.columns.find(c => c.column_id === f.ids['회사']).role, 'reference');
  assert.equal(f.stored.columns.find(c => c.column_id === f.ids['국가']).role, 'company_name');
  assert.deepEqual(f.sheet.cells, before);
+});
+
+
+test('intersection retains earlier candidates in either order, after sort and with zero matches',async()=>{
+ const f=await setup(),before=structuredClone(f.sheet.cells);
+ await f.change('replace','회사','A');assert.match(await f.change('intersect','국가','KR'),/1행/);
+ assert.deepEqual(f.sheet.cells,before);
+ f.sheet.cells.splice(1,4,...f.sheet.cells.slice(1).reverse());
+ await f.apply('회사');assert.deepEqual(f.sheet.cells.slice(1).filter(r=>r[4]==='done').map(r=>r[0]),[3]);
+ const g=await setup();await g.change('replace','국가','KR');assert.match(await g.change('intersect','회사','A'),/1행/);
+ assert.match(await g.change('intersect','회사','MISSING'),/0행/);
+ assert.match(await g.change('intersect','회사','B'),/0행/);
+});
+
+
+test('numeric ranges retain exact boundaries and classify unreadable numbers as unknown',async()=>{
+ const f=await setup(),sheet=f.h.window.operationsSheet;
+ const rule={column_id:f.ids['결과'],operator:'gte',value:'0.5'};
+ assert.equal(sheet.matches('0.499999999999999999',rule),false);
+ assert.equal(sheet.matches('0.5',rule),true);
+ for(const value of ['', 'unknown', '1mm','NaN','1,000'])assert.equal(sheet.matches(value,rule),null);
+ assert.equal(sheet.matches('10',{...rule,operator:'gt',value:'2'}),true);
+ f.sheet.cells.slice(1).forEach((row,i)=>row[4]=['0.5','1.0','1.1','unknown'][i]);
+ await f.change('replace','회사','A');
+ const predicate={operator:'all',conditions:[rule,{...rule,operator:'lte',value:'1.0'}]};
+ assert.match(await f.controller.changeScope({mode:'intersect',condition:predicate}),/1행/);
+});
+test('OR of paired company and item predicates never forms a cross product',async()=>{
+ const f=await setup(),sheet=f.h.window.operationsSheet;
+ const atom=(key,value)=>({column_id:f.ids[key],operator:'equals',value});
+ const condition={operator:'any',conditions:[{operator:'all',conditions:[atom('회사','A'),atom('국가','CN')]},
+ {operator:'all',conditions:[atom('회사','B'),atom('국가','KR')]}]};
+ assert.match(await f.controller.changeScope({mode:'replace',condition}),/2행/);
+ await f.apply('회사');assert.deepEqual(f.sheet.cells.slice(1).filter(row=>row[4]==='done').map(row=>row[0]),[1,2]);
+ const uncertain={operator:'all',conditions:[atom('회사','A'),{column_id:f.ids['결과'],operator:'gt',value:'0'}]};
+ assert.equal(sheet.evaluatePredicate(uncertain,id=>id===f.ids['회사']?'B':'unknown'),false);
+ assert.equal(sheet.evaluatePredicate(uncertain,id=>id===f.ids['회사']?'A':'unknown'),null);
+});
+
+
+test('selection records distinguish unknowns, survive sorting and revisit only saved pending rows',async()=>{
+ const f=await setup();f.sheet.cells.slice(1).forEach((row,i)=>row[4]=['0.5','1','1.1','unknown'][i]);
+ const condition={operator:'all',conditions:[{column_id:f.ids['결과'],operator:'gte',value:'0.5'},
+ {column_id:f.ids['결과'],operator:'lte',value:'1'}]};
+ await f.controller.changeScope({mode:'intersect',condition,note:'두께 mm 확인'}, {workspace_id:'work',expected_filter:null,origin_request_id:'original-request'});
+ const stage=f.stored.selection_stages[0];
+ assert.deepEqual(stage.input_ids,[1,2,3,4]);assert.deepEqual(stage.selected_ids,[1,2]);assert.deepEqual(stage.excluded_ids,[3]);assert.deepEqual(stage.pending_ids,[4]);
+ assert.equal(stage.origin_request_id,'original-request');
+ f.sheet.cells.splice(1,4,...f.sheet.cells.slice(1).reverse());
+ assert.equal((await f.controller.context()).selection_stages[0].status,'applied');
+ await f.controller.changeScope({mode:'revisit',stage_id:stage.stage_id,revisit:'pending',condition:null});
+ await f.apply('회사','0.75','결과');
+ assert.equal(f.sheet.cells.find(r=>r[0]===1)[4],'0.5');assert.equal(f.sheet.cells.find(r=>r[0]===4)[4],'0.75');
+ await f.controller.changeScope({mode:'intersect',condition,note:'사용자가 확인한 두께'});
+ assert.equal(f.stored.selection_stages.at(-1).selected_ids[0],4);
+ assert.equal(f.stored.selection_stages.at(-1).status,'applied');
+});
+test('changed PDF versions invalidate dependent steps and reject stale requests before changing scope',async()=>{
+ const versions={pdf:'version1'},f=await setup({versions});
+ const request={mode:'intersect',condition:{column_id:f.ids['회사'],operator:'equals',value:'A'},condition_ids:['pdf'],condition_versions:{pdf:'version1'},note:'확인한 기업'};
+ await f.controller.changeScope(request);await f.change('intersect','국가','KR');
+ versions.pdf='version2';
+ const ctx=await f.controller.context();assert(ctx.selection_stages.every(stage=>stage.status==='needs_review'));
+ const before=JSON.stringify(f.stored),cells=structuredClone(f.sheet.cells);
+ await assert.rejects(()=>f.controller.changeScope(request),/PDF 조건/);
+ assert.equal(JSON.stringify(f.stored),before);assert.deepEqual(f.sheet.cells,cells);
+ await f.change('replace','회사','B');assert.equal(f.stored.selection_stages.at(-1).status,'applied');
+});
+test('failed scope save rolls back both the filter and new stage; cancelled request creates neither',async()=>{
+ const f=await setup();await f.change('replace','회사','A');const previous=structuredClone(f.stored);
+ f.failSave=true;await assert.rejects(()=>f.change('intersect','국가','KR'),/저장 실패/);f.failSave=false;
+ assert.deepEqual(f.stored,previous);
+ await assert.rejects(()=>f.controller.changeScope({mode:'clear'},null,()=>{throw Error('cancelled')}),/cancelled/);
+ assert.deepEqual(f.stored,previous);
+});
+test('revisit refuses deleted row identities instead of claiming full restoration',async()=>{
+ const f=await setup();await f.change('replace','회사','A');const stage=f.stored.selection_stages[0];
+ f.sheet.cells.pop();f.table.count--;
+ await assert.rejects(()=>f.controller.changeScope({mode:'revisit',stage_id:stage.stage_id,revisit:'input'}),/삭제/);
+});
+
+
+test('intersection freezes its input identities so later edits cannot introduce earlier excluded rows',async()=>{
+ const f=await setup();await f.change('replace','회사','A');await f.change('intersect','국가','KR');
+ f.sheet.cells.find(row=>row[0]===2)[1]='A';
+ const scope=f.h.window.operationsSheet.compileFilter(f.stored.row_filter);
+ const selected=f.sheet.cells.slice(1).filter(row=>scope(id=>row[f.work.columns.find(c=>c.column_id===id).column_index],row[0]));
+ assert.deepEqual(selected.map(row=>row[0]),[3]);
+ assert.equal((await f.controller.context()).selection_stages.at(-1).status,'needs_review');
+});
+
+test('PDF company then numeric item selection can revisit unknowns and reselect all original candidates',async()=>{
+ const f=await setup({versions:{company:'v1',item:'v1'}});
+ f.sheet.cells.slice(1).forEach((row,i)=>{row[1]=['A','B','A','C'][i];row[4]=['0.5','unknown','1.1','0.75'][i]});
+ const atom=(key,operator,value)=>({column_id:f.ids[key],operator,value});
+ const companies={operator:'any',conditions:[atom('회사','equals','A'),atom('회사','equals','B')]};
+ const thickness={operator:'all',conditions:[atom('결과','gte','0.5'),atom('결과','lte','1')]};
+ const applyCondition=(condition,key)=>f.controller.changeScope({mode:'intersect',condition,condition_ids:[key],condition_versions:{[key]:'v1'},note:'PDF 확인 기준; 두께는 mm'});
+ await applyCondition(companies,'company');await applyCondition(thickness,'item');
+ const itemStage=f.stored.selection_stages.at(-1);
+ assert.deepEqual(itemStage.selected_ids,[1]);assert.deepEqual(itemStage.pending_ids,[2]);assert.deepEqual(itemStage.excluded_ids,[3]);
+ await f.controller.changeScope({mode:'revisit',stage_id:itemStage.stage_id,revisit:'pending'});
+ await f.apply('회사','0.75','결과');
+ await f.controller.changeScope({mode:'revisit',stage_id:itemStage.stage_id,revisit:'input'});
+ await applyCondition(thickness,'item');
+ assert.deepEqual(f.stored.selection_stages.at(-1).selected_ids,[1,2]);assert.equal(f.stored.selection_stages.at(-1).pending_ids.length,0);
+ assert.equal(f.stored.selection_stages.at(-1).status,'applied');assert.equal(f.sheet.cells.find(r=>r[0]===4)[4],'0.75');
 });

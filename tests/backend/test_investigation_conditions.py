@@ -221,6 +221,18 @@ class InvestigationConditionTests(unittest.TestCase):
         return self.client.put(self.base + '/reviews/' + self.did, json=dict(
             revision=state['revision'], expected_rows=expected if expected is not None else state['reviews'][self.did], rows=rows))
 
+    def test_unchanged_review_ids_and_versions_survive_reorder_but_edited_conditions_do_not(self):
+        self.extract()
+        first = self.save_rows(self.read()['reviews'][self.did]).json()
+        original = {item['target']['specification']: item['condition_id'] for item in first['conditions']}
+        second = self.save_rows(list(reversed(first['reviews'][self.did]))).json()
+        self.assertEqual(first['condition_versions'], second['condition_versions'])
+        changed = copy.deepcopy(second['reviews'][self.did])
+        changed[0]['target']['requirements'] = '사용자가 수정한 기준'
+        third = self.save_rows(changed).json()
+        self.assertEqual(third['conditions'][1]['condition_id'], original[changed[1]['target']['specification']])
+        self.assertNotEqual(third['conditions'][0]['condition_id'], original[changed[0]['target']['specification']])
+
     def test_review_reorder_edits_delete_and_add_preserve_original_evidence(self):
         self.extract()
         original = copy.deepcopy(self.read()['reviews'][self.did])
