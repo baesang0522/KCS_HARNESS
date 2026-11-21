@@ -148,3 +148,8 @@ API 경로·저장 데이터·도구 이름과 인자는 파일 이동만으로 
 `agents/tools/workspace.py`의 `change_scope` → `investigation/bindings.py` 조건 검증·해시 → 기존 채팅/에이전트 범위 액션 → `workspace_actions.prepareScope` 실제 값 조회·분류 → `workspace.changeScope` 범위와 단계 기록의 동시 저장 순서다. `revisit_selection`도 같은 경로에서 기록된 행 ID로 재검토 범위를 만든다.
 
 `operations/schemas.py`가 수치/복합 조건, 행 ID 범위, 단계 요약을 정의한다. `operations_sheet.js`는 공통 조건 평가(일치/불일치/판단 불가)를 담당하고 `result_dependencies.js`는 기존 결과 의존성과 함께 선별 단계의 입력·PDF 변경 및 후속 단계 재검토를 확인한다. PDF 상태 해시 조회는 기존 조사 조회 API를 사용한다. 단계 요약만 채팅 문맥과 로그로 전달하며 전체 단계 행 목록은 통합문서 설정에 남는다. 현재 범위의 실행용 행 ID는 API에서 유지하고 `services/workspace.summarize_row_scopes`로 모델 입력만 개수로 요약한다. 상세 동작은 [단계별 선별](condition-workflow.md)에 있다.
+
+
+## 수식의 다른 시트 참조
+
+`start_task` / `calculate_formula`의 `reference_sheet_names` → 기존 수식 액션 → `formula.js` → `formula_sheet.readFormulaContext` 순서로 요청한 참조 시트 이름을 전달한다. 현재 작업표 입력 ID와 참조 시트 이름은 별개다. `FormulaReferenceSheet`에 실제 이름·범위·표본·표 머리글/데이터 주소를 담고, `planner.py`에서 이를 기존 수식 모델 입력에 포함한다. 출력은 기존처럼 현재 작업 시트에 작성한다. 적용 전 참조 시트 ID로 이름·범위·표 머리글을 재검사한다. 별도의 기업 분류 연산이나 Y/N 쓰기 도구는 없다.

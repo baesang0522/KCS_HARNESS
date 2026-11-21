@@ -6,7 +6,7 @@ const vm=require('node:vm');
 function setup(fail=false, config={}) {
     let handlers,timer;
     const requests=[],messages=[],status=[],bodies=[],events=[];
-    let validations=0, scopeSeen;
+    let validations=0, scopeSeen, referencesSeen;
     const preview={preview_id:'preview',plan:{actions:[{target_range:'C2:C90001',anchor_cell:'C2'}]}};
     const result={address:'Sheet1!C2:C90001',row_count:90000,targets:[{row_start:1,row_count:90000,column_start:2,column_count:1}]};
     const sandbox={window:{setTimeout:fn=>{timer=fn;},clearTimeout(){}}};
@@ -22,7 +22,7 @@ function setup(fail=false, config={}) {
             if(url.endsWith('/approve'))return preview;
             return {formula_job_id:'job',status:'PREVIEW_READY',preview};
         }},
-        excel:{readFormulaContext:async()=>({row_count:90000}),prepareFormulaPreview:async()=>({target_range:'C2:C90001',anchor_cell:'C2'}),
+        excel:{readFormulaContext:async(target,names)=>{referencesSeen=names;return {row_count:90000,...(config.references ? {reference_sheets:config.references} : {})};},prepareFormulaPreview:async()=>({target_range:'C2:C90001',anchor_cell:'C2'}),
             validateFormulaPreview:async()=>{},applyFormulaPreview:async (p,s,progress)=> {
                 writes++;
                 progress('수식 작성',1000,90000);
@@ -37,7 +37,7 @@ function setup(fail=false, config={}) {
         beginRequest:()=>({controller:new AbortController()}),checkRequest(){},endRequest(){},setBusy(){},
         complete:x=>messages.push(x)
     });
-    return {start:async()=>{controller.openAndSelect('합산',{workspace_id:'work',column_ids:['a','b'],...(config.origin ? {origin_request_id:config.origin} : {})});await timer();},apply:()=>handlers.apply(),requests,messages,status,bodies,events,get scope(){return scopeSeen;},get writes(){return writes;}};
+    return {start:async()=>{controller.openAndSelect('합산',{workspace_id:'work',column_ids:['a','b'],...(config.referenceNames ? {reference_sheet_names:config.referenceNames} : {}),...(config.origin ? {origin_request_id:config.origin} : {})});await timer();},apply:()=>handlers.apply(),requests,messages,status,bodies,events,get scope(){return scopeSeen;},get referencesSeen(){return referencesSeen;},get writes(){return writes;}};
 }
 test('failed partial apply never reports completion and cannot be retried by button',async()=>{
     const h=setup(true);await h.start();await h.apply();await h.apply();
@@ -96,4 +96,13 @@ test('formula creation retains its chat origin and unknown writes report the cli
     assert.equal(h.bodies.find(x=>x.url==='/formula-jobs').body.origin_request_id,'chat-origin');
     assert.equal(h.bodies.find(x=>x.url.endsWith('/unknown')).body.error_message,'partial error');
     assert(!h.requests.some(x=>x.endsWith('/complete')));
+});
+
+
+test('formula controller forwards named references to Excel and actual contexts to the planning job',async()=>{
+ const references=[{worksheet_id:'reference',sheet_name:'거래처검토_ref',address:'거래처검토_ref!A1:C102'}];
+ const f=setup(false,{referenceNames:['거래처검토'],references});await f.start();
+ assert.deepEqual(f.referencesSeen,['거래처검토']);
+ assert.deepEqual(f.bodies.find(x=>x.url==='/formula-jobs').body.reference_sheets,references);
+ assert.equal(f.writes,0);
 });

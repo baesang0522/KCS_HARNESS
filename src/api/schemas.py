@@ -26,6 +26,7 @@ class ChatRequest(BaseModel):
 
 
 class ConfirmSelectionAction(BaseModel):
+    reference_sheet_names: list[str] | None = None
     output: OperationOutput | None = None
     instruction: str | None = None
     type: Literal["confirm_selection"]

@@ -21,11 +21,18 @@ def build_workspace_tools(task_context: dict):
             ],
             input_column_ids: list[str] | None = None,
             output: OperationOutput | None = None,
+            reference_sheet_names: list[str] | None = None,
     ) -> dict:
         """새 업무를 시작하거나 수식·조건부 비교를 요청한다.
         A열의 마지막 단어가 B열에 있으면 추출하는 요청은 formula이며 두 입력 열 ID를 지정한다.
         현재 작업 시트가 있어도 사용자가 업무 전환을 명시하면 사용한다.
-        같은 업무 안의 전처리, 치환, 분리 요청에는 사용하지 않는다."""
+        같은 업무 안의 전처리, 치환, 분리 요청에는 사용하지 않는다.
+        다른 시트를 조회하는 수식은 reference_sheet_names에 사용자가 말한 시트 이름을 지정한다.
+        input_column_ids에는 현재 작업표 열만 넣는다. 다른 시트의 열 ID를 사용자에게 요구하지 않는다."""
+        if reference_sheet_names:
+            if task_type != "formula" or any(not name.strip() for name in reference_sheet_names):
+                raise ValueError("참조 시트 이름은 수식 요청에만 지정하세요.")
+            reference_sheet_names = list(dict.fromkeys(name.strip() for name in reference_sheet_names))
         if output:
             if task_type != "formula" or not workspace:
                 raise ValueError("작업표의 수식 요청에만 저장 위치를 지정하세요.")
@@ -48,6 +55,7 @@ def build_workspace_tools(task_context: dict):
             "intent": "start_task",
             "task_type": task_type,
             "formula_column_ids": input_column_ids,
+            "formula_reference_sheets": reference_sheet_names,
             "formula_output": output.model_dump() if output else None,
             "operation": None,
             "answer": answer,

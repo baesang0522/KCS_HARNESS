@@ -41,6 +41,19 @@ def validate_output_scope(plan: FormulaPlan, source: CreateFormulaJobRequest) ->
             raise ValueError("수식 결과 범위가 원본 선택 범위와 겹칩니다.")
 
 
+def validate_reference_sheets(plan: FormulaPlan, source: CreateFormulaJobRequest) -> None:
+    if not source.reference_sheets:
+        return
+    known = {source.sheet_name.casefold(), *(sheet.sheet_name.casefold() for sheet in source.reference_sheets)}
+    qualifier = re.compile(r"(?:'((?:[^']|'')+)'|([\w가-힣]+))!")
+    for action in plan.actions:
+        formula = re.sub(r'"(?:[^"]|"")*"', '""', action.formula)
+        for match in qualifier.finditer(formula):
+            name = (match.group(1) or match.group(2)).replace("''", "'")
+            if name.casefold() not in known:
+                raise ValueError("실제로 확인한 참조 시트 이름으로 수식을 다시 준비하세요.")
+
+
 def parse_formula_plan(raw: str) -> FormulaPlan:
     try:
         return FormulaPlan.model_validate_json(raw)
@@ -81,6 +94,7 @@ async def generate_formula_plan(source, planning_context, runtime) -> FormulaPla
                 "samples": [row.model_dump() for row in source.samples],
                 "input_columns": [column.model_dump() for column in source.input_columns],
             },
+            "reference_sheets": [sheet.model_dump(mode="json") for sheet in source.reference_sheets],
             "sheet_context": (
                 source.sheet_context.model_dump(mode="json")
                 if source.sheet_context else None
@@ -91,4 +105,5 @@ async def generate_formula_plan(source, planning_context, runtime) -> FormulaPla
     plan = parse_formula_plan(response.content.strip())
     validate_source_reference(plan, source)
     validate_output_scope(plan, source)
+    validate_reference_sheets(plan, source)
     return plan

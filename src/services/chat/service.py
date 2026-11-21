@@ -65,6 +65,8 @@ def decision_action(decision, workspace):
         action = {"type": "confirm_selection", "task_type": decision.task_type}
         if decision.formula_output:
             action["output"] = decision.formula_output.model_dump()
+        if decision.formula_reference_sheets:
+            action["reference_sheet_names"] = decision.formula_reference_sheets
         if decision.formula_instruction:
             action["instruction"] = decision.formula_instruction
         if decision.task_type == "formula" and workspace:

@@ -28,6 +28,7 @@ class RequestDecision(BaseModel):
     similarity: SimilaritySettings | None = None
     group_review_request: GroupReviewRequest | None = None
     scope_change: ScopeRequest | None = None
+    formula_reference_sheets: list[str] | None = None
     formula_instruction: str | None = Field(default=None, min_length=1, max_length=8000)
     formula_column_ids: list[str] | None = Field(default=None, min_length=1, max_length=20)
     answer: str = Field(min_length=1, max_length=8000)

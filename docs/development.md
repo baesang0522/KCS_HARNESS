@@ -390,3 +390,6 @@ Git의 새 파일 목록을 확인합니다. API 소스에는 테스트용 실�
 ## 조건 선별 회귀 확인
 
 `test_condition_workflow.py`는 숫자 경계, 복합 범위의 API 왕복, PDF 조건 연결 검증을 검사한다. `test_investigation_conditions.py`는 검토 순서 변경 시 ID 유지와 수정 조건 버전 변경을 검사한다. 프론트 `test_scope_dependencies.cjs`는 실제 범위 컨트롤러로 교집합, 복합 조건, 보류 재처리, 조건 변경 전파, 행 삭제, 저장 실패를 검사한다. 대표 시나리오는 기업 선별 → 품목 수치 선별 → 보류 행 수정 → 원래 입력 후보 재선별이다. 모델/PDF 추출의 의미 정확성과 실제 Excel 호스트는 자동 테스트 결과와 구분해 기록한다.
+
+
+수식 참조 회귀는 `test_formula_references.py`와 `test_formula_references.cjs`에서 확인한다. 채팅의 시트 이름 전달, 실제 데이터 주소 제공, 존재하지 않는 참조 이름 거부, 동명 후보 확인, 고정 조회 범위와 행 상대참조, 계획 후 구조 변경 차단을 검사한다. 실제 Excel의 COUNTIF 계산과 모델의 도구 선택은 모의 테스트와 구분해 검증한다.

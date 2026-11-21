@@ -43,7 +43,7 @@
                 if (!options.isReady()) {
                     throw new Error("엑셀 안에서 추가 기능을 열어주세요.");
                 }
-                selection = await excel.readFormulaContext(options.getTarget ? await options.getTarget(inputScope, !useWorkspace) : null);
+                selection = await excel.readFormulaContext(options.getTarget ? await options.getTarget(inputScope, !useWorkspace) : null, inputScope && inputScope.reference_sheet_names || []);
                 if (options.validateSource) await options.validateSource(selection);
                 options.checkRequest(run);
                 var names = (selection.input_columns || []).map(function (column) { return column.header; }).join(", ");

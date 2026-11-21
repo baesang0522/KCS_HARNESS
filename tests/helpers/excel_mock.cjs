@@ -134,7 +134,7 @@ function createHost({rows=90000, sourceColumns=2, tableColumns, data, autoFillTa
     vm.createContext(sandbox);
     sandbox.window.errorMessages=JSON.parse(fs.readFileSync(path.join(__dirname,'../../src/services/error_messages.json'),'utf8'));
     host.load=file=>vm.runInContext(fs.readFileSync(path.join(__dirname,'../../src/static/excel',file),'utf8'),sandbox);
-    host.window=sandbox.window; host.range=range;
+    host.window=sandbox.window; host.range=range; host.context=context;
     host.selection={worksheet_id:'sheet',sheet_name:'Sheet1',address:selection.address,row_start:1,column_start:0,row_count:rows,column_count:sourceColumns};
     return host;
 }

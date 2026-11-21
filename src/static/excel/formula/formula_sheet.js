@@ -10,7 +10,60 @@
         }
     }
 
-    async function readFormulaContext(target) {
+    async function readReferenceSheet(context, sheet) {
+        var used = sheet.getUsedRange(true);
+        sheet.load("id,name"); used.load("address,rowIndex,columnIndex,rowCount,columnCount");
+        sheet.tables.load("items/id");
+        await context.sync();
+        var sample = used.getCell(0, 0).getResizedRange(Math.min(20, used.rowCount) - 1, Math.min(20, used.columnCount) - 1);
+        sample.load("text");
+        var tables = sheet.tables.items.map(function (table) {
+            var header = table.getHeaderRowRange(), range = table.getRange(), body = table.getDataBodyRange();
+            header.load("values"); range.load("address"); body.load("address");
+            return {table: table, header: header, range: range, body: body};
+        });
+        await context.sync();
+        return {worksheet_id: sheet.id, sheet_name: sheet.name, address: used.address,
+            row_start: used.rowIndex, column_start: used.columnIndex, row_count: used.rowCount, column_count: used.columnCount,
+            samples: sample.text.map(function (cells) { return {cells: cells}; }),
+            tables: tables.map(function (item) { return {table_id: String(item.table.id), address: item.range.address,
+                data_address: item.body.address, headers: item.header.values[0].map(String)}; })};
+    }
+
+    async function readReferenceSheets(context, names, sourceId) {
+        if (!names || !names.length) return [];
+        var sheets = context.workbook.worksheets;
+        sheets.load("items/id,items/name"); await context.sync();
+        var references = [], seen = new Set();
+        for (var name of names) {
+            if (typeof name !== "string" || !name.trim()) throw new Error("참조할 시트 이름을 알려주세요.");
+            var wanted = name.trim().toLowerCase();
+            var matches = sheets.items.filter(function (sheet) { return sheet.name.toLowerCase() === wanted; });
+            if (!matches.length) matches = sheets.items.filter(function (sheet) { return sheet.name.toLowerCase().startsWith(wanted); });
+            if (matches.length !== 1) throw new Error("참조 시트 ‘" + name + "’를 하나로 확인하지 못했습니다. 시트 이름을 지정하세요: " +
+                (matches.length ? matches : sheets.items).map(function (sheet) { return sheet.name; }).join(", "));
+            var sheet = matches[0];
+            if (sheet.id === sourceId || seen.has(sheet.id)) continue;
+            seen.add(sheet.id); references.push(await readReferenceSheet(context, sheet));
+        }
+        return references;
+    }
+
+    async function validateReferenceSheets(selection) {
+        if (!selection.reference_sheets || !selection.reference_sheets.length) return;
+        await Excel.run(async function (context) {
+            for (var expected of selection.reference_sheets) {
+                var actual = await readReferenceSheet(context, context.workbook.worksheets.getItem(expected.worksheet_id));
+                function layout(value) {
+                    return JSON.stringify([value.worksheet_id, value.sheet_name, value.address, value.row_start, value.column_start,
+                        value.row_count, value.column_count, value.tables]);
+                }
+                if (layout(actual) !== layout(expected)) throw new Error("참조 시트의 이름·범위·열 구성이 바뀌었습니다. 수식 계획을 다시 확인하세요.");
+            }
+        });
+    }
+
+    async function readFormulaContext(target, referenceNames) {
         requireFormulaHost();
         return await Excel.run(async function (context) {
             var range = target ? context.workbook.worksheets.getItem(target.worksheet_id)
@@ -40,6 +93,7 @@
             await context.sync();
 
             return {
+                reference_sheets: await readReferenceSheets(context, referenceNames, sheet.id),
                 task_type: "formula",
                 worksheet_id: sheet.id,
                 sheet_name: sheet.name,
@@ -197,6 +251,7 @@
     }
 
     async function validateFormulaPreview(preview, selection) {
+        await validateReferenceSheets(selection);
         // 승인 전에는 실제 셀에 수식을 쓰지 않는다. 계산 검증은 승인 후에 수행한다.
         var current = await prepareFormulaPreview(preview, selection);
         var ranges = current.target_ranges || [current.target_range];

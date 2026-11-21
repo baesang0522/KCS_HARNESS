@@ -64,6 +64,20 @@ class FormulaSheetContext(BaseModel):
         return self
 
 
+class FormulaReferenceTable(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    table_id: str
+    address: str
+    data_address: str
+    headers: tuple[str, ...]
+
+
+class FormulaReferenceSheet(FormulaSheetContext):
+    worksheet_id: str = Field(min_length=1, max_length=256)
+    sheet_name: str = Field(min_length=1, max_length=256)
+    tables: tuple[FormulaReferenceTable, ...] = ()
+
+
 class FormulaInputColumn(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -95,9 +109,12 @@ class CreateFormulaJobRequest(BaseModel):
     input_columns: tuple[FormulaInputColumn, ...] = Field(default=(), max_length=20)
     samples: tuple[FormulaSampleRow, ...] = Field(min_length=1, max_length=20)
     sheet_context: FormulaSheetContext | None = None
+    reference_sheets: tuple[FormulaReferenceSheet, ...] = ()
 
     @model_validator(mode="after")
     def validate_selection(self):
+        if len({sheet.worksheet_id for sheet in self.reference_sheets}) != len(self.reference_sheets):
+            raise ValueError("수식 참조 시트가 중복되었습니다.")
         if self.row_start + self.row_count > 1048576:
             raise ValueError("선택 범위가 Excel 행 경계를 벗어납니다.")
         if self.column_start + self.column_count > 16384:

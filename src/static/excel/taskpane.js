@@ -87,7 +87,7 @@
             return;
         }
         if (action.type !== 'confirm_selection') throw new Error('지원하지 않는 작업 요청이야.');
-        if (action.task_type === 'formula') formula.openAndSelect(action.instruction || instruction, {workspace_id: action.workspace_id, column_ids: action.column_ids, output: action.output, origin_request_id: originRequestId || null});
+        if (action.task_type === 'formula') formula.openAndSelect(action.instruction || instruction, {workspace_id: action.workspace_id, column_ids: action.column_ids, output: action.output, reference_sheet_names: action.reference_sheet_names || [], origin_request_id: originRequestId || null});
         else await workspace.open(action.task_type);
     }
     document.querySelectorAll('[data-task]').forEach(function (button) {
