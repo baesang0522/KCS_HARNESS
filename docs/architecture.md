@@ -35,6 +35,25 @@ flowchart TD
 
 루트 `start-external.sh`는 외부 모델용 서버 실행, `scripts/evaluate_routing.py`·`evaluate_agent.py`는 실제 모델을 호출하는 합성 데이터 점검이다.
 
+## 프롬프트 역할과 수정 위치
+
+프롬프트를 전부 합쳐 보내지 않는다. `request_graph.py`는 일반 요청에 `request_tools.yml`, 목표 실행 중에는 **대신** `execution.yml`을 사용한다. 대표 부호 연결을 현재 요청에서 명시한 경우만 `code_grouping.yml`을 추가한다. 수식 계획은 별도 모델 호출로 생성한다.
+
+| 위치 | 담당하는 판단 |
+| --- | --- |
+| `prompts/request_tools.yml` | 최신 요청의 도구 선택, 입력 열 해석, 조사 조건·실행 기록·미리보기 후속 요청 |
+| `prompts/execution.yml` | 실제 결과를 보고 다음 단계 선택, 완료한 작업 반복 방지, 유사도 매칭 적용 후 조건부 변경 |
+| `prompts/formula.yml` | Excel 2021 수식 JSON, 실제 주소·전체 행 범위·참조 시트·빈 출력 위치, 검증 실패 수정 |
+| `agents/tools/*.py`, `agents/execution_tools.py` | 각 도구의 인자·기본값·단일 작업 동작 설명과 검증 |
+| `prompts/code_grouping.yml` | 명시적으로 요청한 100점 대표 부호 연결 절차 |
+| `prompts/investigation.yml`, `recommendation.yml` | PDF 조건 추출, 데이터 분석 의견 생성 |
+
+도구 선택 오류는 요청 분류, 다음 작업 누락은 실행, 잘못된 수식·범위는 수식 프롬프트에서 고친다. 같은 사례의 실행 절차를 요청 프롬프트에도 통째로 복사하지 않는다. 서로 독립된 모델 호출에서 필요한 안전 규칙(실제 열 ID, 미리보기와 적용 완료 구분 등)은 각 역할에 남긴다. 인자 설명은 도구 정의를 우선하며 실제 검증 코드를 프롬프트로 대체하지 않는다.
+
+`PYTHONPATH=src KCS_ENV=external .venv/bin/python scripts/evaluate_routing.py`로 현재 설정 모델의 요청별 경로를 검사한다. 방법 안내/AI 분석, 정확 일치 Y/N 수식·실패 후 재요청, 명시한 참조/결과 열의 PDF 추출, 역할 변경, 현재/전체 조건부 변경, 교집합 선별, PDF 검토 전처리, 이전 목표 미승계, 유사도 매칭 전후와 단순 매칭 종료를 포함한다. 선택 도구뿐 아니라 실제 입력·결과 열 ID, 범위, 참조 시트, 반환값도 검사한다.
+
+이 평가는 합성 문맥으로 모델과 기존 도구의 결정을 확인하며 Excel 셀을 읽거나 쓰지 않는다. 모델 호출 권한·비용이 필요하고 결과는 모델 응답에 따라 달라질 수 있다. `evaluate_agent.py`는 합성 Excel 응답을 통해 조회→비교→완료 왕복을 확인한다. 수식 검증 재시도·미리보기·적용 상태와 실제 계산 규칙은 `tests/backend/`, `tests/frontend/`의 자동 테스트에서 별도로 검증한다.
+
 ## 요청 입구와 모델의 도구 선택
 
 | 위치 | 역할 |
