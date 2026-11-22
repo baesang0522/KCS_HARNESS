@@ -16,6 +16,7 @@ from langgraph.graph.message import add_messages
 from pydantic import ValidationError
 
 from agents.request_tools import build_request_tools
+from agents.review_target import check_review_tool, ReviewTargetError
 from services.errors import MODEL_RESPONSE_ERROR
 from services.errors import RepeatedReadError
 from services.debug_log import log_event
@@ -120,6 +121,7 @@ async def run_request_graph(runtime, messages, task_context: dict, *, log_contex
             if selected is None:
                 raise ValueError("제공된 도구 중 하나를 선택하세요.")
 
+            check_review_tool(task_context, call["name"], call["args"])
             decision = await selected.ainvoke(call["args"])
             log_event("tool.completed", **tool_ids, result=decision,
                       elapsed_ms=round((perf_counter() - started) * 1000))
@@ -135,6 +137,8 @@ async def run_request_graph(runtime, messages, task_context: dict, *, log_contex
             if state["failures"] >= 1:
                 if isinstance(error, RepeatedReadError):
                     raise
+                if isinstance(error, ReviewTargetError):
+                    return {"decision": clarification("PDF 검토 시트 대상 연결을 확인하지 못했어요. 첨부 문서 이름을 알려주세요. 작업표에는 실행하지 않았습니다.")}
                 return {
                     "decision": clarification(
                         MODEL_RESPONSE_ERROR

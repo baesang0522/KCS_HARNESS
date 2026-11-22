@@ -44,3 +44,23 @@ test('failed write leaves no retryable approval or false completion',async()=>{
  const h=await setup();await h.run();h.sheet.writePreprocess=async()=>{throw Error('미리보기 이후 검토 표가 바뀌었어요.');};
  await h.messages.command('적용');assert.equal(h.action('적용'),undefined);assert.match(h.chatText(),/바뀌었/);assert.doesNotMatch(h.chatText(),/완료했어/);assert.equal(h.busy,false);
 });
+test('document action reads and updates 16 review rows while a 3036-row workspace is active',async()=>{
+ const {createInvestigationHost}=require('../helpers/investigation_host.cjs');
+ const x=createInvestigationHost();x.window.apiClient={newRequestId:()=> 'review-id'};x.load('documents/review_sheet.js');
+ const work=x.addSheet('조사 원본',[['해외거래처상호'],...Array.from({length:3036},()=>['원본 보존'])]);
+ const rows=Array.from({length:16},(_,i)=>({target:{kind:'supplier',group:'1',category:'회사 '+i,company_name:'  Company '+i+' Co., Ltd.  '},source_pages:[1]}));
+ const review=x.window.investigationSheet;await review.ensure('c','d','해외거래처.pdf',rows);
+ x.sheets[1].name='내 거래처 목록';work.activate();
+ assert.deepEqual(JSON.parse(JSON.stringify(await review.context('c','d'))),[{document_id:'d',kind:'supplier',sheet_name:'내 거래처 목록'}]);
+ assert.deepEqual(JSON.parse(JSON.stringify(await review.context('c','missing'))),[]);
+ const h=createDOM();h.load('documents/review_preprocess.js');const calls=[];
+ const rules=[{operation:'uppercase'},{operation:'remove_words',words:['CO.,','CO.','CO','LTD.','LTD','PTE.','PTE']},{operation:'trim'}];
+ const controller=h.window.createReviewPreprocess({messages:h.messages,sheet:review,getConversationId:()=> 'c',isBusy:()=>false,setBusy(){},
+ api:{requestJson:async(url,opts)=>{const data=JSON.parse(opts.body);calls.push(data);assert.equal(data.rows.length,16);
+  assert.deepEqual(data.operation.rules,rules);return {rows:data.rows.map((r,i)=>({excel_row:r.excel_row,values:['COMPANY '+i]}))};}}});
+ const before=x.writes.length;await controller.run({document_id:'d',kind:'supplier',column:'회사명',rules});
+ assert.equal(x.writes.length,before);await h.messages.command('적용');
+ assert.equal(x.writes.length,before+1);assert.notEqual(x.writes.at(-1).sheet,work.id);
+ assert.equal(work.cells.length,3037);assert.ok(work.cells.slice(1).every(r=>r[0]==='원본 보존'));
+ assert.deepEqual(JSON.parse(JSON.stringify((await review.read('c','d')).rows.map(r=>r.target.company_name))),Array.from({length:16},(_,i)=>'COMPANY '+i));
+});

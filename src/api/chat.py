@@ -78,6 +78,7 @@ async def chat(payload: ChatRequest, request: Request):
                 request_id=ids["request_id"],
                 message=payload.message,
                 workspace=workspace,
+                review_sheets=[item.model_dump(mode="json") for item in payload.review_sheets],
                 advice_requested=payload.advice_requested,
             )
     except Exception as error:

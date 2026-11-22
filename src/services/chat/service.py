@@ -99,12 +99,12 @@ def decision_action(decision, workspace):
 
 
 async def process_chat(*, runtime, repository, formula_jobs: dict, operation_jobs: dict, conversation_id: str,
-                       request_id: str, message: str, workspace=None, advice_requested: bool = False) -> dict:
+                       request_id: str, message: str, workspace=None, advice_requested: bool = False, review_sheets=None) -> dict:
     async with repository.edit(conversation_id) as conversation:
         for turn in conversation.turns:
             if turn.request_id == request_id:
                 if (turn.question != message or turn.request_context != workspace
-                        or turn.advice_requested != advice_requested):
+                        or turn.advice_requested != advice_requested or turn.review_sheets != (review_sheets or [])):
                     raise ConflictError("같은 요청 ID에 다른 질문 또는 작업 대상이 전달됐습니다.")
 
                 return dict(conversation_id=conversation_id, request_id=request_id,
@@ -123,7 +123,7 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
         try:
             context = build_task_context(state, formula_jobs, operation_jobs=operation_jobs,
                                          conversation_id=conversation_id, workspace=workspace,
-                                         investigation=investigation_context(conversation, workspace))
+                                         investigation=investigation_context(conversation, workspace, review_sheets))
             from services.agent_runs.service import active_context
             context["agent_run"] = active_context(conversation, workspace)
             context["user_request"] = message
@@ -157,7 +157,7 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
 
         await conversation.save_turn(StoredTurn(
             request_id=request_id, question=message, answer=answer, reasoning=reasoning,
-            ui_action=action, request_context=workspace, advice_requested=advice_requested,
+            ui_action=action, request_context=workspace, review_sheets=review_sheets or [], advice_requested=advice_requested,
         ))
         if decision.intent == "start_task":
             state.task_type = workspace["task_type"] if workspace and decision.task_type == "formula" else decision.task_type

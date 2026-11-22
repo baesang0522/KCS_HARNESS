@@ -184,6 +184,21 @@
             }
         });
     }
+    async function sheetContext(cid, did) {
+        requireExcel();
+        return Excel.run(async function (context) {
+            var meta = await metadata(context, cid, did);
+            if (!meta) return [];
+            var entries = meta.entries.map(function (entry) {
+                var sheet = context.workbook.worksheets.getItemOrNullObject(entry.worksheet_id);
+                sheet.load('name'); return {kind: entry.kind, sheet: sheet};
+            });
+            await context.sync();
+            return entries.filter(function (entry) { return !entry.sheet.isNullObject; }).map(function (entry) {
+                return {document_id: did, kind: entry.kind, sheet_name: entry.sheet.name};
+            });
+        });
+    }
     async function markSaved(cid, did, rows) {
         requireExcel();
         await Excel.run(async function (context) {
@@ -194,6 +209,6 @@
             context.workbook.settings.add(key(cid, did), meta); await context.sync();
         });
     }
-    window.investigationSheet = {ensure: ensure, isReady: isReady, read: read, markSaved: markSaved, canonical: canonical, parse: parse, values: values,
+    window.investigationSheet = {context: sheetContext, ensure: ensure, isReady: isReady, read: read, markSaved: markSaved, canonical: canonical, parse: parse, values: values,
         preprocessTargets: preprocessTargets, readPreprocess: readPreprocess, writePreprocess: writePreprocess};
 })();

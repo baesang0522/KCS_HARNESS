@@ -10,6 +10,7 @@
     });
     var chat = window.createChatController({
         api: api, getWorkspace: function () { return workspace; }, closeTaskCards: function () { if (workspace) workspace.dismiss(); },
+        getReviewSheets: function () { return investigation ? investigation.reviewContext() : []; },
         resetTasks: function () { if (messages) messages.reset(); if (workspace) workspace.reset(); if (formula) formula.reset(); updateWorkspaceButton(); },
         handleUIAction: handleAction, runAgent: function (action, request) { return agent.run(action, request); },
         beforeManualAction: function () { if (agent) agent.detach(); },

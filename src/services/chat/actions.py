@@ -4,6 +4,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from services.operations.schemas import ColumnId, Rule
 from services.formula.schemas import FormulaOutput
 
+class ReviewSheetContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document_id: UUID
+    kind: Literal["supplier", "item", "other"]
+    sheet_name: str = Field(min_length=1, max_length=255)
+
+
 class DocumentAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: Literal["document_action"]

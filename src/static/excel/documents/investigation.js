@@ -159,7 +159,16 @@
             await refresh();
             return Object.assign({}, state.condition_versions || {});
         }
-        return {conditionVersions: conditionVersions, load: load, refresh: refresh, prepare: prepare, bind: bind, validateWorkspace: validateWorkspace,
+        async function reviewContext() {
+            if (!cid || !state || !sheet || !sheet.context) return [];
+            var expected = version, entries = [];
+            for (var did of Object.keys(state.reviews || {})) {
+                entries = entries.concat(await sheet.context(cid, did));
+                if (expected !== version) throw new Error('대화가 바뀌었어요.');
+            }
+            return entries;
+        }
+        return {reviewContext: reviewContext, conditionVersions: conditionVersions, load: load, refresh: refresh, prepare: prepare, bind: bind, validateWorkspace: validateWorkspace,
             extract: extract, apply: apply, previewApply: previewApply, info: info, ensureSynced: ensureSynced,
             open: async function () { show(); await refresh(); }};
     };

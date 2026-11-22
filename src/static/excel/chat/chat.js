@@ -276,6 +276,7 @@
                         request_id: api.newRequestId()
                     };
                     var context = await options.getWorkspace().context();
+                    var reviewSheets = options.getReviewSheets ? await options.getReviewSheets() : [];
                     checkChat(run);
                     if (advice && (!context || context.workspace_id !== advice.workspace_id)) {
                         throw new Error("분석 대상이 바뀌었습니다. 원하는 열을 지정해 다시 요청하세요.");
@@ -283,7 +284,7 @@
                     if (advice && advice.column_ids) context = Object.assign({}, context, {target_column_ids: advice.column_ids});
                     pendingRequest = Object.assign({}, run.request, {
                         advice_requested: !!advice,
-                        message: value, workspace: context
+                        message: value, workspace: context, review_sheets: reviewSheets
                     });
                     saveSession();
                 } else {

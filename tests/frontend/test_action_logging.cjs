@@ -17,7 +17,7 @@ test('taskpane forwards the chat origin to operation configuration and formula s
     });
     h.window.createFormulaUI = () => ({});
     h.window.createFormulaController = () => ({dismiss(){},openAndSelect:(instruction,scope)=>seen.push({instruction,scope})});
-    h.window.createInvestigationController = () => ({});
+    h.window.createInvestigationController = () => ({reviewContext: async () => []});
     h.window.createReviewPreprocess = () => ({});
     h.window.createDocumentsController = () => ({});
     h.window.createAgentController = () => ({});

@@ -96,7 +96,7 @@ def save_investigation(conversation, payload):
     return next_state
 
 
-def investigation_context(conversation, workspace):
+def investigation_context(conversation, workspace, review_sheets=None):
     state = conversation.investigation
     if state.workspace and not same_workspace(state.workspace.model_dump(), workspace):
         return {"scope": "different_workspace", "notice": "다른 작업표의 조사 조건은 전달하지 않았습니다."}
@@ -116,13 +116,30 @@ def investigation_context(conversation, workspace):
             changed = True
     if changed:
         state.revision += 1
+    documents = [document.summary() for document in conversation.documents.values()
+                 if not document.link or not document.link.workspace or
+                 same_workspace(document.link.workspace.model_dump(), workspace)]
+    layouts = {"supplier": ("거래처검토", ["그룹명", "회사명", "근거 페이지"]),
+               "item": ("품목검토", ["그룹", "HS", "규격", "조건", "근거 페이지"]),
+               "other": ("조건검토", ["그룹", "내용", "근거 페이지"])}
+    review_targets = []
+    sheet_names = {(str(item["document_id"]), item["kind"]): item["sheet_name"] for item in (review_sheets or [])}
+    for document in documents:
+        did = document["document_id"]
+        if did not in state.document_notes:
+            continue
+        rows = review_rows(state, did)
+        kinds = {row.target.kind for row in rows} or {item.target.kind for item in state.extracted_conditions.get(did, []) if item.target}
+        for kind in sorted(kinds):
+            name, headers = layouts[kind]
+            review_targets.append({"document_id": did, "filename": document["filename"], "kind": kind,
+                "review_name": name, "sheet_name_prefix": name + "_", "sheet_name": sheet_names.get((did, kind)), "columns": headers,
+                "saved_row_count": sum(row.target.kind == kind for row in rows)})
     return {"scope": "bound" if state.workspace else "unbound", "goal": state.goal,
             "active_condition_id": str(state.active_condition_id) if state.active_condition_id else None,
             "conditions": [item.model_dump(mode="json") for item in state.conditions],
-            "document_notes": state.document_notes,
-            "documents": [document.summary() for document in conversation.documents.values()
-                          if not document.link or not document.link.workspace or
-                          same_workspace(document.link.workspace.model_dump(), workspace)]}
+            "document_notes": state.document_notes, "documents": documents, "review_targets": review_targets}
+
 
 
 def belongs_to_document(condition, document_id):

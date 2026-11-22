@@ -29,6 +29,7 @@ async function setup(saved) {
     h.load('chat/chat.js'); h.load('chat/agent.js');
     const close = () => { if (h.help) h.help.dismiss(); h.workspace.dismiss(); };
     h.chat = h.window.createChatController({api: h.api, getWorkspace: () => h.workspace,
+        getReviewSheets: async () => h.reviewSheets || [],
         closeTaskCards: close, resetTasks: () => h.workspace.reset(),
         beforeSend:()=>h.beforeSend && h.beforeSend(),
         handleUIAction: async (action, instruction, origin) => { h.actions.push(action); h.origins.push(origin); },
@@ -273,4 +274,11 @@ test('each chat action carries its own originating request after pending state i
     }
     assert.deepEqual(h.origins, h.requests.filter(r => r.url === '/chat').map(r => r.body.request_id));
     assert.notEqual(h.origins[0], h.origins[1]);
+});
+
+test('chat sends review sheet identity separately from the transaction workspace', async()=>{
+ const h=await setup();h.reviewSheets=[{document_id:'pdf',kind:'supplier',sheet_name:'내 거래처 검토'}];
+ h.node('message').value='내 거래처 검토의 회사명을 대문자로 바꿔줘';await h.chat.sendMessage();
+ const request=h.requests.find(r=>r.url==='/chat').body;
+ assert.deepEqual(request.review_sheets,h.reviewSheets);assert.equal(request.workspace.row_count,90000);
 });

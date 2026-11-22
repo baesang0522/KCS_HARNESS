@@ -82,6 +82,27 @@ class InvestigationConditionTests(unittest.TestCase):
                     conditions=[{key: item[key] for key in ('condition_id', 'title', 'description', 'status', 'column_ids')}
                                 for item in state['conditions']])
 
+    def test_chat_receives_registered_review_sheet_names_and_rejects_changed_retry_context(self):
+        self.extract()
+        captured = {}
+        async def route(runtime, messages, *, task_context, **kwargs):
+            captured.update(task_context)
+            return RequestDecision(intent='general', answer='검토 대상 확인'), []
+        payload = dict(conversation_id=self.cid, request_id=str(uuid4()), message='내 품목 목록의 규격을 대문자로 바꿔줘',
+            workspace=self.workspace, review_sheets=[dict(document_id=self.did, kind='item', sheet_name='내 품목 목록'),
+                dict(document_id=str(uuid4()), kind='supplier', sheet_name='다른 대화 자료')])
+        with patch('services.chat.service.route_request', new=route):
+            response = self.client.post('/chat', json=payload)
+            self.assertEqual(response.status_code, 200, response.text)
+            targets = captured['investigation']['review_targets']
+            self.assertEqual(len(targets), 1)
+            self.assertEqual(targets[0]['sheet_name'], '내 품목 목록')
+            self.assertEqual(targets[0]['document_id'], self.did)
+            self.assertEqual(targets[0]['kind'], 'item')
+            self.assertEqual(self.client.post('/chat', json=payload).status_code, 200)
+            payload['review_sheets'][0]['sheet_name'] = '다른 목록'
+            self.assertEqual(self.client.post('/chat', json=payload).status_code, 409)
+
     def test_extract_preserves_evidence_and_different_item_bounds_without_excel_jobs(self):
         result = self.extract()
         self.assertEqual(result.status_code, 200, result.text)

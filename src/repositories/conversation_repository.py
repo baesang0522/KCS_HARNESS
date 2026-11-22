@@ -20,6 +20,7 @@ class StoredTurn:
     reasoning: list[str]
     ui_action: dict | None = None
     request_context: dict | None = None
+    review_sheets: list[dict] = field(default_factory=list)
     advice_requested: bool = False
     recommendation_progress: str | None = None
 

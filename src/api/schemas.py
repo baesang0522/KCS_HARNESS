@@ -1,4 +1,4 @@
-from services.chat.actions import DocumentAction, WorkspaceAction, FormulaOutputAction
+from services.chat.actions import DocumentAction, WorkspaceAction, FormulaOutputAction, ReviewSheetContext
 from uuid import UUID
 from typing import Annotated, Literal
 from services.similarity import SimilaritySettings
@@ -13,6 +13,7 @@ class ChatRequest(BaseModel):
     request_id: UUID
     message: str = Field(min_length=1, max_length=8000)
     workspace: WorkspaceContext | None = None
+    review_sheets: list[ReviewSheetContext] = Field(default_factory=list)
     advice_requested: bool = False
 
     @field_validator("message")
