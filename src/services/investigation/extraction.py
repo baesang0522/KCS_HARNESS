@@ -2,11 +2,13 @@
 import asyncio
 import logging
 from pathlib import Path
+from time import perf_counter
 from prompts.loader import load_agent_prompt
 from services.documents.chunks import flatten_sources, group_sources, next_source_chunk
 from services.documents.service import find_document
 from services.documents.tables import is_model_table, split_model_cell, split_company_name
 from services.errors import ConflictError, ModelProcessingError
+from services.debug_log import log_event
 from models.structured import OutputLengthError, ask
 from services.investigation.schemas import Condition, Evidence, Extraction, ItemTarget, SupplierTarget
 from services.investigation.service import belongs_to_document, check_revision, same_workspace, target_description
@@ -70,6 +72,10 @@ async def extract_conditions(conversation, payload, runtime, request_id):
         raise ConflictError("문서와 조사의 연결 작업표가 다릅니다. 연결을 확인하세요.")
     next_state = state.model_copy(deep=True)
     catalog = model_table_extraction(document)
+    ids = dict(document_id=document_id, request_id=request_id)
+    log_event("pdf.extraction.route", **ids, mode="table" if catalog is not None else "llm",
+              pages=[dict(page_number=page.page_number, readable=page.readable, tables=len(page.tables),
+                          model_tables=sum(is_model_table(table) for table in page.tables)) for page in document.pages])
     if catalog is not None:
         conditions, warnings = catalog
         next_state.conditions.extend(conditions)
@@ -92,10 +98,15 @@ async def extract_conditions(conversation, payload, runtime, request_id):
                 if request_id in conversation.cancelled_requests:
                     raise ConflictError("사용자가 조사 조건 읽기를 중지했습니다.")
                 data = {**base, "pages": group_sources(batch), "has_more": offset + len(batch) < len(entries)}
+                started = perf_counter()
+                log_event("pdf.model.started", **ids, offset=offset, sources=len(batch),
+                          context_sources=len(context), timeout_seconds=runtime.settings.llm.timeout_seconds + 10)
                 try:
                     extracted = await asyncio.wait_for(
                         ask(runtime.advice_model, prompt, "conditions", data, Extraction),
                         timeout=runtime.settings.llm.timeout_seconds + 10)
+                    log_event("pdf.model.completed", **ids, offset=offset, conditions=len(extracted.conditions),
+                              elapsed_ms=round((perf_counter() - started) * 1000))
                     break
                 except OutputLengthError as error:
                     if request_id in conversation.cancelled_requests:
@@ -110,6 +121,10 @@ async def extract_conditions(conversation, payload, runtime, request_id):
                                    document_id, offset, len(batch), chunk_size)
                     # 잘린 응답은 버리고 같은 위치부터 재시도한다. 나머지 원문도 다음 호출에서 처리한다.
                     batch = batch[:chunk_size]
+                except TimeoutError as error:
+                    raise ModelProcessingError(
+                        "PDF 추출 중 모델 응답 대기가 시간 초과로 중단됐습니다. "
+                        "조건은 저장하지 않았습니다. 내부 모델 서버의 응답 상태를 확인해 주세요.") from error
                 except Exception as error:
                     raise ModelProcessingError("조사 조건 응답을 확인하지 못했습니다. 조건은 저장하지 않았습니다. 다시 읽어 주세요.") from error
             available = {(item["page_number"], item["source_id"]): item for item in [*context, *batch]}

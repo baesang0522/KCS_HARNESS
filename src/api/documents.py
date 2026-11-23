@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import UUID
+from time import perf_counter
 
 from fastapi import APIRouter, Query, Request
 
@@ -8,6 +9,7 @@ from services.documents.schemas import DocumentLink, ReferenceDocument
 from services.documents.service import MAX_UPLOAD_BYTES, check_capacity, extract_in_process, find_document
 from services.errors import ConflictError, DocumentError, NotFoundError
 from services.investigation.service import invalidate_document
+from services.debug_log import log_event
 
 router = APIRouter(prefix="/conversations/{conversation_id}/documents", tags=["documents"])
 
@@ -23,6 +25,8 @@ async def upload_document(conversation_id: UUID, document_id: UUID, request: Req
                           filename: str = Query(min_length=1, max_length=255)):
     repository = request.app.state.conversations
     cid, did = str(conversation_id), str(document_id)
+    ids = dict(conversation_id=cid, document_id=did)
+    log_event("pdf.upload.received", **ids)
     async with repository.request(cid, did):
         async with repository.edit(cid) as conversation:
             if did in conversation.documents:
@@ -43,8 +47,18 @@ async def upload_document(conversation_id: UUID, document_id: UUID, request: Req
             with source.open("rb") as stream:
                 if b"%PDF-" not in stream.read(1024):
                     raise DocumentError("PDF 파일의 내용을 확인할 수 없습니다.")
-            pages = await extract_in_process(source, output, request.app.state.document_slots)
+            started = perf_counter()
+            log_event("pdf.read.started", **ids, upload_bytes=size)
+            try:
+                pages = await extract_in_process(source, output, request.app.state.document_slots)
+            except Exception as error:
+                log_event("pdf.read.failed", level="ERROR", **ids, error_type=type(error).__name__,
+                          error_message=str(error), elapsed_ms=round((perf_counter() - started) * 1000))
+                raise
             document = ReferenceDocument(document_id=document_id, filename=name, pages=pages)
+            log_event("pdf.read.completed", **ids, page_count=len(document.pages),
+                      table_counts=[len(page.tables) for page in document.pages],
+                      elapsed_ms=round((perf_counter() - started) * 1000))
             async with repository.edit(cid) as conversation:
                 if did in conversation.cancelled_requests:
                     raise ConflictError("사용자가 PDF 읽기를 중지했습니다.")

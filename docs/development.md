@@ -463,3 +463,14 @@ Git의 새 파일 목록을 확인합니다. API 소스에는 테스트용 실�
 검증: 백엔드 259개 통과. 모의 모델에서 반복 length 후 80개 대상·전체 원문·공통 근거 보존, 마지막 부분 재분할, 중간 성공 뒤 최소 구절 실패의 저장 방지, 사용자 중지 후 재시도 방지를 확인했다. 실제 내부망 모델 서버는 실행하지 않았다.
 
 내부망 반영: `src/models/structured.py`, `src/services/investigation/extraction.py` 두 파일을 함께 반영하고 앱 서버를 재시작한다. 이전 thinking 비활성화가 아직 반영되지 않았다면 `src/runtime.py`의 내부망 normal_extra/advice_extra에서 enable_thinking=False도 함께 적용한다. config.yml의 기존 출력 한도와 의존성은 변경하지 않았다. 서버 재시작으로 대화의 PDF 연결이 사라지면 재첨부한다.
+
+
+### PDF 502·처리 경로 진단 — 2026-11-23
+
+- [x] `api/documents.py`에서 pdf.upload.received, pdf.read.started/completed/failed와 읽기 시간·페이지별 표 개수를 기록한다.
+- [x] `api/investigation.py`에서 pdf.extraction.received/completed/failed와 원래 예외의 종류·메시지·경과 시간을 기록한다. 모델 처리 오류를 앱 자체에서 502로 반환하므로 상태 코드만으로 프록시 장애라고 단정하지 않는다.
+- [x] `services/investigation/extraction.py`에서 pdf.extraction.route의 mode=table/llm 및 페이지별 표 인식 결과, pdf.model.started/completed의 호출 분량·시간을 기록한다. 모델 대기 시간 초과에는 구분 가능한 한국어 안내를 반환한다.
+
+백엔드 263개 통과. 모의 오류로 업로드 읽기 실패·모델 연결 실패·시간 초과를 구분하고 원인 로그를 확인했다. 실제 모델명.pdf(4페이지)는 PyMuPDF 2.1 / pymupdf4llm 2.1에서 표 직접 추출로 236개, 약 0.27초에 처리됐다. LLM 호출은 없었다. 내부망의 실제 배포 코드·프록시·모델 서버는 직접 확인하지 않았다.
+
+내부 반영은 위 실행 코드 세 파일을 함께 반영하고 앱 서버를 재시작한 뒤 PDF를 재첨부한다. pdf.extraction.route가 table이면 LLM 없이 처리하며, llm이면 표 직접 추출 조건이 맞지 않은 것이다. pages의 tables/model_tables로 해당 페이지를 확인한다. pdf.extraction.failed의 cause_type/cause_message가 앱에서 잡은 원인이다. 앱 시작 로그만 있고 해당 요청의 received가 없으면 요청 도달 경로·실제 배포 코드·로그 수집 위치부터 확인한다. 받은 로그 없이 경과 시간 추정만으로 원인을 확정하지 않는다.
