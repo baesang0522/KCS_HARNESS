@@ -133,7 +133,7 @@ def investigation_context(conversation, workspace, review_sheets=None):
         for kind in sorted(kinds):
             name, headers = layouts[kind]
             review_targets.append({"document_id": did, "filename": document["filename"], "kind": kind,
-                "review_name": name, "sheet_name_prefix": name + "_", "sheet_name": sheet_names.get((did, kind)), "columns": headers,
+                "review_name": name, "sheet_name": sheet_names.get((did, kind)), "columns": headers,
                 "saved_row_count": sum(row.target.kind == kind for row in rows)})
     return {"scope": "bound" if state.workspace else "unbound", "goal": state.goal,
             "active_condition_id": str(state.active_condition_id) if state.active_condition_id else None,

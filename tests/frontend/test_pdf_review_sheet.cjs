@@ -52,7 +52,7 @@ test('empty rows mean deletion, manual rows allow blank evidence, different chat
 test('snapshot conflicts and partial write errors preserve all existing sheets',async()=>{
     const h=setup();await h.review.ensure('c','d','파일.pdf',[row()]);
     await assert.rejects(h.review.ensure('c','d','파일.pdf',[row('다른 서버값')]),/기존 검토 시트/);
-    const before=structuredClone(h.sheets[0].cells);let count=0;h.beforeSync=()=>{if(++count===2)throw Error('Excel 실패');};
+    const before=structuredClone(h.sheets[0].cells);h.beforeSync=()=>{if(h.sheets.length>1)throw Error('Excel 실패');};
     await assert.rejects(h.review.ensure('c','new','새 파일.pdf',[row()]),/작성이 완료되지/);
     assert.deepEqual(h.sheets[0].cells,before);
 });
@@ -123,4 +123,25 @@ test('original numeric groups stay in workbook evidence after visible names are 
  const meta=await h.review.ensure('c','d','파일.pdf',draft.rows);
  assert.deepEqual(plain(meta.original_rows),original);assert.equal(meta.original_rows[0].target.group,'1');
  assert.equal(h.sheets[0].cells[3].length,3);assert.equal(meta.baseline[0].target.category,'수정한 그룹명');
+});
+test('new review sheets use normalized PDF basenames with consecutive collision suffixes',async()=>{
+ const h=setup();h.addSheet('해외거래처',[['기존 자료']]);
+ await h.review.ensure('c','a','해외거래처.pdf',[row()]);
+ await h.review.ensure('c','b','해외거래처.PDF',[row()]);
+ await h.review.ensure('c','c','품목.pdf',[row()]);
+ assert.deepEqual(h.sheets.map(s=>s.name),['해외거래처','해외거래처 1','해외거래처 2','품목']);
+ const writes=h.writes.length;h.sheets[1].name='사용자가 정한 이름';h.sheets[1].cells[4][1]='수동 수정';
+ await h.review.ensure('c','a','해외거래처.pdf',[row()]);
+ assert.equal(h.writes.length,writes);assert.equal(h.sheets[1].name,'사용자가 정한 이름');assert.equal(h.sheets[1].cells[4][1],'수동 수정');
+ const x=setup();x.addSheet('COMPANY',[['보존']]);await x.review.ensure('c','d','company.pdf',[row()]);assert.equal(x.sheets[1].name,'company 1');
+});
+test('PDF names fit Excel naming rules and mixed document tables remain separate',async()=>{
+ const h=setup(),long='아주긴파일이름'.repeat(8);
+ await h.review.ensure('c','a',long+'.pdf',[row()]);await h.review.ensure('c','b',long+'.pdf',[row()]);
+ assert.equal(h.sheets[0].name.length,31);assert.equal(h.sheets[1].name.length,31);assert.match(h.sheets[1].name,/ 1$/);
+ await h.review.ensure('c','d',"'파일[]:*?/\\이름'.pdf",[row()]);assert.doesNotMatch(h.sheets[2].name,/[\[\]:*?/\\]/);assert.doesNotMatch(h.sheets[2].name,/^'|'$/);
+ await h.review.ensure('c','e','History.pdf',[row()]);assert.equal(h.sheets[3].name,'History 1');
+ const item={target:{kind:'item',group:'규격',hs_codes:[],specification:'A',requirements:''},source_pages:[1]};
+ await h.review.ensure('c','f','혼합.pdf',[row(),item]);assert.deepEqual(h.sheets.slice(4).map(s=>s.name),['혼합','혼합 1']);
+ assert.equal((await h.review.read('c','f')).rows.length,2);
 });

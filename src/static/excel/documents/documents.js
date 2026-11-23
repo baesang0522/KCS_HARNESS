@@ -28,10 +28,11 @@
             items.forEach(function (item) {
                 var row = node('article'); row.className = 'document-item'; row.appendChild(node('strong', item.filename));
                 var info = options.reviewInfo ? options.reviewInfo(item.document_id) : {ready: false, warnings: []};
-                row.appendChild(node('p', item.page_count + '쪽 · ' + (info.ready ? info.count + '개 항목' : '추출 대기')));
+                row.appendChild(node('p', item.page_count + '쪽 · ' + (info.ready ? info.count + '개 항목' : info.processing ? '추출 중…' : info.failed ? '추출 실패' : '추출 대기')));
                 if (item.unreadable_pages.length) row.appendChild(node('p', '텍스트 없음: ' + item.unreadable_pages.join(', ') + '쪽'));
                 info.warnings.forEach(function (warning) { row.appendChild(node('p', warning)); });
-                row.appendChild(node('p', info.ready ? '검토 시트에서 수정한 뒤 아래 ‘수정 내용 반영’을 누르세요.' : '채팅으로 이 PDF의 추출 재시도를 요청하세요.'));
+                if (info.ready) row.appendChild(node('p', '검토 시트에서 수정한 뒤 아래 ‘수정 내용 반영’을 누르세요.'));
+                else if (info.failed) row.appendChild(node('p', '채팅으로 이 PDF의 추출 재시도를 요청하세요.'));
                 list.appendChild(row);
             });
             updateControls();

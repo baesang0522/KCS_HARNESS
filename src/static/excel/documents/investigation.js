@@ -1,7 +1,7 @@
 "use strict";
 (function () {
     window.createInvestigationController = function (options) {
-        var cid = null, state = null, version = 0, binding = null, readySheets = new Set();
+        var cid = null, state = null, version = 0, binding = null, readySheets = new Set(), extracting = new Set(), failed = new Set();
         var sheet = options.sheet || window.investigationSheet;
         function endpoint() { return '/conversations/' + encodeURIComponent(cid) + '/investigation'; }
         function status(text) { document.getElementById('documents-status').textContent = text; if (options.messages) options.messages.say(text); }
@@ -21,7 +21,7 @@
             state = result; render(); return state;
         }
         async function load(id) {
-            version++; cid = id; state = null; binding = null; readySheets = new Set();
+            version++; cid = id; state = null; binding = null; readySheets = new Set(); extracting = new Set(); failed = new Set();
             var expected = version;
             try {
                 await refresh();
@@ -61,7 +61,8 @@
         async function extract(documentId, filename) {
             if (options.isBusy() || !cid) return;
             var expected = version, run = options.beginRequest(), url = endpoint();
-            options.setBusy(true); show();
+            extracting.add(documentId); failed.delete(documentId);
+            options.setBusy(true); show(); render();
             try {
                 await prepare(); options.checkRequest(run);
                 if (expected !== version) return;
@@ -88,12 +89,12 @@
             } catch (error) {
                 if (expected === version) {
                     if (run.cancelled || error.name === 'AbortError') { await options.reportStop(run); status('추출을 중지했어요. 첨부한 PDF는 유지돼요.'); }
-                    else status(error.message);
+                    else { failed.add(documentId); status(error.message); }
                 }
                 return false;
-            } finally { options.endRequest(run); options.setBusy(false); render(); }
+            } finally { if (expected === version) extracting.delete(documentId); options.endRequest(run); options.setBusy(false); render(); }
         }
-        async function apply(documentId, approvedDraft) {
+        async function apply(documentId, approvedDraft, batch) {
             if (options.isBusy() || !cid) return;
             var expected = version, conversationId = cid, url = endpoint();
             options.setBusy(true);
@@ -115,8 +116,8 @@
                 }
                 try { await sheet.markSaved(conversationId, documentId, state.reviews[documentId] || []); }
                 catch (error) { throw new Error('서버에는 반영했지만 시트 기록 저장에 실패했어요. 채팅으로 수정 내용 반영을 다시 요청해 주세요. ' + error.message); }
-                if (expected === version) { render(); status('수정 내용을 반영했어요. 이후 대화에서는 이 값을 사용해요. 거래 행 추출은 아직 실행하지 않았어요.'); return true; }
-            } catch (error) { if (expected === version) status(error.message); }
+                if (expected === version) { render(); if (!batch) status('수정 내용을 반영했어요. 이후 대화에서는 이 값을 사용해요.'); return true; }
+            } catch (error) { if (expected === version) status((batch && batch.completed ? 'PDF ' + batch.completed + '개는 반영했지만 나머지 반영을 중단했어요. ' : '') + error.message); }
             finally { options.setBusy(false); }
         }
         async function ensureSynced() {
@@ -139,20 +140,31 @@
                 for (var id of ids) {
                     var draft = await sheet.read(cid, id);
                     if (!draft) throw new Error('PDF 검토 시트를 먼저 준비해 주세요.');
-                    drafts.push({id: id, draft: draft});
+                    var current = state.reviews[id] || [];
+                    var changed = sheet.canonical(draft.rows) !== sheet.canonical(current) || sheet.canonical(draft.baseline) !== sheet.canonical(current);
+                    var pending = state.conditions.some(function (condition) { return condition.source_document_id === id && condition.status !== 'confirmed'; });
+                    drafts.push({id: id, draft: draft, changed: changed, pending: pending});
                 }
-                if (!drafts.length) { status('반영할 PDF 검토 내용이 없어요.'); return; }
+                var changedDrafts = drafts.filter(function (item) { return item.changed; });
+                drafts = changedDrafts.length ? changedDrafts : drafts.filter(function (item) { return item.pending; });
+                if (!drafts.length) { status('반영할 수정 내용이 없어요.'); return; }
+                var label = changedDrafts.length ? '수정 내용' : '검토 내용';
                 if (version !== expected) return;
                 var rows = drafts.flatMap(function (item) { return item.draft.rows.map(function (row) { return [{supplier: '거래처', item: '품목', other: '기타'}[row.target.kind] + ' · ' + sheet.values(row).slice(0, -1).join(' · '), (row.source_pages || []).join(', ')]; }); });
-                options.messages.confirm('PDF ' + drafts.length + '개의 검토 내용 ' + rows.length + '건을 조사 조건에 반영할까? 거래 행 선별이나 셀 변경은 실행하지 않아.', {apply: async function () {
+                options.messages.confirm('PDF ' + drafts.length + '개의 ' + label + ' ' + rows.length + '건을 반영할까?', {apply: async function () {
                     if (cid !== conversationId || version !== expected) throw new Error('조사가 바뀌었어요. 다시 요청하세요.');
-                    for (var item of drafts) { if (!await apply(item.id, item.draft)) break; }
+                    var batch = {completed: 0};
+                    for (var item of drafts) {
+                        if (!await apply(item.id, item.draft, batch)) return;
+                        batch.completed++;
+                    }
+                    status('PDF ' + batch.completed + '개의 ' + label + '을 반영했어요.');
                 }, cancel: function () { status('조사 조건 반영을 취소했어요. 검토 시트 수정값은 남아 있어요.'); }}, ['조건 내용', '근거 페이지'], rows);
             } finally { options.setBusy(false); }
         }
         function info(did) {
             return state ? {ready: Object.prototype.hasOwnProperty.call(state.document_notes, did) && readySheets.has(did),
-                count: (state.reviews[did] || []).length, warnings: state.document_notes[did] || []} : {ready: false, count: 0, warnings: []};
+                processing: extracting.has(did), failed: failed.has(did), count: (state.reviews[did] || []).length, warnings: state.document_notes[did] || []} : {ready: false, count: 0, warnings: []};
         }
         async function conditionVersions() {
             if (!cid) return null;

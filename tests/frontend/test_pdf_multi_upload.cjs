@@ -85,3 +85,58 @@ test('reflection button previews both PDFs without typing and saves only after c
  assert.equal(h.state.reviews[ids[1]][0].target.requirements,'150mm 이상');assert(h.state.conditions.every(c=>c.status==='confirmed'));
  assert.equal(h.node('documents-panel').hidden,true);
 });
+test('normal reading and sheet creation never show retry guidance; actual failure does',async()=>{
+ const h=await setup(),original=h.api.requestJson;let release,entered;
+ const started=new Promise(resolve=>entered=resolve);
+ h.api.requestJson=async(url,opts)=>{if(url.includes('/extractions/')){entered();await new Promise(resolve=>release=resolve);}return original(url,opts);};
+ const uploading=h.upload('거래처.pdf');await started;
+ assert.match(h.node('documents-list').textContent,/추출 중/);assert.doesNotMatch(h.node('documents-list').textContent,/재시도/);
+ release();await uploading;h.api.requestJson=original;assert.doesNotMatch(h.node('documents-list').textContent,/재시도/);
+ const ensure=h.window.investigationSheet.ensure;h.window.investigationSheet.ensure=async()=>{throw Error('시트 작성 실패');};
+ await h.upload('품목.pdf');assert.match(h.node('documents-list').textContent,/추출 재시도/);
+ h.window.investigationSheet.ensure=ensure;const doc=h.documents.items()[1];await h.investigation.extract(doc.document_id,doc.filename);
+ assert.doesNotMatch(h.node('documents-list').textContent,/재시도/);
+});
+test('one changed review among three only reflects that PDF and emits one completion',async()=>{
+ const h=await setup();await h.upload('거래처.pdf','품목.pdf','추가거래처.pdf');const ids=Object.keys(h.state.reviews);
+ h.excel.sheets[1].cells[4][3]='150mm 이상';const untouched=structuredClone([h.state.reviews[ids[0]],h.state.reviews[ids[2]]]);
+ const messages=[],say=h.messages.say;h.messages.say=(text)=>{messages.push(text);return say(text);};
+ await h.node('documents-apply').emit('click');assert.match(h.chatText(),/PDF 1개의 수정 내용/);await h.messages.command('적용');
+ assert.deepEqual(h.calls.filter(c=>c.url.includes('/reviews/')).map(c=>c.url.split('/reviews/')[1]),[ids[1]]);
+ assert.deepEqual([h.state.reviews[ids[0]],h.state.reviews[ids[2]]],untouched);
+ assert.deepEqual(messages,['PDF 1개의 수정 내용을 반영했어요.']);
+ assert.deepEqual(h.state.conditions.map(c=>c.status),['candidate','confirmed','candidate']);
+});
+test('multiple changed PDFs emit one completion; confirmed unchanged reviews do not post again',async()=>{
+ const h=await setup();await h.upload('거래처.pdf','품목.pdf','추가거래처.pdf');
+ h.excel.sheets[0].cells[4][1]='회사 A';h.excel.sheets[1].cells[4][3]='150mm 이상';h.excel.sheets[2].cells[4][1]='회사 B';
+ const messages=[],say=h.messages.say;h.messages.say=(text)=>{messages.push(text);return say(text);};
+ await h.investigation.previewApply();await h.messages.command('적용');
+ assert.deepEqual(messages,['PDF 3개의 수정 내용을 반영했어요.']);assert.equal(h.calls.filter(c=>c.url.includes('/reviews/')).length,3);
+ await h.investigation.previewApply();assert.equal(messages.at(-1),'반영할 수정 내용이 없어요.');assert.equal(h.action('적용'),undefined);
+ assert.equal(h.calls.filter(c=>c.url.includes('/reviews/')).length,3);
+});
+test('unchanged initial reviews can be confirmed once and saved-record failure remains retryable',async()=>{
+ const h=await setup();await h.upload('거래처.pdf','품목.pdf');
+ await h.investigation.previewApply();assert.match(h.chatText(),/PDF 2개의 검토 내용/);await h.messages.command('적용');
+ assert(h.state.conditions.every(c=>c.status==='confirmed'));
+ h.excel.sheets[0].cells[4][1]='재시도 회사';const mark=h.window.investigationSheet.markSaved;
+ h.window.investigationSheet.markSaved=async()=>{throw Error('기록 실패');};
+ await h.investigation.previewApply();await h.messages.command('적용');assert.match(h.node('documents-status').textContent,/기록 실패/);
+ const count=h.calls.filter(c=>c.url.includes('/reviews/')).length;h.window.investigationSheet.markSaved=mark;
+ await h.investigation.previewApply();await h.messages.command('적용');
+ assert.equal(h.calls.filter(c=>c.url.includes('/reviews/')).length,count);assert.match(h.node('documents-status').textContent,/PDF 1개의 수정 내용을 반영/);
+});
+test('a failed batch reports partial completion once and retries only remaining changes',async()=>{
+ const h=await setup();await h.upload('거래처.pdf','품목.pdf');const ids=Object.keys(h.state.reviews);
+ h.excel.sheets[0].cells[4][1]='반영된 회사';h.excel.sheets[1].cells[4][3]='150mm 이상';
+ const original=h.api.requestJson,messages=[],say=h.messages.say;h.messages.say=text=>{messages.push(text);return say(text);};
+ h.api.requestJson=async(url,opts)=>{if(url.endsWith('/reviews/'+ids[1]))throw Error('저장 실패');return original(url,opts);};
+ await h.investigation.previewApply();await h.messages.command('적용');
+ assert.deepEqual(messages,['PDF 1개는 반영했지만 나머지 반영을 중단했어요. 저장 실패']);
+ assert.equal(h.state.reviews[ids[0]][0].target.company_name,'반영된 회사');
+ assert.equal(h.state.reviews[ids[1]][0].target.requirements,item.target.requirements);
+ h.api.requestJson=original;await h.investigation.previewApply();await h.messages.command('적용');
+ assert.equal(messages.at(-1),'PDF 1개의 수정 내용을 반영했어요.');
+ assert.equal(h.calls.filter(c=>c.url.endsWith('/reviews/'+ids[0])).length,1);
+});

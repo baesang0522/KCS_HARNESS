@@ -59,8 +59,8 @@ function createInvestigationHost() {
         sheets.push(sheet);return sheet;
     }
     const context={sync:async()=>{host.syncs++;if(host.beforeSync)await host.beforeSync(host);},workbook:{
-        worksheets:{add:addSheet,getItem(id){const s=sheets.find(s=>s.id===id||s.name===id);if(!s)throw new Error('sheet not found');return s;},
-            getItemOrNullObject(id){return sheets.find(s=>s.id===id||s.name===id)||{isNullObject:true,load(){}};}},
+        worksheets:{add:addSheet,getItem(id){const s=sheets.find(s=>s.id===id||s.name.toLowerCase()===id.toLowerCase());if(!s)throw new Error('sheet not found');return s;},
+            getItemOrNullObject(id){return sheets.find(s=>s.id===id||s.name.toLowerCase()===id.toLowerCase())||{isNullObject:true,load(){}};}},
         settings:{add:(key,value)=>settings.set(key,structuredClone(value)),getItemOrNullObject:key=>({value:settings.get(key),isNullObject:!settings.has(key),load(){}})} }};
     host.Excel={run:fn=>fn(context)};
     host.window={crypto:require('node:crypto').webcrypto,workspaceSheet:{requireExcel(){}},errorMessages:{ADVICE_GROUP_COLUMNS_REQUIRED:'빈도 집계 열 필요'}};
