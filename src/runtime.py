@@ -71,7 +71,7 @@ def create_runtime() -> CustomsHarness:
             }
             advice_extra = {
                 "reasoning_format": "deepseek",
-                "chat_template_kwargs": {"enable_thinking": True},
+                "chat_template_kwargs": {"enable_thinking": False},
             }
 
         # 내부 서버는 max_tokens와 reasoning_content를 사용하는 기존 어댑터로 연결한다.

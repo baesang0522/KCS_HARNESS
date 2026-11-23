@@ -136,3 +136,82 @@ class PDFChunkTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.advice_model.ainvoke = empty
         await self.extract()
         self.assertEqual([p['page_number'] for call in self.calls for p in call['pages']], list(range(1, 1501)))
+
+    async def test_length_halves_batches_and_covers_all_sources_with_original_evidence(self):
+        attempts, failed = [], []
+        async def reply(messages):
+            payload = json.loads(messages[1].content)
+            entries = flatten_sources(payload['pages'])
+            attempts.append(payload)
+            threshold = 5 if len(self.calls) < 3 else 2
+            if len(entries) > threshold:
+                failed.append(len(attempts) - 1)
+                # Even syntactically valid partial JSON must never be accepted.
+                return AIMessage(content='{"conditions":[],"warnings":["잘린 결과"]}',
+                                 response_metadata={'finish_reason': 'length'})
+            return await self.reply(messages)
+        self.runtime.advice_model.ainvoke = reply
+        state = await self.extract()
+        self.assertGreaterEqual(len(failed), 2)
+        for index in failed:
+            before, after = attempts[index:index + 2]
+            previous = flatten_sources(before['pages'])
+            self.assertEqual(flatten_sources(after['pages']), previous[:len(previous) // 2])
+            self.assertEqual(after['context_pages'], before['context_pages'])
+        sent = [entry for call in self.calls for entry in flatten_sources(call['pages'])]
+        self.assertEqual(sent, flatten_sources(evidence_sources(self.document)[0]))
+        self.assertEqual(len(state.conditions), 80)
+        self.assertEqual(len({c.target.specification for c in state.conditions}), 80)
+        self.assertEqual(state.document_notes[self.did], ['문서 안내'])
+        for condition in state.conditions:
+            self.assertTrue(any('공통 조건 HS 7208511000' in evidence.quote for evidence in condition.evidence))
+        self.assertTrue(all(call['has_more'] for call in self.calls[:-1]))
+        self.assertFalse(self.calls[-1]['has_more'])
+        self.assertTrue(all(len(flatten_sources(call['pages'])) <= 2 for call in self.calls[3:]))
+
+    async def test_length_on_last_batch_updates_has_more_and_keeps_the_remaining_sources(self):
+        self.document.pages = self.document.pages[:1]
+        self.document.pages[0].text = '그룹 1 공통 조건 HS 7208511000\n대상 A\n대상 B'
+        attempts = []
+        async def reply(messages):
+            payload = json.loads(messages[1].content)
+            attempts.append(payload)
+            if len(attempts) == 1:
+                return AIMessage(content='{"conditions":[', response_metadata={'finish_reason': 'length'})
+            return await self.reply(messages)
+        self.runtime.advice_model.ainvoke = reply
+        state = await self.extract()
+        self.assertEqual([len(flatten_sources(p['pages'])) for p in attempts], [3, 1, 1, 1])
+        self.assertEqual([p['has_more'] for p in attempts], [False, True, True, False])
+        self.assertEqual(len(state.conditions), 2)
+
+    async def test_length_at_one_source_stops_without_saving_earlier_successes(self):
+        self.document.pages = self.document.pages[:1]
+        self.document.pages[0].text = '그룹 1 공통 조건 HS 7208511000\n대상 A\n대상 B\n대상 C'
+        original = self.conversation.investigation.model_dump()
+        attempts = []
+        async def reply(messages):
+            entries = flatten_sources(json.loads(messages[1].content)['pages'])
+            attempts.append(len(entries))
+            if len(entries) > 2 or entries[0]['source_id'] >= 3:
+                return AIMessage(content='', response_metadata={'finish_reason': 'length'})
+            return await self.reply(messages)
+        self.runtime.advice_model.ainvoke = reply
+        with self.assertRaisesRegex(ModelProcessingError, '원문 구절 3 하나로 줄여도'):
+            await self.extract()
+        self.assertEqual(attempts, [4, 2, 2, 1])
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.conversation.investigation.model_dump(), original)
+        self.assertIn(self.did, self.conversation.documents)
+
+    async def test_cancel_after_length_never_starts_a_split_retry(self):
+        attempts = []
+        async def reply(messages):
+            attempts.append(messages)
+            self.conversation.cancelled_requests.add(self.rid)
+            return AIMessage(content='', response_metadata={'finish_reason': 'length'})
+        self.runtime.advice_model.ainvoke = reply
+        with self.assertRaises(ConflictError):
+            await self.extract()
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(self.conversation.investigation.conditions, [])

@@ -1,14 +1,18 @@
 """PDF 원문·표에서 근거를 검증하며 조사 조건을 추출한다."""
 import asyncio
+import logging
 from pathlib import Path
 from prompts.loader import load_agent_prompt
 from services.documents.chunks import flatten_sources, group_sources, next_source_chunk
 from services.documents.service import find_document
 from services.documents.tables import is_model_table, split_model_cell, split_company_name
 from services.errors import ConflictError, ModelProcessingError
-from models.structured import ask
+from models.structured import OutputLengthError, ask
 from services.investigation.schemas import Condition, Evidence, Extraction, ItemTarget, SupplierTarget
 from services.investigation.service import belongs_to_document, check_revision, same_workspace, target_description
+
+
+logger = logging.getLogger(__name__)
 
 
 def evidence_sources(document):
@@ -74,6 +78,7 @@ async def extract_conditions(conversation, payload, runtime, request_id):
         prompt = load_agent_prompt(Path(__file__).resolve().parents[2] / "prompts/investigation.yml").render()
         entries = flatten_sources(pages)
         offset, context, warnings, seen = 0, [], [], set()
+        chunk_size = None
         while offset < len(entries):
             if request_id in conversation.cancelled_requests:
                 raise ConflictError("사용자가 조사 조건 읽기를 중지했습니다.")
@@ -82,13 +87,31 @@ async def extract_conditions(conversation, payload, runtime, request_id):
                 batch = next_source_chunk(entries, offset, prompt, base, Extraction)
             except ValueError as error:
                 raise ModelProcessingError("이어 읽을 공통 근거를 AI 요청에 구성하지 못했습니다. 조건은 저장하지 않았습니다. 다시 읽어 주세요.") from error
-            data = {**base, "pages": group_sources(batch), "has_more": offset + len(batch) < len(entries)}
-            try:
-                extracted = await asyncio.wait_for(
-                    ask(runtime.advice_model, prompt, "conditions", data, Extraction),
-                    timeout=runtime.settings.llm.timeout_seconds + 10)
-            except Exception as error:
-                raise ModelProcessingError("조사 조건 응답을 확인하지 못했습니다. 조건은 저장하지 않았습니다. 다시 읽어 주세요.") from error
+            batch = batch[:chunk_size]
+            while True:
+                if request_id in conversation.cancelled_requests:
+                    raise ConflictError("사용자가 조사 조건 읽기를 중지했습니다.")
+                data = {**base, "pages": group_sources(batch), "has_more": offset + len(batch) < len(entries)}
+                try:
+                    extracted = await asyncio.wait_for(
+                        ask(runtime.advice_model, prompt, "conditions", data, Extraction),
+                        timeout=runtime.settings.llm.timeout_seconds + 10)
+                    break
+                except OutputLengthError as error:
+                    if request_id in conversation.cancelled_requests:
+                        raise ConflictError("사용자가 조사 조건 읽기를 중지했습니다.") from error
+                    if len(batch) == 1:
+                        raise ModelProcessingError(
+                            f"PDF {batch[0]['page_number']}쪽의 원문 구절 {batch[0]['source_id']} 하나로 줄여도 "
+                            "생성이 토큰 한도로 중단됐습니다. 조건은 저장하지 않았습니다. "
+                            "llm.advice_max_tokens와 내부 모델 서버의 생성·컨텍스트 한도를 확인해 주세요.") from error
+                    chunk_size = len(batch) // 2
+                    logger.warning("PDF 추출 재분할: document_id=%s offset=%s sources=%s next_sources=%s",
+                                   document_id, offset, len(batch), chunk_size)
+                    # 잘린 응답은 버리고 같은 위치부터 재시도한다. 나머지 원문도 다음 호출에서 처리한다.
+                    batch = batch[:chunk_size]
+                except Exception as error:
+                    raise ModelProcessingError("조사 조건 응답을 확인하지 못했습니다. 조건은 저장하지 않았습니다. 다시 읽어 주세요.") from error
             available = {(item["page_number"], item["source_id"]): item for item in [*context, *batch]}
             current = {(item["page_number"], item["source_id"]) for item in batch}
             for candidate in extracted.conditions:

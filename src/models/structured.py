@@ -14,6 +14,10 @@ INPUT_BYTES = 48000
 logger = logging.getLogger(__name__)
 
 
+class OutputLengthError(ValueError):
+    """생성 길이 한도로 잘린 응답. 호출부가 입력을 나눠 재요청할 수 있다."""
+
+
 def dumps(value) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
@@ -98,7 +102,7 @@ async def ask(model, prompt: str, stage: str, payload: dict, schema):
                 stage, getattr(model, "max_tokens", None), usage.get("prompt_tokens"),
                 usage.get("completion_tokens"), len(reasoning), len(reply.content),
             )
-            raise ValueError(
+            raise OutputLengthError(
                 f"조언 생성이 토큰 한도로 중단됐습니다(단계: {stage}). "
                 "llm.advice_max_tokens와 서버의 생성·컨텍스트 한도를 확인하세요. "
                 "추론이 출력 예산을 소진했을 수도 있습니다."
