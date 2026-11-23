@@ -1,4 +1,3 @@
-from services.errors import SHARED_MESSAGES
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
@@ -48,13 +47,8 @@ class CreateOperationJob(StrictModel):
     @model_validator(mode="after")
     def validate_scope(self):
         self.operation.validate_ready()
-        if self.operation.condition and self.operation.condition_scope == "all" and self.row_filter is not None:
+        if (self.operation.condition or self.operation.kind == "dimensions") and self.operation.condition_scope == "all" and self.row_filter is not None:
             raise ValueError("전체 범위 요청에는 기존 행 필터를 적용하지 않습니다.")
-        if self.operation.kind == "dimensions" and (
-            self.model_spec_column_id is None
-            or self.operation.column_ids != [self.model_spec_column_id]
-        ):
-            raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])
         if self.row_start + self.row_count > 1048576:
             raise ValueError("처리 범위가 Excel 행 경계를 벗어납니다.")
         if len(self.model_dump_json().encode("utf-8")) > 262144:
@@ -179,7 +173,8 @@ def preview_job(job: OperationJob, payload: JobPreview):
         raise ValueError("분석 대상 행 수가 바뀌었습니다. 새 미리보기를 만드세요.")
     if request.operation.kind == "match_suppliers":
         from services.supplier_matching import compare
-        result = compare(request.rows, job.supplier_references, request.operation.similarity_method or "auto")
+        result = compare(request.rows, job.supplier_references, request.operation.similarity_method or "auto",
+                         threshold=request.operation.similarity_threshold if request.operation.similarity_threshold is not None else 90)
     elif request.operation.extraction_mode == "pdf":
         from services.model_matching import compare
         result = compare(request.rows, job.model_references)
@@ -204,7 +199,10 @@ def begin_apply(job: OperationJob, output: OutputPlacement) -> OperationJob:
     if job.source.operation.extraction_mode == "pdf" and output.mode == "existing":
         raise ConflictError("모델명과 종류를 함께 저장할 새 결과 열을 사용하세요.")
     if job.source.operation.kind == "dimensions" and output.mode == "existing":
-        raise ConflictError("치수와 확인 상태를 함께 보존하도록 새 결과 열을 사용하세요.")
+        if len(job.source.operation.dimensions.selected_fields) != 1 or output.column_id in job.source.operation.input_column_ids:
+            raise ConflictError("치수 항목 하나를 원본·조건과 다른 기존 열에 반영하세요.")
+        if not job.source.operation.output or job.source.operation.output.mode != "existing":
+            raise ConflictError("기존 결과 열의 현재 값을 포함해 새 미리보기를 준비하세요.")
     planned = job.source.operation.output
     if job.source.operation.kind == "match_suppliers" and output.mode == "existing" and (not planned or planned.mode != "existing"):
         raise ConflictError("기존 그룹 열의 미분류 조건으로 새 미리보기를 준비하세요.")

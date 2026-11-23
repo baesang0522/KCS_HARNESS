@@ -38,6 +38,14 @@
                 options.setBusy(false);
             }
         }
+        function dimensionValues(row) {
+            if (row.length < 2) throw new Error("치수 결과와 파싱 상태가 필요합니다.");
+            return row.map(function (value, index) {
+                if (index === row.length - 1 || value === "") return value;
+                if (!/^\d+(?:\.\d+)?$/.test(value) || !Number.isFinite(Number(value)) || Number(value) <= 0) throw new Error("유효하지 않은 치수 결과입니다.");
+                return Number(value);
+            });
+        }
         function check() { if (cancelled) throw new Error("처리를 취소했습니다. 시트는 변경하지 않았습니다."); }
         function progress(phase, done, total) { options.status(phase + " · " + done.toLocaleString() + "/" + total.toLocaleString() + "행. 완료 전에는 편집·정렬을 기다려 주세요."); }
         async function build(automatic, verify) {
@@ -60,7 +68,7 @@
                 options.setBusy(true);
 
                 var readWorkspace = workspace, readTarget = target;
-                if (operation.kind === "set" && operation.condition && operation.condition_scope === "all") {
+                if ((operation.kind === "dimensions" || operation.kind === "set" && operation.condition) && operation.condition_scope === "all") {
                     readWorkspace = Object.assign({}, workspace, {row_filter: null});
                     readTarget = await Excel.run(async function (context) {
                         var info = await window.workspaceTable.layout(context, workspace);
@@ -74,11 +82,12 @@
                 );
                 check();
                 var ids = operation.column_ids.concat(operation.kind === "group" ? [operation.value_column_id] : []);
+                if (operation.kind === "dimensions" && operation.condition && !ids.includes(operation.condition.column_id)) ids.push(operation.condition.column_id);
                 var destination = ui.destination ? ui.destination() : null;
-                var snapshot = await sheet.read(readWorkspace, readTarget, ids, progress, check, destination, null, null, operation.condition, operation.kind === "match_suppliers");
+                var snapshot = await sheet.read(readWorkspace, readTarget, ids, progress, check, destination, null, null, operation.condition, ["match_suppliers", "dimensions"].includes(operation.kind));
                 if (!snapshot.rows.length) {
                     await options.jobs.status(job, "NO_CHANGE");
-                    complete(destination ? "현재 범위에 그룹이 빈 행이 없어. 기존 그룹과 점수는 그대로 유지했어." : "현재 작업 범위에 비교할 행이 없어. 셀은 변경하지 않았어.",
+                    complete(operation.kind === "dimensions" ? "조건에 맞는 행이 없어. 셀은 변경하지 않았어." : destination ? "현재 범위에 그룹이 빈 행이 없어. 기존 그룹과 점수는 그대로 유지했어." : "현재 작업 범위에 비교할 행이 없어. 셀은 변경하지 않았어.",
                         {kind: "operation", job_id: job.source.operation_job_id, status: "SUCCEEDED"});
                     return;
                 }
@@ -107,6 +116,10 @@
                     }
                     result.rows.forEach(function (row, i) {
                         if (row.excel_row !== rows[i].excel_row || !Array.isArray(row.values) || row.values.some(function (v) { return typeof v !== "string" || v.length > 32767; })) throw new Error("유효하지 않은 처리 결과입니다.");
+                        if (operation.kind === "dimensions") {
+                            if (row.values.length !== result.headers.length) throw new Error("치수 결과의 열 수가 다릅니다.");
+                            dimensionValues(row.values);
+                        }
                         values.push(row.values);
                     });
                     if (result.headers.length > headers.length) headers = result.headers;
@@ -125,7 +138,7 @@
                 }
                 values.forEach(function (row) { while (row.length < headers.length) row.push(""); });
                 if (destination) changed = values.filter(function (row, i) { return row[0] !== snapshot.rows[i].destination; }).length;
-                if (!changed && destination && !["group", "extract"].includes(operation.kind)) {
+                if (!changed && destination && !["group", "extract", "dimensions"].includes(operation.kind)) {
                     if (destination && options.reviewed && operation.kind !== "match_suppliers") {
                         var current = await sheet.read(readWorkspace, readTarget, ids, progress, check, destination, null, null, operation.condition);
                         if (current.stamp !== snapshot.stamp || JSON.stringify(current.rows) !== JSON.stringify(snapshot.rows) || JSON.stringify(current.scope_rows) !== JSON.stringify(snapshot.scope_rows)) throw new Error("확인 중 값이 바뀌었습니다. 다시 요청하세요.");
@@ -208,7 +221,7 @@
             } else if (operation.kind === "replace") {
                 action = "문자열 치환 " + JSON.stringify(operation.find) + " → " + JSON.stringify(operation.replacement);
             } else if (operation.kind === "match_suppliers") {
-                action = (operation.similarity_method === "sequence" ? "SequenceMatcher 양방향 평균" : operation.similarity_method === "levenshtein" ? "Levenshtein" : "자동 매칭: Levenshtein 후 미분류만 SequenceMatcher") + " / PDF 기준 거래처와 비교 / 최고 점수 90 이상 / 동점은 기준 목록 뒤 항목 / 공백·대소문자 통일";
+                action = (operation.similarity_method === "sequence" ? "SequenceMatcher 양방향 평균" : operation.similarity_method === "levenshtein" ? "Levenshtein" : "자동 매칭: Levenshtein 후 미분류만 SequenceMatcher") + " / PDF 기준 거래처와 비교 / 최고 점수 " + (operation.similarity_threshold ?? 90) + " 이상 / 동점은 기준 목록 뒤 항목 / 공백·대소문자 통일";
                 if (index === 1) action += " / 최고 유사도 점수";
             } else if (operation.kind === "map") {
                 action = "공백·대소문자 정리 기준 매핑 " + operation.mappings.length + "개 적용";
@@ -256,16 +269,13 @@
                 var output = ui.output();
                 var writeValues = data.values, writeSnapshot = data.snapshot, writeFormats = null;
                 if (data.operation.kind === "dimensions") {
-                    writeValues = data.values.map(function (row) { return row.map(function (value, index) {
-                        if (index === row.length - 1 || value === "") return value;
-                        if (!/^\d+(?:\.\d+)?$/.test(value) || !Number.isFinite(Number(value))) throw new Error("유효하지 않은 치수 결과입니다.");
-                        return Number(value);
-                    }); });
+                    writeValues = data.values.map(dimensionValues);
                     writeFormats = writeValues.map(function (row) { return row.map(function (_, index) { return index === row.length - 1 ? "@" : "General"; }); });
                 }
                 if (output.mode === "existing") {
                     if (data.operation.kind === "split" && data.names.length !== 1) throw new Error("여러 열로 분리하는 결과는 새 열로 저장하세요.");
-                    writeValues = data.values.map(function (row) { return output.score_column_id ? row.slice() : [row[0]]; });
+                    writeValues = writeValues.map(function (row) { return output.score_column_id ? row.slice() : [row[0]]; });
+                    if (writeFormats) writeFormats = writeFormats.map(function (row) { return [row[0]]; });
                 }
                 options.setBusy(true);
                 if (data.operation.kind === "match_suppliers" && output.mode === "existing") {
@@ -273,7 +283,8 @@
                         progress, function () {}, data.snapshot.output_column_ids || output.column_id, null, null, data.operation.condition, true);
                     if (current.stamp !== data.snapshot.stamp || JSON.stringify(current.rows) !== JSON.stringify(data.snapshot.rows) ||
                         JSON.stringify(current.scope_rows) !== JSON.stringify(data.snapshot.scope_rows)) throw new Error("비교 후 데이터가 바뀌었습니다. 새 미리보기를 확인하세요.");
-                    var matched = data.values.map(function (row, i) { return row[0].trim() && row[1] !== "" && Number(row[1]) >= 90 ? i : -1; }).filter(function (i) { return i >= 0; });
+                    // 서버가 반올림 전 점수로 채운 그룹을 사용한다. 표시 점수로 기준을 다시 판정하지 않는다.
+                    var matched = data.values.map(function (row, i) { return row[0].trim() && row[1] !== "" && Number.isFinite(Number(row[1])) ? i : -1; }).filter(function (i) { return i >= 0; });
                     writeValues = matched.map(function (i) { return writeValues[i]; });
                     writeSnapshot = Object.assign({}, data.snapshot, {
                         rows: matched.map(function (i) { return data.snapshot.rows[i]; }),

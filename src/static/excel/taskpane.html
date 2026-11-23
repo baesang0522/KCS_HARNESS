@@ -54,7 +54,12 @@
   <div class="app">
     <header class="topbar">
       <div class="brand"><img src="assets/mata10.png" width="28" height="28" alt=""><span>엑셀 전처리 도우미</span></div>
-      <button type="button" class="workspace-launch" id="open-workspace">작업 준비</button>
+      <div class="topbar-actions">
+        <button type="button" class="workspace-launch" id="open-workspace">작업 준비</button>
+        <button type="button" class="icon-button" id="new-task" aria-label="새 작업" title="새 작업">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7M5 9v12h5v-7h4v7h5V9"/></svg>
+        </button>
+      </div>
 
     </header>
 
@@ -65,13 +70,13 @@
       <section class="welcome">
         <img class="hero-icon" src="assets/mata10.png" width="59" height="59" alt="">
         <h1>엑셀 업무에,<br>도움이 필요하신가요?</h1>
-        <p>복잡한 데이터 정리부터 분석까지.<br>하던 작업을 이어가며 도움을 받아보세요.</p>
+        <p>복잡한 데이터 정리부터 분석까지.<br>필요한 작업을 채팅으로 요청해 보세요.</p>
       </section>
       <section class="suggestions" aria-labelledby="suggestion-title">
         <h2 id="suggestion-title">이런 작업을 함께할 수 있어요</h2>
         <button class="suggestion" data-task="investigation"><span class="card-icon violet" aria-hidden="true">✧</span><span><strong>통합 조사 시작</strong><small>원본에서 필요한 열을 가져와 기업·물품을 함께 조사</small></span><span class="arrow" aria-hidden="true">↗</span></button>
       </section>
-      <p class="preview-note">필요한 열을 가져온 뒤 채팅으로 작업을 요청하세요.<br>새 조사는 채팅으로 ‘새 조사 시작’이라고 입력하세요.</p>
+      <p class="preview-note">필요한 열을 가져온 뒤 채팅으로 작업을 요청하세요.<br>새 작업은 상단 집 모양 버튼을 누르세요.</p>
       </div>
       <section id="conversation" role="log" aria-label="대화 내용" aria-live="polite" hidden></section>
       <section class="normalization-panel" id="work-panel" hidden>
@@ -80,7 +85,6 @@
           <label hidden>작업 종류 <select id="work-type"><option value="investigation">통합 조사</option><option value="model_normalization" hidden>기존 모델규격 작업</option><option value="counterparty_cleanup" hidden>기존 해외거래처 작업</option></select></label>
           <p>머리글을 포함한 원본 범위를 선택하세요. 다음 화면에서 지금 가져올 열을 고를 수 있습니다. 처음 선택하지 않은 같은 원본 시트의 열도 나중에 추가할 수 있습니다. 떨어진 열은 같은 시작 행과 끝 행으로 선택하세요.</p>
           <button type="button" id="work-select">선택 범위 가져오기</button>
-          <button type="button" id="work-restore">저장된 작업 이어가기</button>
           <div id="work-mapping" hidden>
             <p id="work-source"></p>
             <fieldset><legend>열 역할 · 필요한 것만 지정</legend><div id="work-required"></div></fieldset>

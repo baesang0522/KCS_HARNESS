@@ -22,12 +22,13 @@ async function setup({count=4,targetCount=count,versions=null}={}){
  'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js',
  'workspace/result_dependencies.js','workspace/workspace_actions.js','workspace/workspace.js'].forEach(h.load);
  const messages=[];
+ h.captureWorkspaceActions();
  controller=h.window.createWorkspaceController({messages:h.messages,api,getConditionVersions:async()=>versions,getConversationId:()=> 'conversation',isBusy:()=>busy,
  setBusy:value=>{busy=value;controller?.setBusy(value);},complete:message=>messages.push(message),enterConversation:noop,
  beforeWorkspaceChange:target=>{if(!target)throw Error('기존 조사에 연결됨');},
  newInvestigation:async()=>{if(h.rejectNew)throw Error('새 조사 연결 실패');messages.push('새 조사 생성');controller.reset();}});
  const node=id=>h.document.getElementById(id);
- await node('work-restore').emit('click');
+ await h.workspaceActions.restore();
  const ids=Object.fromEntries(f.work.columns.map(c=>[c.header,c.column_id]));
  const change=(mode,header='判定',value='Y',operator='equals',expected)=>controller.changeScope({mode,condition:mode==='clear'?null:{column_id:ids[header],operator,value}},expected);
  async function apply(source,value='done',destination='결과',scope='current'){
@@ -69,7 +70,7 @@ test('include searches the whole table while retaining the old bounded selection
  assert.match(await f.change('include','회사','B'),/3행/);
  assert.deepEqual(Array.from(f.stored.row_filter.base_ids),[1]);
  f.sheet.cells.splice(1,4,...f.sheet.cells.slice(1).reverse());
- await f.node('work-restore').emit('click');await f.apply('회사');
+ await f.h.workspaceActions.restore();await f.apply('회사');
  assert.deepEqual(f.sheet.cells.slice(1).map(row=>[row[0],row[4]]),[[4,'done'],[3,'old'],[2,'done'],[1,'done']]);
 });
 test('combined scope can update its own predicate column across 10,002 rows without losing later matches',async()=>{
@@ -90,7 +91,7 @@ test('only dependent outputs need review; unrelated notes, outside rows, rename 
  const before=structuredClone(f.sheet.cells),context=await f.controller.context();
  assert.deepEqual(new Set(context.review_required_column_ids),new Set([f.ids['결과'],f.ids['후속']]));
  assert.deepEqual(f.sheet.cells,before);assert.match(f.h.chatText(),/재검토|다시 확인/);
- await f.node('work-restore').emit('click');assert.equal((await f.controller.context()).review_required_column_ids.length,2);
+ await f.h.workspaceActions.restore();assert.equal((await f.controller.context()).review_required_column_ids.length,2);
 });
 test('manual selection edits and scope changes invalidate filtered results but leave whole-table results valid',async()=>{
  const f=await setup();await f.change('replace','판정','Y');await f.apply('회사');

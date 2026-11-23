@@ -233,7 +233,7 @@
             values.some(function (row) { return row.length !== names.length || row.some(function (v) {
                 return typeof v === 'string' ? v.length > 32767 : !formats || !(typeof v === 'boolean' || typeof v === 'number' && Number.isFinite(v));
             }); })) throw new Error('출력 결과의 크기나 값이 올바르지 않습니다.');
-        if (formats && (output.mode === 'existing' || formats.length !== values.length || formats.some(function (row) {
+        if (formats && (formats.length !== values.length || formats.some(function (row) {
             return row.length !== names.length || row.some(function (value) { return typeof value !== 'string'; });
         }))) throw new Error('원본 열의 표시 형식을 확인할 수 없습니다.');
         var existing = output.mode === 'existing';
@@ -303,15 +303,15 @@
                     }
                     started = true; await context.sync();
                     if (existing) for (var k = run.offset; k < run.offset + run.selected; k++) {
-                        expected[k].destination = values[k][0];
-                        if (expected[k].destinations) expected[k].destinations = values[k].slice();
+                        expected[k].destination = String(values[k][0]);
+                        if (expected[k].destinations) expected[k].destinations = values[k].map(String);
                         snapshot.columns.forEach(function (column, j) {
                             var index = outputIds.indexOf(String(column.column_id));
-                            if (index >= 0) expected[k].values[j] = values[k][index];
+                            if (index >= 0) expected[k].values[j] = String(values[k][index]);
                         });
                         var filterIds = Array.from(new Set(filterColumns(snapshot.row_filter).concat(filterColumns(snapshot.condition))));
                         ownChanges.set(expected[k].identity, outputIds.filter(function (id) { return filterIds.includes(id); }).map(function (id) {
-                            return {column_id: id, before: snapshot.scope_rows[k].filter_values[filterIds.indexOf(id)], after: values[k][outputIds.indexOf(id)]};
+                            return {column_id: id, before: snapshot.scope_rows[k].filter_values[filterIds.indexOf(id)], after: String(values[k][outputIds.indexOf(id)])};
                         }));
                     }
                     progress('결과 작성', run.offset + run.selected, values.length);

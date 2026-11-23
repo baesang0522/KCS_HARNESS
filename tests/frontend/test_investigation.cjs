@@ -109,11 +109,12 @@ test('direct scope selection persists without cell writes or groups and filters 
     }};
     ['workspace/workspace_sheet.js','workspace/table_reader.js','operations/operations_sheet.js','operations/operations_ui.js',
         'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js','workspace/result_dependencies.js','workspace/workspace_actions.js','workspace/workspace.js'].forEach(h.load);
+    h.captureWorkspaceActions();
     controller=h.window.createWorkspaceController({messages:h.messages,api,getConversationId:()=> 'conversation',isBusy:()=>busy,
         showWorkspace:()=>{revealed++;},
         setBusy:v=>{busy=v;controller?.setBusy(v);},complete:noop,enterConversation:noop});
     const node=id=>h.document.getElementById(id);
-    await node('work-restore').emit('click');
+    await h.workspaceActions.restore();
     const before=structuredClone(f.sheet.cells);
     const condition={column_id:f.work.columns[1].column_id,operator:'equals',value:'OK'};
     await assert.rejects(controller.changeScope({mode:'replace',condition:{...condition,value:''}}),/비교할 값/);
@@ -130,7 +131,7 @@ test('direct scope selection persists without cell writes or groups and filters 
     await controller.previewOperation();assert.match(h.chatText(),/기존 열/);await h.messages.command('적용');
     assert.deepEqual(f.sheet.cells.slice(1).map(r=>r[1]),['confirmed','keep','confirmed']);
     assert.equal(stored.columns.length,2);assert.equal(stored.target.row_count,3);
-    await node('work-restore').emit('click');
+    await h.workspaceActions.restore();
     assert.equal((await controller.context()).row_filter.value,'OK');
     await controller.changeScope({mode:'clear'});assert.equal(stored.row_filter,null);
     await controller.openSourceColumns();
@@ -293,10 +294,11 @@ for (const failSecond of [false, true]) test(`multiple imports preserve row iden
     h.window.createSimilarityController=()=>({reset(){},show(){},busy(){}});
     ['workspace/workspace_sheet.js','workspace/table_reader.js','operations/operations_sheet.js','operations/operations_ui.js',
         'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js','workspace/result_dependencies.js','workspace/workspace_actions.js','workspace/workspace.js'].forEach(h.load);
+    h.captureWorkspaceActions();
     controller=h.window.createWorkspaceController({messages:h.messages,api:{newRequestId:()=> 'job'},getConversationId:()=> 'conversation',
         isBusy:()=>busy,setBusy:v=>{busy=v;controller?.setBusy(v);},showWorkspace:noop,complete:noop,enterConversation:noop});
     const node=id=>h.document.getElementById(id);
-    await node('work-restore').emit('click');await controller.openSourceColumns();
+    await h.workspaceActions.restore();await controller.openSourceColumns();
     assert.equal(node('work-scope-settings'),null);assert.equal(node('work-advice-settings'),null);
     assert.equal(node('op-settings'),null);
     for(const check of node('work-import-columns').querySelectorAll('input')){check.checked=true;await check.emit('change');}

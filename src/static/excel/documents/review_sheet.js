@@ -70,8 +70,10 @@
             return rows.every(function (row) { return meta.entries.some(function (entry) { return entry.kind === row.target.kind; }); });
         });
     }
-    async function availableSheetName(context, filename) {
-        var base = filename.normalize('NFC').replace(/\.pdf$/i, '').replace(/[\\/:*?\[\]\x00-\x1f]/g, '_').trim().replace(/^'+|'+$/g, '') || 'PDF';
+    async function availableSheetName(context, filename, kind) {
+        var base = filename.normalize('NFC').replace(/\.pdf$/i, '').trim();
+        if (Array.from(base).length > 5) base = {supplier: '거래처검토', item: '품목검토', other: '조건검토'}[kind];
+        base = base.replace(/[\\/:*?\[\]\x00-\x1f]/g, '_').replace(/^'+|'+$/g, '') || 'PDF';
         for (var index = 0; ; index++) {
             var suffix = index ? ' ' + index : '';
             // Excel sheet names allow 31 characters; keep a surrogate pair intact.
@@ -91,7 +93,7 @@
             if (!kinds.length && !meta.entries.length) kinds.push('other');
             for (var kind of kinds) {
                 if (meta.entries.some(function (entry) { return entry.kind === kind; })) continue;
-                var name = await availableSheetName(context, filename);
+                var name = await availableSheetName(context, filename, kind);
                 var sheet = context.workbook.worksheets.add(name);
                 var data = rows.filter(function (row) { return row.target.kind === kind; }).map(values);
                 if (!data.length) data = [headers[kind].map(function () { return ''; })];

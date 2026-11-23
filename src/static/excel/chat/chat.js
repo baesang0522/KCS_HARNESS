@@ -38,7 +38,6 @@
         var sending = false;
         var conversationId = null;
         var pendingRequest = null;
-        var storageKey = 'kcs-chat-session-v1';
         var activeRequest = null;
 
         function beginRequest() {
@@ -91,17 +90,6 @@
         }
 
 
-        function saveSession() {
-            try {
-                localStorage.setItem(storageKey, JSON.stringify({
-                    conversation_id: conversationId,
-                    pending_request: pendingRequest
-                }));
-            } catch (_) {
-                // 저장이 제한된 환경에서도 현재 창의 채팅은 계속 사용한다.
-            }
-        }
-
         function setBusy(value) {
             sending = value;
             var button = document.querySelector('.send');
@@ -112,6 +100,7 @@
             button.querySelector('path').setAttribute('d', stoppable
                 ? 'M7 7h10v10H7Z' : 'm6 12 6-6 6 6M12 6v13');
             document.getElementById('open-workspace').disabled = value;
+            document.getElementById('new-task').disabled = value;
             document.querySelectorAll('[data-close-task]').forEach(function (button) { button.disabled = value; });
             message.readOnly = false;
             document.querySelectorAll('[data-prompt], [data-task]').forEach(function (button) {
@@ -123,14 +112,18 @@
             options.onBusy(value);
         }
 
-        async function createConversation() {
+        async function createConversation(reset) {
             var data = await api.requestJson('/conversations', {
                 method: 'POST'
             });
 
             conversationId = data.conversation_id;
             pendingRequest = null;
-            saveSession();
+            if (reset) {
+                renderMessages([]);
+                message.value = '';
+                notice.textContent = '';
+            }
             if (options.onConversationChanged) await options.onConversationChanged(conversationId);
         }
 
@@ -147,56 +140,12 @@
             });
         }
 
-        async function refreshConversation() {
-            var data = await api.requestJson(
-                '/conversations/' + encodeURIComponent(conversationId)
-            );
-
-            renderMessages(data.messages);
-            if (options.onConversationChanged) await options.onConversationChanged(conversationId);
-        }
-
         async function initializeConversation() {
             setBusy(true);
-
             try {
-                try {
-                    var saved = JSON.parse(
-                        localStorage.getItem(storageKey) || 'null'
-                    );
-
-                    if (saved && typeof saved.conversation_id === 'string') {
-                        conversationId = saved.conversation_id;
-                        pendingRequest = saved.pending_request || null;
-                    }
-                } catch (_) {
-                    conversationId = null;
-                    pendingRequest = null;
-                }
-
-                if (conversationId) {
-                    try {
-                        await refreshConversation();
-                    } catch (error) {
-                        if (error.status !== 404) throw error;
-
-                        // 메모리 저장소이므로 서버가 재시작되면 이전 대화가 사라진다.
-                        await createConversation();
-                        renderMessages([]);
-                        notice.textContent =
-                            '이전 대화가 없어 새 대화를 시작했습니다.';
-                    }
-                } else {
-                    await createConversation();
-                    renderMessages([]);
-                }
-
-                if (pendingRequest) {
-                    message.value = pendingRequest.message;
-                    notice.textContent =
-                        '완료 여부를 확인하지 못한 요청이 있습니다. ' +
-                        '같은 내용으로 다시 보내거나 다른 질문을 입력할 수 있습니다.';
-                }
+                // 작업표 연결은 창 메모리에만 있으므로 채팅도 다시 열 때 복원하지 않는다.
+                try { localStorage.removeItem('kcs-chat-session-v1'); } catch (_) {}
+                await newConversation();
             } catch (error) {
                 notice.textContent = error.message;
             } finally {
@@ -252,7 +201,6 @@
                 (advice && !pendingRequest.advice_requested))) {
                 pendingRequest = null;
                 pendingBubble = null;
-                saveSession();
             }
 
             var run = beginRequest();
@@ -286,7 +234,6 @@
                         advice_requested: !!advice,
                         message: value, workspace: context, review_sheets: reviewSheets
                     });
-                    saveSession();
                 } else {
                     run.request = pendingRequest;
                 }
@@ -339,7 +286,6 @@
                 activeRequest = null;
                 setBusy(true);
                 pendingRequest = null;
-                saveSession();
                 message.value = '';
 
                 pendingBubble = null;
@@ -362,14 +308,13 @@
                 if (run.cancelled) {
                     pendingRequest = null;
                     pendingBubble = null;
-                    saveSession();
                     appendMessage('assistant', '요청을 중지했습니다.');
                     message.value = value;
                     await reportStop(run);
                     return false;
                 }
                 // 422는 모델 실행 전 입력 검증 실패. 오래된 작업 문맥으로 재시도하지 않는다.
-                if (error.status === 422) { pendingRequest = null; pendingBubble = null; saveSession(); }
+                if (error.status === 422) { pendingRequest = null; pendingBubble = null; }
                 if (!pendingRequest) pendingBubble = null;
                 options.closeTaskCards();
                 appendMessage('assistant', error.message);
@@ -385,10 +330,7 @@
         }
 
         async function newConversation() {
-            await createConversation();
-            renderMessages([]);
-            message.value = '';
-            notice.textContent = '';
+            await createConversation(true);
         }
 
         document.getElementById('composer').addEventListener('submit', function (event) {

@@ -131,4 +131,104 @@ class DimensionTests(unittest.TestCase):
         wrong=build_task_context(WorkFlowState(),{},operation_jobs=jobs,conversation_id=cid,workspace={**w,'workspace_id':str(uuid4())})
         self.assertEqual(self.tool(wrong).invoke({})['intent'],'clarify')
 
+
+class ConditionalDimensionTests(unittest.TestCase):
+    parse = DimensionTests.parse
+    tool = DimensionTests.tool
+    def test_reported_label_layouts_extract_numbers_not_words(self):
+        for raw, expected in [
+            ("'MODEL: API 2W-50LS,PS: HOT ROLLED, MT: STEEL,SHAPE: PLATE, TS:448MPA,SIZE: T 38.1 W X 3228 X L 11816 MM 35 PC", '38.1'),
+            ("'MODEL: API 2Y-50ZLS,PS: HOT ROLLED, MT: STEEL,SHAPE: PLATE, TS:448MPA,SIZE: T 120.00 X W 4040 X L 6507 MM 1 PC", '120'),
+        ]:
+            with self.subTest(raw=raw):
+                values, evidence = self.parse(raw, fields=['thickness'], after='SIZE:')
+                self.assertEqual(values[0], expected)
+                self.assertTrue(values[-1].startswith('추출'))
+                self.assertNotIn('448', evidence)
+        self.assertEqual(self.parse('T 12XYZ W 200 L 300', fields=['thickness'])[0][0], '')
+        self.assertEqual(self.parse('SIZE: T W X 3228 X L 11816 MM', fields=['thickness'], after='SIZE:')[0][0], '')
+
+    def context(self):
+        context = DimensionTests.context(self)
+        context['workspace']['columns'] += [dict(column_id='flag',header='분석대상여부',role='reference'),
+                                             dict(column_id='result',header='두께',role='result')]
+        return context
+
+    def test_conditional_extraction_checks_product_and_explicit_source_without_role(self):
+        context=self.context()
+        context['workspace']['columns'][0]['role']='reference'
+        args=dict(column_id='model',fields=['thickness'],condition=dict(column_id='flag',operator='equals',value='분석대상'),
+                  output=dict(mode='existing',column_id='result'))
+        self.assertEqual(self.tool(context).invoke(args)['intent'],'clarify')
+        op=self.tool(context).invoke({**args,'product':'철판'})['operation']
+        self.assertEqual(op['condition_scope'],'all')
+        self.assertEqual(Operation.model_validate(op).input_column_ids,['model','flag'])
+        self.assertEqual(context['workspace']['columns'][0]['role'],'reference')
+        result=execute(OperationRequest(operation=op,rows=[dict(excel_row=40,values=['T 38.1 W X 3228 X L 11816 MM','분석대상'])]))
+        self.assertEqual(result.rows[0].values[0],'38.1')
+        with self.assertRaisesRegex(ValidationError,'조건에 맞지'):
+            OperationRequest(operation=op,rows=[dict(excel_row=41,values=['T 38.1','N'])])
+        with self.assertRaisesRegex(ValueError,'원본·조건'):
+            self.tool(context).invoke({**args,'product':'철판','output':dict(mode='existing',column_id='model')})
+
+    def test_missing_workspace_does_not_crash_product_clarification(self):
+        from agents.tools.operations import build_operations_tools
+        tool=build_operations_tools({})['parse_dimensions']
+        self.assertEqual(tool.invoke({})['intent'],'clarify')
+
+    def test_conditional_job_overwrites_only_planned_existing_column(self):
+        context=self.context();w=context['workspace'];jobs={}
+        op=self.tool(context).invoke(dict(product='철판',fields=['thickness'],
+            condition=dict(column_id='flag',operator='equals',value='Y'),output=dict(mode='existing',column_id='result')))['operation']
+        source=CreateOperationJob(operation_job_id=uuid4(),conversation_id=uuid4(),workspace_id=w['workspace_id'],
+            worksheet_id='sheet',table_id='table',task_type='investigation',row_start=1,row_count=50,operation=op)
+        job=create_job(source,jobs)
+        preview_job(job,JobPreview(rows=[dict(excel_row=40,values=['T 120.00 X W 4040 X L 6507 MM','Y'])],selected_count=1))
+        update_job(job,JobUpdate(status='PREVIEW_READY'))
+        with self.assertRaises(Exception):begin_apply(job,OutputPlacement(mode='existing',column_id='model'))
+        begin_apply(job,OutputPlacement(mode='existing',column_id='result'))
+        update_job(job,JobUpdate(status='APPLIED',result_column_ids=['result']))
+        with self.assertRaisesRegex(ValidationError,'기존 행 필터'):
+            CreateOperationJob.model_validate({**source.model_dump(), 'row_filter':dict(column_id='flag',operator='equals',value='N')})
+
+    def test_formula_tool_cannot_bypass_dimension_checks_but_numeric_comparison_is_allowed(self):
+        context=self.context()
+        for request in ['분석대상인 행에서 두께만 뽑아줘','두께 규격을 추출해줘','규격 파싱해줘']:
+            context['user_request']=request
+            start=next(t for t in build_request_tools(context) if t.name=='start_task')
+            with self.assertRaisesRegex(ValueError,'parse_dimensions'):
+                start.invoke(dict(task_type='formula',input_column_ids=['model','flag']))
+        for request in ['두께가 90 미만이면 분석대상여부에 N을 써줘', '문자열 길이를 뽑아줘']:
+            context['user_request']=request
+            start=next(t for t in build_request_tools(context) if t.name=='start_task')
+            self.assertEqual(start.invoke(dict(task_type='formula',input_column_ids=['result']))['task_type'],'formula')
+
+class DimensionRoutingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_wrong_formula_route_recovers_through_product_check_before_any_excel_action(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+        from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+        from agents.request_router import route_request
+        context=ConditionalDimensionTests.context(self)
+        context['workspace']['columns'][0]['role']='reference'
+        request='분석대상인 행에서 두께만 뽑아줘'
+        context['user_request']=request
+        for product in [None,'철판']:
+            args=dict(column_id='model',fields=['thickness'],condition=dict(column_id='flag',operator='equals',value='분석대상'))
+            if product: args['product']=product
+            replies=[AIMessage(content='',tool_calls=[dict(name='start_task',args=dict(task_type='formula',input_column_ids=['model','flag']),id='wrong')]),
+                     AIMessage(content='',tool_calls=[dict(name='parse_dimensions',args=args,id='correct')])]
+            model=SimpleNamespace(ainvoke=AsyncMock(side_effect=replies))
+            runtime=SimpleNamespace(model=SimpleNamespace(bind_tools=lambda *a,**kw:model),tools_prompt='test')
+            with patch('builtins.print'):
+                decision,_=await route_request(runtime,[HumanMessage(content=request)],task_context=context)
+            self.assertIsNone(decision.task_type)
+            self.assertEqual(decision.intent,'operation' if product else 'clarify')
+            feedback=[m.content for m in model.ainvoke.call_args.args[0] if isinstance(m,ToolMessage)]
+            self.assertIn('parse_dimensions',feedback[-1])
+            if product:
+                self.assertEqual(decision.operation.condition.column_id,'flag')
+            else:
+                self.assertIn('어떤 물품',decision.answer)
+
 if __name__=='__main__':unittest.main()

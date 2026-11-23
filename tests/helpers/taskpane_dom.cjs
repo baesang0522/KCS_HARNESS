@@ -74,11 +74,20 @@ function createDOM(html = fs.readFileSync(path.join(root, 'taskpane.html'), 'utf
     const messages = JSON.parse(fs.readFileSync(path.join(__dirname, '../../src/services/error_messages.json'), 'utf8'));
     document.getElementById('server-error-messages').textContent = JSON.stringify(messages);
     const values = new Map();
-    const localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value)};
+    const localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key)};
     const window = {crypto: require('node:crypto').webcrypto, errorMessages: messages, setTimeout: () => 1, clearTimeout() {}, markdownRenderer: {render: (node, text) => { node.textContent = text; }}};
     const sandbox = vm.createContext({window, document, localStorage, navigator: {userAgent: 'test'}, TextEncoder, Uint8Array, AbortController, DOMException, console});
     const h = {window, document, localStorage, sandbox,
         load: file => vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, {filename: file})};
+    // 기존 작업표를 사용하는 계산 테스트는 제거된 복구 버튼 대신 내부 준비 동작을 호출한다.
+    h.captureWorkspaceActions = () => {
+        const create = window.createWorkspaceUI;
+        window.createWorkspaceUI = (...args) => {
+            const ui = create(...args), bind = ui.bind;
+            ui.bind = handlers => { h.workspaceActions = handlers; bind(handlers); };
+            return ui;
+        };
+    };
     h.load('chat/task_messages.js');
     h.messages = window.createTaskMessages({enterConversation() {}, isBusy: () => false,
         appendMessage(role, text) { const message = document.createElement('div'), body = document.createElement('div');

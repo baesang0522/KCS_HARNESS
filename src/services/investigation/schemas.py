@@ -74,6 +74,21 @@ class Extraction(StrictModel):
     warnings: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=10)
 
 
+class CatalogRule(StrictModel):
+    table_ids: list[str] = Field(default_factory=list)
+    groups: list[str] = Field(default_factory=list)
+    specifications: list[str] = Field(default_factory=list)
+    row_numbers: list[str] = Field(default_factory=list)
+    hs_codes: list[Annotated[str, Field(pattern=r"^[0-9.]{4,14}$")]] = Field(default_factory=list)
+    requirements: str = ""
+    evidence: list[SourceReference] = Field(min_length=1)
+    uncertainty: str = ""
+
+
+class CatalogExtraction(Extraction):
+    table_rules: list[CatalogRule]
+
+
 class Evidence(PageEvidence):
     document_id: UUID
     filename: str

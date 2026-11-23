@@ -15,7 +15,7 @@ from services.documents.schemas import DocumentTable, ReferenceDocument
 from services.investigation.schemas import Extraction, ExtractConditions, SaveReview
 from services.investigation.extraction import extract_conditions, model_table_extraction
 from services.investigation.service import public_investigation, save_review
-from services.documents.tables import split_company_name
+from services.documents.tables import split_company_name, table_markdown
 from repositories.conversation_repository import MemoryConversationRepository
 
 
@@ -81,8 +81,9 @@ class PDFTableTests(unittest.TestCase):
             did = str(uuid4())
             note = '(시험 조건 ' + '상세 원문 ' * 30 + ')'
             rows = [[str(i + 1), 'MODEL-' + str(i) + '\n' + note] for i in range(236)]
+            table = dict(headers=['순번', '열처리 강종'], rows=rows)
             conv.documents[did] = ReferenceDocument(document_id=did, filename='catalog.pdf', pages=[dict(
-                page_number=1, text='원문 표', readable=True, tables=[dict(headers=['순번', '열처리 강종'], rows=rows)])])
+                page_number=1, text=table_markdown(table), readable=True, tables=[table])])
             model = SimpleNamespace(ainvoke=AsyncMock(side_effect=AssertionError('catalogue must not regenerate cells with LLM')))
             runtime = SimpleNamespace(advice_model=model)
             state = await extract_conditions(conv, ExtractConditions(document_id=did, revision=0), runtime, str(uuid4()))

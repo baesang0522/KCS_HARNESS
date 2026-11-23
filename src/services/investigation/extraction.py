@@ -6,12 +6,13 @@ from openai import APITimeoutError
 from prompts.loader import load_agent_prompt
 from services.documents.chunks import flatten_sources, group_sources, next_source_chunk
 from services.documents.service import find_document
-from services.documents.tables import is_model_table, split_model_cell, split_company_name
+from services.documents.tables import is_model_table, split_company_name
 from services.errors import ConflictError, ModelProcessingError
 from services.debug_log import log_event
 from models.structured import OutputLengthError, ask
-from services.investigation.schemas import Condition, Evidence, Extraction, ItemTarget, SupplierTarget
-from services.investigation.service import belongs_to_document, check_revision, same_workspace, target_description
+from services.investigation.schemas import CatalogExtraction, CatalogRule, Condition, Evidence, Extraction, ItemTarget, SupplierTarget
+from services.investigation.catalog import split_catalog, apply_catalog_rules
+from services.investigation.service import belongs_to_document, check_revision, same_workspace
 
 
 logger = logging.getLogger(__name__)
@@ -33,31 +34,8 @@ def evidence_sources(document):
 
 
 def model_table_extraction(document):
-    readable = [page for page in document.pages if page.readable]
-    if not readable or any(not page.tables or not all(is_model_table(t) for t in page.tables) for page in readable):
-        return None
-    conditions, warnings = [], []
-    for page in readable:
-        for table in page.tables:
-            for row in table.rows:
-                for category, value in zip(table.headers[1:], row[1:]):
-                    if not value.strip():
-                        continue
-                    model, note = split_model_cell(value)
-                    if not model:
-                        return None
-                    target = ItemTarget(kind="item", group=category, hs_codes=[], specification=model, requirements=note)
-                    title, description = target_description(target)
-                    quote = f"{table.headers[0]} {row[0]} / {category}: {value}"
-                    conditions.append(Condition(title=title, description=description, target=target,
-                        source_document_id=document.document_id, source_pages=[page.page_number],
-                        evidence=[Evidence(document_id=document.document_id, filename=document.filename,
-                                           page_number=page.page_number, quote=quote)]))
-        for line in page.text.splitlines():
-            if not line.startswith('|') and any(word in line for word in ['판독 유의', '원본 확인', '원본 대조', '잘림', '가려짐']):
-                if line not in warnings:
-                    warnings.append(line)
-    return conditions, warnings
+    catalog, remainder = split_catalog(document)
+    return ([cell[2] for cell in catalog], []) if catalog and not remainder.pages else None
 
 
 async def extract_conditions(conversation, payload, runtime, request_id):
@@ -71,16 +49,19 @@ async def extract_conditions(conversation, payload, runtime, request_id):
             document.link.workspace.model_dump(), state.workspace.model_dump()):
         raise ConflictError("문서와 조사의 연결 작업표가 다릅니다. 연결을 확인하세요.")
     next_state = state.model_copy(deep=True)
-    catalog = model_table_extraction(document)
+    catalog, remainder = split_catalog(document)
+    table_conditions = [cell[2] for cell in catalog]
+    next_state.conditions.extend(table_conditions)
+    table_rules = []
+    schema = CatalogExtraction if catalog else Extraction
     ids = dict(document_id=document_id, request_id=request_id)
-    log_event("pdf.extraction.route", **ids, mode="table" if catalog is not None else "llm",
+    log_event("pdf.extraction.route", **ids, mode="hybrid" if catalog and remainder.pages else "table" if catalog else "llm",
+              direct_conditions=len(catalog),
               pages=[dict(page_number=page.page_number, readable=page.readable, tables=len(page.tables),
                           model_tables=sum(is_model_table(table) for table in page.tables)) for page in document.pages])
-    if catalog is not None:
-        conditions, warnings = catalog
-        next_state.conditions.extend(conditions)
-    else:
-        pages, sources = evidence_sources(document)
+    warnings = []
+    if remainder.pages:
+        pages, sources = evidence_sources(remainder)
         prompt = load_agent_prompt(Path(__file__).resolve().parents[2] / "prompts/investigation.yml").render()
         entries = flatten_sources(pages)
         offset, context, warnings, seen = 0, [], [], set()
@@ -90,7 +71,7 @@ async def extract_conditions(conversation, payload, runtime, request_id):
                 raise ConflictError("사용자가 조사 조건 읽기를 중지했습니다.")
             base = {"goal": state.goal, "filename": document.filename, "context_pages": group_sources(context)}
             try:
-                batch = next_source_chunk(entries, offset, prompt, base, Extraction)
+                batch = next_source_chunk(entries, offset, prompt, base, schema)
             except ValueError as error:
                 raise ModelProcessingError("이어 읽을 공통 근거를 AI 요청에 구성하지 못했습니다. 조건은 저장하지 않았습니다. 다시 읽어 주세요.") from error
             batch = batch[:chunk_size]
@@ -104,8 +85,8 @@ async def extract_conditions(conversation, payload, runtime, request_id):
                               getattr(runtime.advice_model, "timeout_seconds", None)))
                 try:
                     # 모델 클라이언트의 시간 제한을 따른다. 일반 채팅 기준으로 먼저 끊지 않는다.
-                    extracted = await ask(runtime.advice_model, prompt, "conditions", data, Extraction)
-                    log_event("pdf.model.completed", **ids, offset=offset, conditions=len(extracted.conditions),
+                    extracted = await ask(runtime.advice_model, prompt, "conditions", data, schema)
+                    log_event("pdf.model.completed", **ids, offset=offset, conditions=len(extracted.conditions), table_rules=len(getattr(extracted, "table_rules", [])),
                               elapsed_ms=round((perf_counter() - started) * 1000))
                     break
                 except OutputLengthError as error:
@@ -129,22 +110,33 @@ async def extract_conditions(conversation, payload, runtime, request_id):
                     raise ModelProcessingError("조사 조건 응답을 확인하지 못했습니다. 조건은 저장하지 않았습니다. 다시 읽어 주세요.") from error
             available = {(item["page_number"], item["source_id"]): item for item in [*context, *batch]}
             current = {(item["page_number"], item["source_id"]) for item in batch}
-            for candidate in extracted.conditions:
-                if not candidate.title.strip() or not candidate.description.strip():
+            for candidate in [*extracted.conditions, *getattr(extracted, "table_rules", [])]:
+                if not isinstance(candidate, CatalogRule) and (not candidate.title.strip() or not candidate.description.strip()):
                     raise ModelProcessingError("빈 조사 조건이 반환되어 저장하지 않았습니다.")
-                references = {(item.page_number, item.source_id) for item in candidate.evidence}
+                references = set()
                 evidence = []
                 for item in candidate.evidence:
                     quote = sources.get((item.page_number, item.source_id))
                     if (item.page_number, item.source_id) not in available:
                         raise ModelProcessingError(
-                            f"AI가 ‘{candidate.title}’의 근거 위치를 잘못 지정했습니다 "
+                            f"AI가 ‘{getattr(candidate, 'title', '공통 조건')}’의 근거 위치를 잘못 지정했습니다 "
                             f"({item.page_number}쪽, 구절 {item.source_id}). PDF는 유지했으며 조건은 저장하지 않았습니다. 추출 다시 시도를 눌러 주세요.")
+                    if quote.startswith("[직접 추출 표]"):
+                        continue  # 합성한 위치 안내는 원문 인용으로 저장하지 않는다.
+                    references.add((item.page_number, item.source_id))
                     evidence.append(Evidence(page_number=item.page_number, quote=quote,
                                              document_id=document.document_id, filename=document.filename))
+                if not evidence:
+                    raise ModelProcessingError("조건의 설명문 근거가 없습니다. 조건은 저장하지 않았습니다.")
                 # Context is repeated for interpretation, not for extracting the same rows again.
                 if not references & current:
                     continue
+                if isinstance(candidate, CatalogRule):
+                    table_rules.append((candidate, evidence))
+                    continue
+                if isinstance(candidate.target, ItemTarget) and any(
+                        candidate.target.specification == item.target.specification for item in table_conditions):
+                    raise ModelProcessingError("AI가 직접 추출된 표 항목을 다시 작성했습니다. 공통 조건 연결 응답을 확인해 주세요.")
                 if isinstance(candidate.target, SupplierTarget):
                     names = split_company_name(candidate.target.company_name)
                     if names:
@@ -170,6 +162,7 @@ async def extract_conditions(conversation, payload, runtime, request_id):
             offset += len(batch)
     if request_id in conversation.cancelled_requests:
         raise ConflictError("사용자가 조사 조건 읽기를 중지했습니다.")
+    apply_catalog_rules(catalog, table_rules)
     next_state.extracted_conditions[document_id] = [item.model_copy(deep=True) for item in next_state.conditions
                                                    if belongs_to_document(item, document_id)]
     next_state.document_notes[document_id] = warnings + [

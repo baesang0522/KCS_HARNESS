@@ -36,11 +36,15 @@
                     if (previous) value.output = {mode: 'existing', column_id: String(previous.column_id)};
                 }
                 output = Object.assign({mode: 'new', anchor: String(source.column_id), side: 'after', name: value.kind === 'dimensions' ? '규격' : value.extraction_mode === 'pdf' ? '모델명' : source.header + ({split: value.part === 'last' ? ' 마지막 단어' : ' 단어', replace: ' 치환', map: ' 대표값', match_suppliers: ' 그룹', group: ' 통일', extract: ' 모델명 후보'}[value.kind] || ' 정제')}, Object.fromEntries(Object.entries(value.output || {}).filter(function (entry) { return entry[1] !== null; })));
-                if (value.condition && value.kind !== "match_suppliers") {
+                if (value.kind === 'dimensions' && !value.condition_scope) value.condition_scope = 'all';
+                if (value.condition && !["match_suppliers", "dimensions"].includes(value.kind)) {
                     if (value.output && (value.output.mode !== 'existing' || value.output.column_id !== value.destination_column_id)) throw new Error('조건부 변경의 저장 열이 일치하지 않습니다.');
                     output = {mode: 'existing', column_id: value.destination_column_id};
                 }
-                if (value.kind === 'dimensions' && output.mode === 'existing') throw new Error('치수와 확인 상태를 함께 보존하도록 새 결과 열로 요청해 줘.');
+                if (value.kind === 'dimensions' && output.mode === 'existing') {
+                    if (!value.dimensions.fields || value.dimensions.fields.length !== 1) throw new Error('기존 열에는 추출할 치수 항목 하나를 지정해 줘.');
+                    if (value.column_ids.includes(output.column_id) || value.condition && value.condition.column_id === output.column_id) throw new Error('치수 결과 열은 원본·조건 열과 달라야 해.');
+                }
                 if (value.extraction_mode === 'pdf' && output.mode === 'existing') throw new Error('모델명과 종류를 함께 저장할 새 결과 열로 요청해 줘.');
                 if (output.mode === 'existing') { output.name = find(output.column_id).header; delete output.anchor; }
                 else { find(output.anchor); if (!output.name || !output.name.trim()) throw new Error('새 열 이름을 알려주세요.'); }
@@ -65,7 +69,7 @@
                     var after = special || existing ? values.slice(0, 1) : values;
                     return {changed: dimensions ? values.slice(0, -1).some(Boolean) : pdf ? Boolean(values[0]) : after.length !== 1 || before !== after[0], blank: dimensions ? values.slice(0, -1).some(function (v) { return !v; }) : pdf ? !values[0] : after.some(function (v) { return !String(v).trim(); }),
                         source: original.values[0], group: values[0],
-                        cells: [original.excel_row].concat(matching && existing ? [original.values[0]] : []).concat([before]).concat(dimensions ? [data.extracted_texts[i]] : []).concat(after).concat(special ? [values[1]] : [])};
+                        cells: [original.excel_row].concat(matching && existing ? [original.values[0]] : []).concat([before]).concat(dimensions ? [data.extracted_texts[i]] : []).concat(after).concat(special || dimensions && existing ? [values[values.length - 1]] : [])};
                 });
                 rows.sort(function (a, b) { return Number(b.changed || b.blank) - Number(a.changed || a.blank); });
                 var title = data.snapshot.columns.map(function (c) { return c.header; }).join(' · ');
@@ -73,13 +77,13 @@
                 text += existing ? '저장 위치: 작업표의 기존 열 ‘' + names.join('’, ‘') + '’\n' : '저장 위치: 새 열 ‘' + names.join('’, ‘') + '’ · ‘' + find(output.anchor).header + '’ ' + (output.side === 'before' ? '앞' : '뒤') + '\n';
                 text += (data.operation.condition_scope === 'all' ? '작업표 전체에서 처리 · ' : '현재 작업 범위 안에서 처리 · ') + '작업 범위: ' + window.operationsSheet.describeFilter(data.snapshot.row_filter, columns) + '\n';
                 if (data.operation.condition) text += '추가 조건: ' + window.operationsSheet.describeFilter(data.operation.condition, columns) + '\n';
-                if (matching) text += (data.operation.similarity_method === 'sequence' ? 'SequenceMatcher(양방향 평균)' : data.operation.similarity_method === 'levenshtein' ? 'Levenshtein' : '자동 매칭') + ' 방식 · 기준 거래처 ' + data.job.supplier_references.length + '개 × 고유 거래처 ' + data.unique_count.toLocaleString() + '개 비교. 최고 점수 90 이상만 반영 · 동점은 기준 목록 뒤 항목 · 대소문자·연속 공백 통일.\n' + (existing ? '그룹이 빈 행만 비교했어. 기존 그룹·점수는 유지하고, 90 이상인 행만 채워.\n' : '90 미만·빈 거래처의 그룹명은 빈칸으로 남겨.\n');
+                if (matching) text += (data.operation.similarity_method === 'sequence' ? 'SequenceMatcher(양방향 평균)' : data.operation.similarity_method === 'levenshtein' ? 'Levenshtein' : '자동 매칭') + ' 방식 · 기준 거래처 ' + data.job.supplier_references.length + '개 × 고유 거래처 ' + data.unique_count.toLocaleString() + '개 비교. 최고 점수 ' + (data.operation.similarity_threshold ?? 90) + ' 이상만 반영 · 동점은 기준 목록 뒤 항목 · 대소문자·연속 공백 통일.\n' + (existing ? '그룹이 빈 행만 비교했어. 기존 그룹·점수는 유지하고, ' + (data.operation.similarity_threshold ?? 90) + ' 이상인 행만 채워.\n' : (data.operation.similarity_threshold ?? 90) + ' 미만·빈 거래처의 그룹명은 빈칸으로 남겨.\n');
                 if (dimensions) text += data.parsing_summary + '\n확인 필요 ' + data.values.filter(function (v) { return v[v.length - 1].startsWith('확인 필요'); }).length + '행 · 미검출 ' + data.values.filter(function (v) { return v[v.length - 1] === '미검출'; }).length + '행.\n';
                 if (pdf) text += 'PDF 모델명과 대소문자·연속 공백을 통일해 대조했어. 종류는 PDF 분류 그대로이고, 미검출은 빈칸이야.\n여러 모델·분류가 발견되면 두 열을 같은 순서로 줄바꿈해 표시해. 복수 후보 ' + data.values.filter(function (v) { return v[0].includes('\n'); }).length + '행. 두께 등 추가 조건의 충족 여부는 판정하지 않아.\n';
                 text += '빈 결과 ' + rows.filter(function (r) { return r.blank; }).length.toLocaleString() + '행. 아직 셀은 변경하지 않았어.';
                 if (special && !matching) text += '\n' + ['변경', '유지', '확인 필요', '단일 후보', '미검출', '확인 필요 · 복수 후보'].map(function (status) { var count = data.values.filter(function (v) { return v[1] === status; }).length; return count ? status + ' ' + count + '행' : ''; }).filter(Boolean).join(' · ');
                 rows.slice(0, 3).forEach(function (row) { text += '\n변경 예시 ' + row.cells[0] + '행: ' + (matching ? JSON.stringify(row.source) + ' → ' + JSON.stringify(row.group) : JSON.stringify(row.cells[1]) + ' → ' + row.cells.slice(2, special ? -1 : undefined).map(function (v) { return JSON.stringify(v); }).join(' | ')); });
-                if (existing && special && !output.score_column_id) text += '\n기존 열에는 결과값만 반영하고 ' + (matching ? '점수' : '상태 정보') + '는 아래 결과에서 확인할 수 있어.';
+                if (existing && (special || dimensions) && !output.score_column_id) text += '\n기존 열에는 결과값만 반영하고 ' + (matching ? '점수' : '상태 정보') + '는 아래 결과에서 확인할 수 있어.';
                 if (matching) {
                     var seen = new Set();
                     rows = rows.filter(function (row) {
@@ -89,7 +93,7 @@
                     });
                     text += '\n아래 표는 같은 입력·결과를 한 번씩 보여줘. 적용하면 해당 거래처의 대상 행 모두에 반영해.';
                 }
-                offer = messages.confirm(text, {apply: handlers.apply, cancel: async function () { await handlers.edit(); operation = output = null; }}, ['Excel 행'].concat(matching && existing ? ['거래처', '이전 그룹'] : ['이전 값']).concat(dimensions ? ['찾은 치수 표기'] : []).concat(names.slice(0, existing ? 1 : special ? 1 : undefined)).concat(special ? [matching ? '유사도 점수' : '상태'] : []), rows.map(function (r) { return r.cells; }));
+                offer = messages.confirm(text, {apply: handlers.apply, cancel: async function () { await handlers.edit(); operation = output = null; }}, ['Excel 행'].concat(matching && existing ? ['거래처', '이전 그룹'] : ['이전 값']).concat(dimensions ? ['찾은 치수 표기'] : []).concat(names.slice(0, existing ? 1 : special ? 1 : undefined)).concat(special || dimensions && existing ? [matching ? '유사도 점수' : '상태'] : []), rows.map(function (r) { return r.cells; }));
             },
             extractionSuggestions: function (data) {
                 var expected = operation;

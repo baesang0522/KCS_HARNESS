@@ -135,6 +135,8 @@ async def run_request_graph(runtime, messages, task_context: dict, *, log_contex
                       will_retry=state["failures"] < 1,
                       elapsed_ms=round((perf_counter() - started) * 1000))
             if state["failures"] >= 1:
+                if isinstance(error, ValidationError) and any("output" in item["loc"] for item in error.errors(include_input=False)):
+                    return {"decision": clarification("결과 저장 위치 설정의 형식이 잘못되어 작업을 시작하지 못했어. 셀은 변경하지 않았어.")}
                 if isinstance(error, RepeatedReadError):
                     raise
                 if isinstance(error, ReviewTargetError):
@@ -147,7 +149,7 @@ async def run_request_graph(runtime, messages, task_context: dict, *, log_contex
 
             if isinstance(error, ValidationError):
                 detail = "; ".join(
-                    item["msg"]
+                    ".".join(map(str, item["loc"])) + ": " + item["msg"]
                     for item in error.errors(include_input=False)
                 )
             else:

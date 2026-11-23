@@ -1,4 +1,5 @@
 """화면과 자연어 요청이 공유하는 연산 계약."""
+import json
 from uuid import UUID
 from decimal import Decimal, InvalidOperation
 import re
@@ -186,6 +187,21 @@ class OperationOutput(StrictModel):
     anchor: ColumnId | None = None
     side: Literal["before", "after"] = "after"
 
+    @model_validator(mode="before")
+    @classmethod
+    def parse_output(cls, value):
+        # 일부 모델은 중첩된 저장 위치 객체를 JSON 문자열로 한 번 더 직렬화한다.
+        if isinstance(value, str):
+            if value.strip() == "new":
+                return {"mode": "new"}
+            try:
+                value = json.loads(value)
+            except ValueError:
+                raise ValueError('output은 저장 위치 객체여야 합니다. 새 열은 {"mode":"new"}, 기존 열은 {"mode":"existing","column_id":"실제 열 ID"}로 전달하세요.') from None
+        if not isinstance(value, (dict, cls)):
+            raise ValueError('output은 저장 위치 객체여야 합니다. 문자열·목록 대신 mode와 필요한 열 정보를 객체로 전달하세요.')
+        return value
+
     @model_validator(mode="after")
     def validate_output(self):
         if self.score_column_id and (self.mode != "existing" or self.score_column_id == self.column_id):
@@ -201,6 +217,7 @@ class OperationOutput(StrictModel):
 
 class Operation(StrictModel):
     dimensions: DimensionRules | None = None
+    similarity_threshold: float | None = Field(default=None, ge=0, le=100)
     similarity_method: Literal["auto", "levenshtein", "sequence"] | None = None
     output: OperationOutput | None = None
     kind: Literal["preprocess", "split", "group", "replace", "map", "extract", "set", "match_suppliers", "dimensions"]
@@ -223,14 +240,23 @@ class Operation(StrictModel):
 
     @property
     def input_column_ids(self) -> list[str]:
-        return self.column_ids + ([self.value_column_id] if self.kind == "group" else [])
+        ids = self.column_ids + ([self.value_column_id] if self.kind == "group" else [])
+        if self.kind == "dimensions" and self.condition and self.condition.column_id not in ids:
+            ids = ids + [self.condition.column_id]
+        return ids
 
     @model_validator(mode="after")
     def validate_operation(self):
         if (self.kind == "dimensions") != (self.dimensions is not None):
             raise ValueError("규격 파싱에는 품목과 파싱 규칙이 필요합니다.")
-        if self.kind == "dimensions" and self.output and self.output.mode == "existing":
-            raise ValueError("치수와 확인 상태를 함께 보존하도록 새 결과 열을 사용하세요.")
+        if self.kind == "dimensions":
+            if self.destination_column_id is not None:
+                raise ValueError("치수 결과 위치는 output으로 지정하세요.")
+            if self.output and self.output.mode == "existing":
+                if len(self.dimensions.selected_fields) != 1:
+                    raise ValueError("기존 열에는 추출할 치수 항목 하나를 지정하세요.")
+                if self.output.column_id in self.input_column_ids:
+                    raise ValueError("치수 결과 열은 원본·조건 열과 달라야 합니다.")
         if self.kind == "match_suppliers":
             if len(self.column_ids) != 1:
                 raise ValueError("비교할 해외거래처 열 하나를 지정하세요.")
@@ -246,9 +272,9 @@ class Operation(StrictModel):
                 self.condition = expected
             elif self.condition:
                 raise ValueError("미분류 조건에는 기존 그룹 결과 열이 필요합니다.")
-        elif self.similarity_method is not None or (self.output and self.output.score_column_id):
-            raise ValueError("유사도 방식과 점수 열은 거래처 매칭에서만 지정합니다.")
-        if self.kind != "match_suppliers" and (self.condition is not None or self.destination_column_id is not None):
+        elif self.similarity_method is not None or self.similarity_threshold is not None or (self.output and self.output.score_column_id):
+            raise ValueError("유사도 방식·기준 점수와 점수 열은 거래처 매칭에서만 지정합니다.")
+        if self.kind not in {"match_suppliers", "dimensions"} and (self.condition is not None or self.destination_column_id is not None):
             if self.kind != "set" or self.condition is None or self.destination_column_id is None:
                 raise ValueError("조건부 값 변경에는 조건과 반영할 기존 열을 함께 지정하세요.")
             if self.column_ids != [self.condition.column_id]:
@@ -339,10 +365,11 @@ class OperationRequest(StrictModel):
             raise ValueError("대상 열 개수와 행의 값 개수가 다릅니다.")
         if sum(len(value) for row in self.rows for value in row.values) > 16000000:
             raise ValueError("처리할 문자열이 너무 많습니다. 대상 행을 줄여 주세요.")
-        if self.operation.condition and self.operation.kind == "set":
+        if self.operation.condition and self.operation.kind in {"set", "dimensions"}:
             condition = self.operation.condition
+            index = self.operation.input_column_ids.index(condition.column_id)
             for row in self.rows:
-                value = row.values[0]
+                value = row.values[index]
                 matched = condition.matches(value)
                 if not matched:
                     raise ValueError("요청한 조건에 맞지 않는 행이 포함되어 있습니다.")

@@ -97,7 +97,7 @@
             status: status,
             bind: function (handlers) {
                 el("import-confirm").addEventListener("change", updateImport);
-                ["select", "start", "restore", "import-add"
+                ["select", "start", "import-add"
                 ].forEach(function (name) {
                     el(name).addEventListener("click", handlers[name]);
                 });

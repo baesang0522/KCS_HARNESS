@@ -69,7 +69,7 @@ test('stop aborts local request, calls server cancellation, and ignores a late r
     assert.equal(h.actions.length, 0); assert(!h.node('conversation').textContent.includes('늦은 결과'));
     assert(h.node('conversation').textContent.includes('요청을 중지했습니다'));
     assert.equal(h.node('message').value, '긴 요청'); assert.equal(h.chat.isBusy(), false);
-    assert.equal(JSON.parse(h.localStorage.getItem('kcs-chat-session-v1')).pending_request, null);
+    assert.equal(h.localStorage.getItem('kcs-chat-session-v1'), null);
 });
 
 test('advice updates the existing notice through analysis and verification, then stops polling', async () => {
@@ -130,7 +130,7 @@ test('progress lookup failure does not discard a successful analysis', async () 
     assert.equal(h.node('notice').textContent, '');
 });
 
-test('retry keeps request ID; new question changes it; stale saved conversation recovers', async () => {
+test('retry keeps request ID within this pane; new question changes it; saved session is ignored', async () => {
     const h = await setup({conversation_id: 'old'});
     assert.equal(h.chat.getConversationId(), 'conversation');
     h.reply = async () => { throw new Error('network'); };
@@ -142,8 +142,8 @@ test('retry keeps request ID; new question changes it; stale saved conversation 
 });
 
 test('page bootstrap wires chat and formula callbacks before initialization', async () => {
-    const h = createDOM(); let workspaceOptions, formulaOptions, imports=0, scopes=0, reviewRequest, scopeRequest;
-    const stub = {cancelPending() {}, isProcessing:()=>false, open:async()=>{}, dismiss() {}, reset() { this.referenceTarget=()=>null; }, setBusy() {}, context: async () => null, referenceTarget: () => null,
+    const h = createDOM(); let workspaceOptions, formulaOptions, imports=0, scopes=0, reviewRequest, scopeRequest, opened=0, resets=0;
+    const stub = {cancelPending() {}, isProcessing:()=>false, open:async()=>{opened++;}, dismiss() {}, reset() { resets++;this.referenceTarget=()=>null; }, setBusy() {}, context: async () => null, referenceTarget: () => null,
         openSourceColumns:async()=>{imports++;}, openScope:async()=>{scopes++;},
         changeScope:async(request,expected)=>{scopeRequest={request,expected};return "범위 변경 완료";},
         openGroups:async(column,request)=>{reviewRequest={column,request};},
@@ -189,6 +189,36 @@ test('page bootstrap wires chat and formula callbacks before initialization', as
         assert.equal(reviewRequest,undefined);
         assert.match(h.document.getElementById('notice').textContent,/현재 사용하지|보류 중/);
     }
+    const home=h.document.getElementById('new-task');
+    assert.equal(home.getAttribute('aria-label'),'새 작업');
+    assert.equal(h.document.getElementById('work-restore'),null);
+    stub.referenceTarget=()=>({workspace_id:'work',task_type:'investigation'});
+    h.document.getElementById('conversation').textContent='이전 대화';
+    h.document.getElementById('message').value='남아 있는 입력';
+    const oldResets=resets,oldOpened=opened;
+    let newCalls=0;
+    h.window.apiClient.requestJson=async url=>{
+        if(url==='/conversations'){newCalls++;throw Error('새 대화 연결 실패');}
+        throw Error('unexpected '+url);
+    };
+    workspaceOptions.setBusy(true);
+    assert.equal(home.disabled,true);await home.emit('click');assert.equal(newCalls,0);
+    workspaceOptions.setBusy(false);await home.emit('click');
+    assert.equal(newCalls,1);assert.equal(resets,oldResets);assert.equal(opened,oldOpened);
+    assert.equal(stub.referenceTarget().workspace_id,'work');
+    assert.equal(h.document.getElementById('conversation').textContent,'이전 대화');
+    assert.match(h.document.getElementById('notice').textContent,/새 대화 연결 실패/);
+    h.window.apiClient.requestJson=async url=>url==='/conversations'?{conversation_id:'new-conversation'}:
+        url.startsWith('/write-recovery')?[]:url.endsWith('/agent-runs')?{run:null}:
+        url.endsWith('/documents')?{documents:[]}:{revision:0,goal:'',conditions:[],document_notes:{},columns:[]};
+    await home.emit('click');
+    assert.equal(workspaceOptions.getConversationId(),'new-conversation');
+    assert.equal(stub.referenceTarget(),null);assert.equal(resets,oldResets+2);
+    assert.equal(opened,oldOpened+1);assert.equal(home.disabled,false);
+    assert.equal(h.document.getElementById('conversation').textContent,'');
+    assert.equal(h.document.getElementById('message').value,'');
+    assert.equal(button.textContent,'작업 준비');
+
 });
 
 test('all application scripts load in HTML order and the real controllers initialize', async () => {
@@ -226,7 +256,7 @@ test('chat displays server validation text without another failure message and c
     h.node('message').value = '정제해줘'; await h.chat.sendMessage();
     const last = h.node('conversation').children.at(-1);
     assert.equal(last.children[1].textContent, message);
-    assert.equal(JSON.parse(h.localStorage.getItem('kcs-chat-session-v1')).pending_request, null);
+    assert.equal(h.localStorage.getItem('kcs-chat-session-v1'), null);
     assert.equal(h.chat.isBusy(), false);
 });
 
@@ -281,4 +311,33 @@ test('chat sends review sheet identity separately from the transaction workspace
  h.node('message').value='내 거래처 검토의 회사명을 대문자로 바꿔줘';await h.chat.sendMessage();
  const request=h.requests.find(r=>r.url==='/chat').body;
  assert.deepEqual(request.review_sheets,h.reviewSheets);assert.equal(request.workspace.row_count,90000);
+});
+
+
+test('reopening ignores saved chat and pending request instead of restoring chat without its workspace', async()=>{
+    const saved={conversation_id:'old',pending_request:{conversation_id:'old',request_id:'old-request',message:'이전 변경 요청',workspace:{workspace_id:'old-work'}}};
+    const h=await setup(saved);
+    assert.deepEqual(h.requests.map(r=>r.url),['/conversations']);
+    assert.equal(h.localStorage.getItem('kcs-chat-session-v1'),null);
+    assert.equal(h.node('message').value,'');assert.equal(h.node('conversation').textContent,'');
+    assert.equal(h.node('welcome-content').hidden,false);
+    h.context=null;h.node('message').value='이전 변경 요청';await h.chat.sendMessage();
+    const request=h.requests.find(r=>r.url==='/chat').body;
+    assert.equal(request.conversation_id,'conversation');assert.equal(request.workspace,null);
+    assert.notEqual(request.request_id,'old-request');
+    assert.equal(h.localStorage.getItem('kcs-chat-session-v1'),null);
+});
+
+test('new conversation drops the in-memory pending retry while storage failure does not block startup',async()=>{
+    const h=await setup();h.reply=async()=>{throw Error('network');};
+    h.node('message').value='같은 요청';await h.chat.sendMessage();
+    const first=h.requests.find(r=>r.url==='/chat').body.request_id;
+    await h.chat.newConversation();
+    h.reply=async()=>({answer:'완료',ui_action:null});
+    h.node('message').value='같은 요청';await h.chat.sendMessage();
+    assert.notEqual(h.requests.filter(r=>r.url==='/chat').at(-1).body.request_id,first);
+    h.localStorage.removeItem=()=>{throw Error('storage disabled');};
+    await h.chat.initialize();
+    assert.equal(h.chat.isBusy(),false);assert.equal(h.node('notice').textContent,'');
+    assert.equal(h.node('conversation').textContent,'');
 });

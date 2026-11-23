@@ -12,16 +12,17 @@ async function setup(values=['MATCH','LOW','MATCH','BORDER','']){
   if(url==='/operation-jobs')return job={source:body,supplier_references:[{group:'앞',company_name:'FIRST'},{group:'뒤',company_name:'LAST'}]};
   if(url.includes('/preview')){
    if(h.cancelOnPreview){controller.cancelPending();throw new DOMException('중지','AbortError');}
-   return {headers:['거래처 그룹','유사도 점수'],changed_count:body.rows.length,rows:body.rows.map(r=>({...r,values:r.values[0]==='LOW'?(['sequence','auto'].includes(job.source.operation.similarity_method)?['시퀀스 그룹','94.252874']:['','89']):!r.values[0].trim()?['','']:['뒤',r.values[0]==='BORDER'?'90':'100']}))};
+   return {headers:['거래처 그룹','유사도 점수'],changed_count:body.rows.length,rows:body.rows.map(r=>({...r,values:r.values[0]==='ROUND'?[(job.source.operation.similarity_threshold ?? 90)<=84.6153852?'뒤':'','84.615385']:r.values[0]==='LOW'?(['sequence','auto'].includes(job.source.operation.similarity_method)?['시퀀스 그룹','94.252874']:[(job.source.operation.similarity_threshold ?? 90)<=89?'뒤':'','89']):!r.values[0].trim()?['','']:['뒤',r.values[0]==='BORDER'?'90':'100']}))};
   }
   return job;
  }};
  ['workspace/workspace_sheet.js','workspace/table_reader.js','operations/operations_sheet.js','operations/operations_ui.js','operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js','workspace/result_dependencies.js','workspace/workspace_actions.js','workspace/workspace.js'].forEach(h.load);
+ h.captureWorkspaceActions();
  controller=h.window.createWorkspaceController({messages:h.messages,api,getConversationId:()=> 'conversation',isBusy:()=>busy,
   setBusy:v=>{busy=v;controller?.setBusy(v);},complete:message=>completed.push(message),enterConversation(){},beforeApply:async()=>{if(h.unsavedPDF)throw Error('검토 시트에 반영하지 않은 수정');}});
- await h.document.getElementById('work-restore').emit('click');
+ await h.workspaceActions.restore();
  const operation={kind:'match_suppliers',column_ids:[f.work.columns[0].column_id]};
- async function preview(output,method="levenshtein"){await controller.configure({...operation,output,similarity_method:method});await controller.previewOperation();}
+ async function preview(output,method="levenshtein",threshold){await controller.configure({...operation,output,similarity_method:method,similarity_threshold:threshold});await controller.previewOperation();}
  return {...f,h,host,controller,requests,completed,preview,get stored(){return stored;}};
 }
 test('n:N preview deduplicates names, retains scores and applies two new columns to all corresponding rows',async()=>{
@@ -126,4 +127,30 @@ test('automatic follow-up preserves the existing pair and fills only remaining b
  assert.equal(f.sheet.cells[0].length,before[0].length);assert.deepEqual(f.sheet.cells[2].slice(2,4),['시퀀스 그룹','94.252874']);
  for(const i of [1,3,4,5])assert.deepEqual(f.sheet.cells[i],before[i]);
  assert.equal(f.requests.slice(start).filter(r=>r.url.includes('/apply')).length,1);
+});
+
+test('lowering threshold fills existing blank groups and scores while preserving classified rows',async()=>{
+ const f=await setup();await f.preview();await f.h.messages.command('적용');
+ const before=structuredClone(f.sheet.cells),start=f.requests.length;
+ await f.preview(undefined,'levenshtein',80);
+ const job=f.requests.slice(start).find(r=>r.url==='/operation-jobs').body;
+ assert.equal(job.operation.similarity_threshold,80);assert.equal(job.operation.output.mode,'existing');
+ assert.match(f.h.chatText(),/최고 점수 80 이상/);
+ await f.h.messages.command('적용');
+ assert.deepEqual(f.sheet.cells[2].slice(2,4),['뒤','89']);
+ for(const i of [1,3,4,5])assert.deepEqual(f.sheet.cells[i],before[i]);
+ assert.equal(f.sheet.cells[0].length,before[0].length);
+});
+test('custom threshold is shown and applied to new columns, including zero and decimal criteria',async()=>{
+ for(const threshold of [0,80,88.5]){
+  const f=await setup(['LOW']);await f.preview(undefined,'levenshtein',threshold);
+  assert(f.h.chatText().includes('최고 점수 '+threshold+' 이상'));
+  await f.h.messages.command('적용');assert.deepEqual(f.sheet.cells[1].slice(2,4),['뒤','89']);
+ }
+});
+
+test('existing output uses server decision before score rounding at decimal threshold',async()=>{
+ const f=await setup(['ROUND']);await f.preview();await f.h.messages.command('적용');
+ await f.preview(undefined,'levenshtein',84.6153851);await f.h.messages.command('적용');
+ assert.deepEqual(f.sheet.cells[1].slice(2,4),['뒤','84.615385']);
 });

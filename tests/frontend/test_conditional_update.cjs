@@ -24,10 +24,11 @@ async function fixture(rows, scopeRows = 1) {
     }};
     ['workspace/workspace_sheet.js','workspace/table_reader.js','operations/operations_sheet.js','operations/operations_ui.js',
         'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js','workspace/result_dependencies.js','workspace/workspace_actions.js','workspace/workspace.js'].forEach(h.load);
+    h.captureWorkspaceActions();
     controller=h.window.createWorkspaceController({messages:h.messages,api,getConversationId:()=> 'conversation',isBusy:()=>busy,
         setBusy:v=>{busy=v;controller?.setBusy(v);},complete:text=>completed.push(text),enterConversation(){}});
     const node=id=>h.document.getElementById(id);
-    await node('work-restore').emit('click');
+    await h.workspaceActions.restore();
     const operation={kind:'set',condition_scope:'all',column_ids:[f.work.columns[0].column_id],assigned_value:'재확인',rules:[],delimiter:null,
         condition:{column_id:f.work.columns[0].column_id,operator:'contains',value:'AB-12'},
         destination_column_id:f.work.columns[1].column_id};

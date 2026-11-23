@@ -38,7 +38,7 @@
     function updateWorkspaceButton() {
         var hasWorkspace = workspace && workspace.referenceTarget(), button = document.getElementById('open-workspace');
         button.textContent = hasWorkspace ? '열 추가' : '작업 준비';
-        button.title = hasWorkspace ? '원본 열을 현재 작업표에 추가' : '작업표 만들기 또는 저장된 작업 이어가기';
+        button.title = hasWorkspace ? '원본 열을 현재 작업표에 추가' : '원본에서 작업표 만들기';
     }
     function completeTask(text, outcome) {
         if (agent && outcome) agent.complete(outcome, text);
@@ -46,13 +46,23 @@
         messages.say(text);
         if (recovery && outcome) recovery.refresh();
     }
+    async function newTask() {
+        if (chat.isBusy()) return;
+        chat.setBusy(true);
+        try {
+            if (agent) await agent.pause();
+            await chat.newConversation();
+            await workspace.open();
+        } finally { chat.setBusy(false); }
+    }
+    document.getElementById('new-task').addEventListener('click', async function () {
+        try { await newTask(); }
+        catch (error) { document.getElementById('notice').textContent = error.message; }
+    });
     async function localCommand(text) {
         if (await messages.command(text)) return true;
         if (/^(새 조사|새 조사 시작)[.!]?$/.test(text)) {
-            if (agent) await agent.pause();
-            chat.setBusy(true);
-            try { await chat.newConversation(); } finally { chat.setBusy(false); }
-            await workspace.open(); return true;
+            await newTask(); return true;
         }
         if (/^(PDF\s*)?수정 내용 반영[.!]?$/i.test(text)) {
             messages.reset(); workspace.cancelPending(); formula.dismiss();

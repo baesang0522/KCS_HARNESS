@@ -31,7 +31,7 @@ def validate_references(job, conversation):
         raise ConflictError("비교 후 기준 거래처 목록이나 순서가 바뀌었습니다. 새 미리보기를 확인하세요.")
 
 
-def compare(rows, suppliers, method="auto"):
+def compare(rows, suppliers, method="auto", threshold=90):
     if method not in {"auto", "levenshtein", "sequence"}:
         raise ValueError("지원하지 않는 유사도 방식입니다.")
     if not suppliers:
@@ -52,9 +52,9 @@ def compare(rows, suppliers, method="auto"):
                         # Equal scores deliberately select the later saved reference.
                         if current >= best:
                             best, group = current, label
-                    if best >= 90:
+                    if best >= threshold:
                         break
-            matches[value] = [group if best >= 90 else "", format(best, ".6f").rstrip("0").rstrip(".") if best >= 0 else ""]
+            matches[value] = [group if best >= threshold else "", format(best, ".6f").rstrip("0").rstrip(".") if best >= 0 else ""]
         result.append(Row(excel_row=row.excel_row, values=matches[value]))
     return OperationResponse(headers=["거래처 그룹", "유사도 점수"], rows=result,
                              changed_count=sum(row.values[0] != original.values[0] for row, original in zip(result, rows)))

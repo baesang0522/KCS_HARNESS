@@ -30,6 +30,41 @@ class SupplierMatchingTests(unittest.TestCase):
         self.assertEqual(compare(rows[:1], list(reversed(refs))).rows[0].values[0], '앞 회사')
         self.assertEqual(compare([Row(excel_row=2, values=['  Acme   steel  '])], [dict(group='회사',company_name='ACME STEEL')]).rows[0].values, ['회사','100'])
 
+    def test_custom_threshold_boundary_ties_and_auto_fallback(self):
+        refs = [dict(group='앞', company_name='A'), dict(group='뒤', company_name='B')]
+        rows = [Row(excel_row=i+2, values=[v]) for i, v in enumerate(['above', 'boundary', 'below', ''])]
+        scores = {'ABOVE': 84.615385, 'BOUNDARY': 80, 'BELOW': 79.9999996}
+        for method in ['auto', 'levenshtein', 'sequence']:
+            with patch('services.supplier_matching.score', side_effect=lambda a,b,m: scores[a]) as calculate:
+                result = compare(rows, refs, method, threshold=80)
+            self.assertEqual([r.values for r in result.rows], [['뒤','84.615385'], ['뒤','80'], ['','80'], ['','']])
+            if method == 'auto':
+                self.assertEqual(calculate.call_count, 8)
+                self.assertFalse(any(c.args[0] != 'BELOW' and c.args[2] == 'sequence' for c in calculate.call_args_list))
+        self.assertEqual(compare(rows[:1], refs, 'sequence', threshold=0).rows[0].values[0], '뒤')
+        self.assertEqual(compare([Row(excel_row=2, values=['A'])], refs, threshold=100).rows[0].values, ['앞','100'])
+        with patch('services.supplier_matching.score', return_value=84.615385):
+            self.assertEqual(compare(rows[:1], refs, threshold=84.7).rows[0].values[0], '')
+            self.assertEqual(compare(rows[:1], refs, threshold=84.6).rows[0].values[0], '뒤')
+
+    def test_tool_threshold_reaches_saved_job_and_preview(self):
+        context={'workspace':{'columns':[dict(column_id='company',header='상호',role='company_name')], 'target_column_ids':['company']}}
+        tool=next(t for t in build_request_tools(context) if t.name=='match_suppliers')
+        self.assertEqual(tool.invoke({})['operation']['similarity_threshold'], 90)
+        for threshold in [-1, 101, float('nan'), float('inf')]:
+            with self.subTest(threshold=threshold), self.assertRaises(ValidationError):
+                tool.invoke({'threshold': threshold})
+        self.source['operation'] = tool.invoke({'threshold':80})['operation']
+        job = self.create()
+        self.assertEqual(job['source']['operation']['similarity_threshold'], 80)
+        with patch('services.supplier_matching.score', return_value=84.615385):
+            response=self.client.post(self.url('preview'),json={'rows':[{'excel_row':2,'values':['company']}]})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['rows'][0]['values'], ['우한 스틸','84.615385'])
+        self.assertEqual(tool.invoke({'threshold':0})['operation']['similarity_threshold'],0)
+        with self.assertRaises(ValidationError):
+            Operation(kind='set', column_ids=['company'], assigned_value='Y', similarity_threshold=80)
+
     def test_n_by_N_over_old_pair_limit_and_each_duplicate_computed_once(self):
         refs = [dict(group=str(i), company_name=f'COMPANY {i:04}') for i in range(20)]
         rows = [Row(excel_row=i+2, values=[f'COMPANY {i%3000:04}']) for i in range(6000)]

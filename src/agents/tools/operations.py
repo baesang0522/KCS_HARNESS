@@ -1,9 +1,8 @@
 """정제·비교 미리보기를 구성하는 도구."""
 from typing import Literal
 from langchain_core.tools import tool
-from services.errors import SHARED_MESSAGES
 from services.formula.schemas import FormulaOutput
-from services.operations.schemas import Mapping, Operation, OperationOutput, Rule, extraction_column_id
+from services.operations.schemas import Mapping, Operation, OperationOutput, Rule, RowFilter, extraction_column_id
 from services.similarity import SimilaritySettings
 from services.group_review import GroupReviewRequest
 from services.operations.dimensions import DimensionRules, Dimension, Unit, PRODUCTS, DimensionParser
@@ -220,6 +219,8 @@ def build_operations_tools(task_context: dict):
                          fields: list[Dimension] | None = None, order: list[Dimension] | None = None,
                          unit: Unit | None = None, delimiter: str | None = None, after: str | None = None,
                          labels: dict[Dimension, str] | None = None, reuse_rules: bool = True,
+                         condition: RowFilter | None = None,
+                         scope: Literal["current", "all"] = "all",
                          output: OperationOutput | None = None) -> dict:
         """모델규격명에서 치수를 읽어 mm 수치와 파싱 상태를 기존 미리보기로 보낸다.
         품목을 모르면 product를 생략해 질문한다. 대화/PDF에서 확인한 품목만 전달한다.
@@ -229,13 +230,19 @@ def build_operations_tools(task_context: dict):
         예: thickness만 추출, order=[width,length,thickness], after=SIZE:, labels={thickness:THK:}.
         같은 입력 열의 미리보기/적용된 규칙을 재사용한다. 새 품목이나 reuse_rules=false면 초기화한다.
         after=""는 시작 표기 해제, labels={}는 사용자 표기 해제, order=[]는 기본 순서 복귀다.
+        조건부 두께 추출도 이 도구다. condition에 행 조건을 전달하며 일반 수식으로 대체하지 않는다.
+        기본 scope=all은 필터·숨김과 무관한 작업표 전체다. 사용자가 현재 후보 안으로 제한한 경우만 current다.
+        명시한 column_id는 역할 변경 없이 사용한다. 기존 결과 열 갱신은 fields 한 항목과 output을 지정한다.
+        조건 밖 기존 값은 유지한다. 기존 열 갱신의 파싱 상태는 미리보기에서 확인한다.
         임의 정규식/코드는 받지 않는다. 미검출·모호함은 숫자를 비우며 자동 적용하지 않는다."""
-        expected = extraction_column_id(workspace)
-        if column_id is not None and column_id != expected:
-            raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])
+        expected = column_id
+        if expected is None and workspace:
+            sources = [c for c in workspace["columns"] if c.get("role") == "model_spec"]
+            if len(sources) == 1:
+                expected = str(sources[0]["column_id"])
         previous = {}
         if reuse_rules:
-            pending = workspace.get("pending_operation") or {}
+            pending = (workspace or {}).get("pending_operation") or {}
             if pending.get("kind") == "dimensions" and pending.get("column_ids") == [expected]:
                 previous = pending.get("dimensions") or {}
             else:
@@ -248,13 +255,16 @@ def build_operations_tools(task_context: dict):
                         unit=unit, delimiter=delimiter, after=after, labels=labels).items() if value is not None})
         if not settings.get("product"):
             return {"intent": "clarify", "answer": "어떤 물품 데이터야? 철판·강관·환봉 같은 품목을 알려줘. 표기 순서를 몰라도 괜찮아."}
+        if expected is None:
+            return {"intent": "clarify", "answer": "규격 원문이 들어 있는 열 이름을 알려줘."}
         if settings.get("order") == []:
             settings["order"] = None
         if not PRODUCTS.get(settings["product"].lower().strip()) and not settings.get("order") and not settings.get("labels"):
             return {"intent": "clarify", "answer": settings["product"] + "의 기본 치수 표기는 아직 지원하지 않아. 원문의 규격 예시와 뽑을 항목을 알려줘. 순서나 항목 표기를 알면 같이 말해줘."}
         rules = DimensionRules.model_validate(settings)
         DimensionParser(rules)  # 서로 다른 치수에 같은 표기를 지정하는 충돌은 미리 차단한다.
-        result = prepare_operation(kind="dimensions", column_ids=[expected], dimensions=rules, output=output)
+        result = prepare_operation(kind="dimensions", column_ids=[expected], dimensions=rules,
+                                   condition=condition, condition_scope=scope, output=output)
         result["answer"] = rules.summary() + " 실제 원문과 추출 결과를 미리보기로 보여줄게."
         return result
 
@@ -279,15 +289,15 @@ def build_operations_tools(task_context: dict):
 
     @tool
     def match_suppliers(column_id: str | None = None, output: OperationOutput | None = None,
-                        method: Literal["auto", "levenshtein", "sequence"] = "auto") -> dict:
+                        method: Literal["auto", "levenshtein", "sequence"] = "auto", threshold: float = 90) -> dict:
         """확인한 PDF 기준 거래처 n개와 현재 범위의 고유 해외거래처 N개를 비교한다.
-        지정한 방식의 최고 점수 90 이상만 한국어 그룹명을 부여하고 동점은 저장 목록의 뒤 항목을 택한다.
-        미지정은 auto: Levenshtein으로 먼저 비교하고 90 미만만 SequenceMatcher로 보완해 한 번에 미리보기한다.
+        threshold는 사용자가 지정한 기준 점수(0~100, 소수 허용), 미지정은 90이다. 최고 점수가 threshold 이상일 때만 한국어 그룹명을 부여하고 동점은 저장 목록의 뒤 항목을 택한다.
+        미지정은 auto: Levenshtein으로 먼저 비교하고 threshold 미만만 SequenceMatcher로 보완해 한 번에 미리보기한다.
         알고리즘 선택을 사용자에게 묻지 않는다. 특정 방식 지정 시에만 method=sequence 또는 levenshtein을 전달한다.
         기존 그룹·점수 열이 있으면 재사용하고 그룹이 빈 행만 비교한다. 채워진 그룹과 점수는 유지한다.
         대소문자·연속 공백을 통일해 비교한다. 기준 목록은 서버가 읽으며 AI가 매핑을 만들지 않는다.
-        기존 결과가 없으면 새 그룹·점수 열의 변경 미리보기다. 확인 후 적용하며 90 미만은 미분류다."""
-        return prepare_operation(kind="match_suppliers", column_ids=[target(column_id)], output=output, similarity_method=method)
+        기존 결과가 없으면 새 그룹·점수 열의 변경 미리보기다. 확인 후 적용하며 threshold 미만은 미분류다."""
+        return prepare_operation(kind="match_suppliers", column_ids=[target(column_id)], output=output, similarity_method=method, similarity_threshold=threshold)
 
 
     @tool

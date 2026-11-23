@@ -1,4 +1,5 @@
 """작업 시작·범위·열 역할·문서·AI 의견 도구."""
+import re
 from typing import Literal
 from langchain_core.tools import tool
 from services.operations.schemas import Operation, Rule, RowFilter, FilterGroup, ScopeRequest
@@ -28,9 +29,15 @@ def build_workspace_tools(task_context: dict):
         A열의 마지막 단어가 B열에 있으면 추출하는 요청은 formula이며 두 입력 열 ID를 지정한다.
         현재 작업 시트가 있어도 사용자가 업무 전환을 명시하면 사용한다.
         같은 업무 안의 전처리, 치환, 분리 요청에는 사용하지 않는다.
+        치수·두께 추출은 행 조건이나 기존 결과 열이 있어도 parse_dimensions다. 추출된 숫자의 비교·계산만 formula다.
         다른 시트를 조회하는 수식은 reference_sheet_names에 사용자가 말한 시트 이름을 지정한다.
         input_column_ids에는 현재 작업표 열만 넣는다. 다른 시트의 열 ID를 사용자에게 요구하지 않는다.
         수식의 새 열은 output에 mode=new와 name만 지정한다. anchor/side로 중간 삽입 위치를 만들지 않는다."""
+        if task_type == "formula" and re.search(
+            r"(?:두께|치수|외경|직경|규격)(?:\s*(?:규격|값|숫자))?"
+            r"(?:\s|만|을|를|부터|도|좀|다시)*(?:뽑|추출|파싱)", task_context.get("user_request", "")
+        ):
+            raise ValueError("치수 추출은 조건이 있어도 parse_dimensions를 사용하세요. 품목을 모르면 product를 생략해 질문하고, 행 조건은 condition에 전달하세요. 기존 결과 열은 fields 한 항목과 output으로 지정하세요.")
         if reference_sheet_names:
             if task_type != "formula" or any(not name.strip() for name in reference_sheet_names):
                 raise ValueError("참조 시트 이름은 수식 요청에만 지정하세요.")

@@ -29,7 +29,7 @@ class ErrorResponseTests(unittest.TestCase):
             ({'kind': 'replace', 'column_ids': ['model']}, '찾을 문자열을 입력하세요.'),
             ({'kind': 'map', 'column_ids': ['model'], 'mappings': []}, '원본 값과 대표값을 지정하세요.'),
             ({'kind': 'extract', 'column_ids': ['model']}, '추천을 확인하고 추출 방식을 선택하세요.'),
-            ({'kind': 'dimensions', 'column_ids': ['trade'], 'dimensions': {'product': '철판'}}, SHARED_MESSAGES['MODEL_SPEC_REQUIRED']),
+            ({'kind': 'dimensions', 'column_ids': ['model']}, '규격 파싱에는 품목과 파싱 규칙이 필요합니다.'),
             ({'kind': 'group', 'column_ids': ['trade'], 'value_column_id': 'model'}, '대표값의 기준이 되는 행을 지정하세요.'),
             ({'kind': 'group', 'column_ids': ['model'], 'value_column_id': 'model'}, '같은 값 판단 기준과 값을 바꿀 열을 서로 다르게 지정하세요.'),
             ({'kind': 'preprocess', 'column_ids': ['model'], 'rules': [{'operation': 'remove_words', 'words': []}]}, '제거할 단어를 입력하세요.'),

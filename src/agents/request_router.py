@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validat
 
 from services.errors import SHARED_MESSAGES
 from agents.request_graph import run_request_graph
-from services.operations.schemas import Operation, ScopeRequest, extraction_column_id
+from services.operations.schemas import Operation, ScopeRequest
 from services.formula.schemas import FormulaOutput
 from services.chat.state import TaskType
 from services.similarity import SimilaritySettings
@@ -118,8 +118,6 @@ async def route_request(runtime, messages, *, task_context: dict, log_context=No
             referenced += [value for value in [decision.operation.output.column_id, decision.operation.output.score_column_id, decision.operation.output.anchor] if value]
         if not set(referenced) <= columns:
             raise ValueError("현재 작업 시트에 없는 열을 요청했습니다.")
-        if decision.operation.kind == "dimensions" and decision.operation.column_ids != [extraction_column_id(workspace)]:
-            raise ValueError(SHARED_MESSAGES["MODEL_SPEC_REQUIRED"])
 
     if decision.scope_change:
         if not workspace:

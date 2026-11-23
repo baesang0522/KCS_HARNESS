@@ -173,3 +173,5 @@ input:focus-visible,select:focus-visible{outline:2px solid #75609d;outline-offse
 .task-message details>div{overflow-x:auto}
 .task-message table{border-collapse:collapse;font-size:12px;min-width:100%}
 .task-message th,.task-message td{border-bottom:1px solid #e8e5ef;padding:7px;text-align:left;vertical-align:top;min-width:65px;max-width:220px;overflow-wrap:anywhere}
+
+.topbar-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}

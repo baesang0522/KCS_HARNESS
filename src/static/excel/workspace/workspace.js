@@ -358,7 +358,7 @@
                 if (!workspace || workspace.task_type !== type) {
                     newSource();
                     ui.status(
-                        "원본 범위를 가져오거나 저장된 작업 이어가기를 누르세요."
+                        "머리글을 포함한 원본 범위를 선택하고 가져오세요."
                     );
                 } else {
                     await refresh();

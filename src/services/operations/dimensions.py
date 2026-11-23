@@ -27,7 +27,8 @@ UNITS = {'mm': 'mm', '㎜': 'mm', '밀리미터': 'mm', 'cm': 'cm', '㎝': 'cm',
 NUMBER = r'(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)'
 UNIT_PATTERN = '|'.join(map(re.escape, sorted(UNITS, key=len, reverse=True)))
 ATOM = NUMBER + r'\s*(?:' + UNIT_PATTERN + r')?'
-VALUE = re.compile(r'\s*(' + NUMBER + r')\s*([^\d\s,;:×*]*)', re.I)
+# A standalone X after a labelled number separates dimensions; XYZ remains an unknown unit.
+VALUE = re.compile(r'\s*(' + NUMBER + r')\s*((?:(?![xX](?=\s|\d|$))[^\d\s,;:×*])*)', re.I)
 
 
 class DimensionRules(BaseModel):

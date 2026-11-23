@@ -19,9 +19,10 @@ async function setup(values=['SA516-70','MODEL: UNKNOWN','SA516-70','SM490A / SA
   return job;
  }};
  ['workspace/workspace_sheet.js','workspace/table_reader.js','operations/operations_sheet.js','operations/operations_ui.js','operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js','workspace/result_dependencies.js','workspace/workspace_actions.js','workspace/workspace.js'].forEach(h.load);
+ h.captureWorkspaceActions();
  controller=h.window.createWorkspaceController({messages:h.messages,api,getConversationId:()=> 'conversation',isBusy:()=>busy,
   setBusy:v=>{busy=v;controller?.setBusy(v);},complete:message=>completed.push(message),enterConversation(){},beforeApply:async()=>{if(h.unsavedPDF)throw Error('검토 시트에 반영하지 않은 수정');}});
- await h.document.getElementById('work-restore').emit('click');
+ await h.workspaceActions.restore();
  async function preview(output){await controller.configure({kind:'extract',column_ids:[f.work.columns[0].column_id],extraction_mode:'pdf',output});await controller.previewOperation();}
  return {...f,h,host,controller,requests,completed,preview,get stored(){return stored;}};
 }

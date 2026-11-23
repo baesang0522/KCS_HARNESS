@@ -133,15 +133,28 @@ test('new review sheets use normalized PDF basenames with consecutive collision 
  const writes=h.writes.length;h.sheets[1].name='사용자가 정한 이름';h.sheets[1].cells[4][1]='수동 수정';
  await h.review.ensure('c','a','해외거래처.pdf',[row()]);
  assert.equal(h.writes.length,writes);assert.equal(h.sheets[1].name,'사용자가 정한 이름');assert.equal(h.sheets[1].cells[4][1],'수동 수정');
- const x=setup();x.addSheet('COMPANY',[['보존']]);await x.review.ensure('c','d','company.pdf',[row()]);assert.equal(x.sheets[1].name,'company 1');
+ const x=setup();x.addSheet('ACME',[['보존']]);await x.review.ensure('c','d','acme.pdf',[row()]);assert.equal(x.sheets[1].name,'acme 1');
 });
 test('PDF names fit Excel naming rules and mixed document tables remain separate',async()=>{
  const h=setup(),long='아주긴파일이름'.repeat(8);
  await h.review.ensure('c','a',long+'.pdf',[row()]);await h.review.ensure('c','b',long+'.pdf',[row()]);
- assert.equal(h.sheets[0].name.length,31);assert.equal(h.sheets[1].name.length,31);assert.match(h.sheets[1].name,/ 1$/);
- await h.review.ensure('c','d',"'파일[]:*?/\\이름'.pdf",[row()]);assert.doesNotMatch(h.sheets[2].name,/[\[\]:*?/\\]/);assert.doesNotMatch(h.sheets[2].name,/^'|'$/);
- await h.review.ensure('c','e','History.pdf',[row()]);assert.equal(h.sheets[3].name,'History 1');
+ assert.deepEqual(h.sheets.map(s=>s.name),['거래처검토','거래처검토 1']);
+ await h.review.ensure('c','d',"'가/나'.pdf",[row()]);assert.equal(h.sheets[2].name,'가_나');
+ await h.review.ensure('c','e','History.pdf',[row()]);assert.equal(h.sheets[3].name,'거래처검토 2');
  const item={target:{kind:'item',group:'규격',hs_codes:[],specification:'A',requirements:''},source_pages:[1]};
  await h.review.ensure('c','f','혼합.pdf',[row(),item]);assert.deepEqual(h.sheets.slice(4).map(s=>s.name),['혼합','혼합 1']);
  assert.equal((await h.review.read('c','f')).rows.length,2);
+});
+test('five-character basenames stay literal and longer names use the review kind',async()=>{
+ const h=setup(),item={target:{kind:'item',group:'규격',hs_codes:[],specification:'A',requirements:''},source_pages:[1]};
+ await h.review.ensure('c','a','가나다라마.PDF',[row()]);
+ await h.review.ensure('c','b','가나다라마바.pdf',[row(),item]);
+ await h.review.ensure('c','c','설명자료긴이름.pdf',[]);
+ await h.review.ensure('c','d','abcde.pdf',[row()]);
+ await h.review.ensure('c','e','abcdef.pdf',[row()]);
+ await h.review.ensure('c','f','😀가나다라.pdf',[row()]);
+ assert.deepEqual(h.sheets.map(s=>s.name),['가나다라마','거래처검토','품목검토','조건검토','abcde','거래처검토 1','😀가나다라']);
+ assert.equal(h.sheets[1].cells[0][0],'가나다라마바.pdf');
+ h.sheets[1].name='사용자 지정';await h.review.ensure('c','b','가나다라마바.pdf',[row(),item]);
+ assert.equal(h.sheets[1].name,'사용자 지정');
 });
