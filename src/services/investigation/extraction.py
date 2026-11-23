@@ -1,8 +1,8 @@
 """PDF 원문·표에서 근거를 검증하며 조사 조건을 추출한다."""
-import asyncio
 import logging
 from pathlib import Path
 from time import perf_counter
+from openai import APITimeoutError
 from prompts.loader import load_agent_prompt
 from services.documents.chunks import flatten_sources, group_sources, next_source_chunk
 from services.documents.service import find_document
@@ -100,11 +100,11 @@ async def extract_conditions(conversation, payload, runtime, request_id):
                 data = {**base, "pages": group_sources(batch), "has_more": offset + len(batch) < len(entries)}
                 started = perf_counter()
                 log_event("pdf.model.started", **ids, offset=offset, sources=len(batch),
-                          context_sources=len(context), timeout_seconds=runtime.settings.llm.timeout_seconds + 10)
+                          context_sources=len(context), model_timeout=getattr(runtime.advice_model, "request_timeout",
+                              getattr(runtime.advice_model, "timeout_seconds", None)))
                 try:
-                    extracted = await asyncio.wait_for(
-                        ask(runtime.advice_model, prompt, "conditions", data, Extraction),
-                        timeout=runtime.settings.llm.timeout_seconds + 10)
+                    # 모델 클라이언트의 시간 제한을 따른다. 일반 채팅 기준으로 먼저 끊지 않는다.
+                    extracted = await ask(runtime.advice_model, prompt, "conditions", data, Extraction)
                     log_event("pdf.model.completed", **ids, offset=offset, conditions=len(extracted.conditions),
                               elapsed_ms=round((perf_counter() - started) * 1000))
                     break
@@ -121,7 +121,7 @@ async def extract_conditions(conversation, payload, runtime, request_id):
                                    document_id, offset, len(batch), chunk_size)
                     # 잘린 응답은 버리고 같은 위치부터 재시도한다. 나머지 원문도 다음 호출에서 처리한다.
                     batch = batch[:chunk_size]
-                except TimeoutError as error:
+                except (TimeoutError, APITimeoutError) as error:
                     raise ModelProcessingError(
                         "PDF 추출 중 모델 응답 대기가 시간 초과로 중단됐습니다. "
                         "조건은 저장하지 않았습니다. 내부 모델 서버의 응답 상태를 확인해 주세요.") from error

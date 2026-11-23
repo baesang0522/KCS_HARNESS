@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 import tempfile
@@ -7,6 +8,9 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+import httpx
+from langchain_core.messages import AIMessage
+from openai import APITimeoutError
 
 from services.documents.schemas import ReferenceDocument
 from services.errors import DocumentError
@@ -80,6 +84,37 @@ class PDFDiagnosticsTests(unittest.TestCase):
         failed = self.events(output)[-1]
         self.assertEqual(failed['cause_type'], 'RuntimeError')
         self.assertEqual(failed['cause_message'], 'upstream 502 Bad Gateway')
+
+    def test_slow_reply_uses_model_timeout_instead_of_130_second_outer_deadline(self):
+        self.ordinary_document()
+        self.app.state.runtime.settings.llm.timeout_seconds = 120
+        self.model.request_timeout = 300
+        original_wait = asyncio.wait_for
+        async def scaled_wait(awaitable, timeout):
+            # 실제로 130초를 기다리지 않고 기존 바깥 제한만 짧게 재현한다.
+            return await original_wait(awaitable, 0.001 if timeout == 130 else timeout)
+        async def reply(messages):
+            await asyncio.sleep(0.02)
+            return AIMessage(content='{"conditions": [], "warnings": []}')
+        self.model.ainvoke.side_effect = reply
+        with patch('asyncio.wait_for', side_effect=scaled_wait), patch('builtins.print') as output:
+            response = self.extract()
+        self.assertEqual(response.status_code, 200, response.text)
+        started = next(e for e in self.events(output) if e['event'] == 'pdf.model.started')
+        self.assertEqual(started['model_timeout'], 300)
+        self.assertEqual(self.model.request_timeout, 300)
+
+    def test_sdk_timeout_still_returns_clear_error_and_preserves_document(self):
+        self.ordinary_document()
+        self.model.ainvoke.side_effect = APITimeoutError(request=httpx.Request('POST', 'http://model.test/v1/chat/completions'))
+        with patch('builtins.print') as output:
+            response = self.extract()
+        self.assertEqual(response.status_code, 502)
+        self.assertIn('모델 응답 대기가 시간 초과', response.json()['detail'])
+        self.assertEqual(self.events(output)[-1]['cause_type'], 'APITimeoutError')
+        conversation = self.app.state.conversations._conversations[self.cid]
+        self.assertIn(self.did, conversation.documents)
+        self.assertEqual(conversation.investigation.revision, 0)
 
     def test_reader_failure_is_distinct_from_model_failure(self):
         with patch('api.documents.extract_in_process', new=AsyncMock(side_effect=DocumentError('PDF 읽기 실패'))), \
