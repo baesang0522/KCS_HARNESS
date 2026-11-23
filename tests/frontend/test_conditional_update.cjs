@@ -255,3 +255,10 @@ test('stopping automatic grouping during final verification prevents the write',
     assert(!f.requests.some(r=>r.url.includes('/apply')));
     assert.match(f.completed.at(-1),/취소/);
 });
+
+test('numeric less-than replaces only matching existing values and preserves boundary, blank and invalid rows',async()=>{
+    const f=await fixture([[1,'89.9','Y'],[2,'90','keep'],[3,'90.1','manual'],[4,'','blank'],[5,'N/A','invalid']],5);
+    const operation={...f.operation,assigned_value:'N',condition:{column_id:f.work.columns[0].column_id,operator:'lt',value:'90'}};
+    await f.controller.configure(operation);await f.controller.previewOperation();await f.h.messages.command('적용');
+    assert.deepEqual(f.sheet.cells.slice(1).map(r=>r[2]),['N','keep','manual','blank','invalid']);
+});

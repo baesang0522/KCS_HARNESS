@@ -72,7 +72,7 @@ def build_operations_tools(task_context: dict):
 
     @tool
     def update_matching_rows(condition_column_id: str,
-                             operator: Literal["equals", "not_equals", "contains", "blank", "not_blank"],
+                             operator: Literal["equals", "not_equals", "contains", "blank", "not_blank", "gt", "gte", "lt", "lte"],
                              value: str, destination_column_id: str, assigned_value: str,
                              scope: Literal["current", "all"] = "current") -> dict:
         """명확한 단일 조건에 맞는 행의 기존 열 값만 변경하는 미리보기를 준비한다.
@@ -80,6 +80,7 @@ def build_operations_tools(task_context: dict):
         그중에서/현재 대상 안에서는 scope=current, 전체 작업표에서 다시 찾기는 scope=all이다.
         범위 지정이 없으면 current를 사용한다. 현재 범위와 새 조건은 함께 적용한다.
         문자열 포함은 contains, 전체 값 일치는 equals이며 공백·대소문자를 구분한다.
+        숫자 초과는 gt, 이상은 gte, 미만은 lt, 이하는 lte다. 빈칸·숫자가 아닌 값은 제외한다.
         맞지 않는 행은 유지한다. 비슷한 회사 판단, 새 열 생성, 복합 조건에는 사용하지 않는다.
         """
         result = prepare_operation(kind="set", column_ids=[condition_column_id],
@@ -262,7 +263,7 @@ def build_operations_tools(task_context: dict):
     def change_output(output: OperationOutput) -> dict:
         """현재 채팅의 정제 또는 수식 미리보기 저장 위치만 바꿔 다시 계산한다. 적용은 하지 않는다.
         기존 열은 실제 column_id를 지정한다. 정제의 새 열만 name/anchor/side를 지원한다.
-        수식은 오른쪽 새 열(mode=new) 또는 빈 기존 열만 지원하며 이름 변경은 start_task로 다시 준비한다."""
+        수식은 오른쪽 새 열(mode=new) 또는 입력과 겹치지 않는 기존 열을 지원하며 이름 변경은 start_task로 다시 준비한다."""
         pending = workspace and workspace.get("pending_operation")
         if not pending:
             job = task_context.get("active_formula_job")
@@ -272,7 +273,7 @@ def build_operations_tools(task_context: dict):
             output_ids = [v for v in [output.column_id, output.anchor] if v]
             if output_ids:
                 resolve_columns(workspace, output_ids)
-            return {"intent": "formula_output", "formula_output_action": {"type": "formula_output", "formula_job_id": job["formula_job_id"], "output": output.model_dump()}, "answer": "수식 결과 저장 위치를 확인할게요. 기존 값이 있는 열은 덮어쓰지 않습니다."}
+            return {"intent": "formula_output", "formula_output_action": {"type": "formula_output", "formula_job_id": job["formula_job_id"], "output": output.model_dump()}, "answer": "수식 결과 저장 위치를 확인할게요. 지정한 기존 열은 계산 결과값으로 갱신합니다."}
         return prepare_operation(**{**pending, "output": output})
 
 

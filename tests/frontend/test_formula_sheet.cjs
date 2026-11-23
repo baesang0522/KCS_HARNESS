@@ -20,7 +20,8 @@ test('blank-looking formulas at the last row are occupied; original cells untouc
     assert.equal(result.reason,'automatic'); assert.equal(result.target_range,'D2:D90001');
     assert.equal(h.writes.length,0);
     h.selected=h.range(0,2,1,1);
-    await assert.rejects(()=>h.window.formulaSheet.readFormulaTarget(plan(90000),h.selection),/기존 값이나 수식/);
+    const chosen=await h.window.formulaSheet.readFormulaTarget(plan(90000),h.selection);
+    assert.equal(chosen.overwrite,'allow');assert.equal(chosen.has_formulas,true);assert.equal(h.writes.length,0);
 });
 test('90k and 400001 rows write in bounded batches with relative and absolute references',async()=>{
     for (const count of [90000,400001]) {
@@ -214,6 +215,51 @@ test('chat resolves an existing formula destination by ID without relying on cur
  const target=await h.window.formulaSheet.readFormulaTarget(plan(3),h.selection,destination);
  assert.equal(target.target_range,'D2:D4');assert.equal(h.writes.length,0);
  h.occupied.set('1,3',{value:'keep',formula:''});
- await assert.rejects(()=>h.window.formulaSheet.readFormulaTarget(plan(3),h.selection,destination),/기존 값이나 수식/);
+ const occupied=await h.window.formulaSheet.readFormulaTarget(plan(3),h.selection,destination);
+ assert.equal(occupied.overwrite,'allow');assert.match(occupied.previous_cells[0],/keep/);assert.equal(h.writes.length,0);
  await assert.rejects(()=>h.window.formulaSheet.readFormulaTarget(plan(3),h.selection,{...destination,column_index:0}),/겹칠 수/);
+});
+
+async function overwritePreview(h, rows) {
+    h.load('formula/formula_sheet.js');
+    const preview=plan(rows), snapshot=await h.window.formulaSheet.readFormulaTarget(preview,h.selection,{worksheet_id:'sheet',column_index:2});
+    preview.plan.actions[0].overwrite='allow';
+    return {preview,snapshot};
+}
+test('explicit existing output overwrites constants and formulas across all batches and freezes values',async()=>{
+    for(const automatic of [false,true]) {
+        const h=createHost({rows:3036,tableColumns:['input','other','result'],autoFillTable:automatic,calculateValue:r=>r%2?'N':'Y'});
+        h.occupied.set('1,2',{value:'old'});h.occupied.set('1001,2',{formula:'="old"',value:'old'});h.occupied.set('3036,2',{value:false});
+        const {preview,snapshot}=await overwritePreview(h,3036);
+        assert.equal(snapshot.has_formulas,true);assert.equal(h.writes.length,0);
+        assert.equal(snapshot.previous_cells.length,4);
+        const result=await h.window.formulaSheet.applyFormulaPreview(preview,h.selection,null,null,snapshot);
+        assert.equal(result.row_count,3036);
+        for(const row of [1,1001,3036]){assert.equal(h.valueAt(row,2),row%2?'N':'Y');assert.equal(h.formulaAt(row,2),'');}
+        assert(h.loads.filter(x=>x.properties==='formulas').every(x=>x.n<=1000));
+    }
+});
+test('overwrite requires the captured destination and rejects edits since preview without any writes',async()=>{
+    for(const cell of [{value:'new'}, {value:0}, {formula:'=""',value:''}]) {
+        const h=createHost({rows:3});h.occupied.set('3,2',{value:'old'});
+        const {preview,snapshot}=await overwritePreview(h,3);
+        await assert.rejects(()=>h.window.formulaSheet.applyFormulaPreview(preview,h.selection),/미리보기를 다시/);
+        h.occupied.set('3,2',cell);
+        await assert.rejects(()=>h.window.formulaSheet.applyFormulaPreview(preview,h.selection,null,null,snapshot),/미리보기 이후/);
+        assert.equal(h.writes.length,0);assert.deepEqual(h.occupied.get('3,2'),cell);
+    }
+});
+test('overwrite still stops on a user edit in a later batch and does not freeze partial results',async()=>{
+    const h=createHost({rows:3036});h.occupied.set('1001,2',{value:'old'});
+    const {preview,snapshot}=await overwritePreview(h,3036);
+    await assert.rejects(()=>h.window.formulaSheet.applyFormulaPreview(preview,h.selection,(phase,done)=>{
+        if(phase==='수식 계산 확인' && done===1000)h.occupied.set('1001,2',{value:'user edit'});
+    },null,snapshot),/1000셀.*미리보기 이후/);
+    assert.deepEqual(h.occupied.get('1001,2'),{value:'user edit'});assert.equal(h.valueCopies.length,0);
+});
+test('overwrite preview explains replacement of existing formulas with values',()=>{
+    const {createDOM}=require('../helpers/taskpane_dom.cjs'),h=createDOM();h.load('formula/formula_ui.js');
+    const ui=h.window.createFormulaUI(h.messages);ui.bind({});
+    ui.showPreview('갱신',{workspace_id:'work',address:'A2:A4'},plan(3),{address:'C2:C4',row_count:3,overwrite:'allow',has_formulas:true});
+    assert.match(h.chatText(),/기존 열의 값을 계산 결과값으로 덮어/);assert.match(h.chatText(),/기존 수식도 결과값으로 교체/);
 });

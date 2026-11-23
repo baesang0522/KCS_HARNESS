@@ -132,8 +132,8 @@
             formulas: target.getSpecialCellsOrNullObject("Formulas")};
     }
 
-    function formulaTargetSnapshot(inspection, formula, sourceAddress, reason) {
-        if (!inspection.constants.isNullObject || !inspection.formulas.isNullObject) return null;
+    function formulaTargetSnapshot(inspection, formula, sourceAddress, reason, overwrite) {
+        if (!overwrite && (!inspection.constants.isNullObject || !inspection.formulas.isNullObject)) return null;
         var target = inspection.range;
         return {
             address: target.address,
@@ -241,17 +241,58 @@
                 throw new Error("결과 열은 원본 선택 범위와 겹칠 수 없습니다.");
             }
             var result = formulaTargetSnapshot(
-                inspection, preview.plan.actions[0].formula, selection.address, "manual"
+                inspection, preview.plan.actions[0].formula, selection.address, "manual", true
             );
-            if (!result) {
-                throw new Error("선택한 결과 범위에 기존 값이나 수식이 있습니다.");
+            result.overwrite = "allow";
+            result.destination = destination || null;
+            result.has_formulas = !inspection.formulas.isNullObject;
+            // formulas에는 수식이 없는 셀의 상수도 들어간다. 재계산만으로는 충돌하지 않는다.
+            result.previous_cells = [];
+            for (var offset = 0; offset < target.rowCount; offset += batchSize) {
+                var part = chosenSheet.getRangeByIndexes(target.rowIndex + offset, target.columnIndex,
+                    Math.min(batchSize, target.rowCount - offset), 1);
+                part.load("formulas");
+                await context.sync();
+                result.previous_cells.push(JSON.stringify(part.formulas));
             }
             return result;
         });
     }
 
-    async function validateFormulaPreview(preview, selection) {
+    function validateOverwriteTarget(preview, selection, snapshot) {
+        var actions = preview.plan.actions;
+        if (actions.length !== 1 || !snapshot || snapshot.overwrite !== "allow" ||
+            !snapshot.previous_cells || actions[0].target_range !== snapshot.target_range ||
+            selection.address !== snapshot.source_address) {
+            throw new Error("덮어쓸 결과 범위의 미리보기를 다시 준비하세요.");
+        }
+    }
+
+    function validatePreviousCells(part, snapshot, offset) {
+        if (JSON.stringify(part.formulas) !== snapshot.previous_cells[offset / batchSize]) {
+            throw new Error("미리보기 이후 결과 범위의 값이나 수식이 바뀌었습니다. 다시 요청하세요.");
+        }
+    }
+
+    async function validateFormulaPreview(preview, selection, snapshot) {
         await validateReferenceSheets(selection);
+        if (preview.plan.actions.some(function (action) { return action.overwrite === "allow"; })) {
+            validateOverwriteTarget(preview, selection, snapshot);
+            return await Excel.run(async function (context) {
+                var sheet = context.workbook.worksheets.getItem(selection.worksheet_id);
+                var target = sheet.getRange(snapshot.target_range);
+                target.load("rowIndex,columnIndex,rowCount,columnCount");
+                await context.sync();
+                if (formulaTargetOverlaps(target, selection)) throw new Error("결과 범위가 원본 선택 범위와 겹칩니다.");
+                for (var offset = 0; offset < target.rowCount; offset += batchSize) {
+                    var part = sheet.getRangeByIndexes(target.rowIndex + offset, target.columnIndex,
+                        Math.min(batchSize, target.rowCount - offset), 1);
+                    part.load("formulas");
+                    await context.sync();
+                    validatePreviousCells(part, snapshot, offset);
+                }
+            });
+        }
         // 승인 전에는 실제 셀에 수식을 쓰지 않는다. 계산 검증은 승인 후에 수행한다.
         var current = await prepareFormulaPreview(preview, selection);
         var ranges = current.target_ranges || [current.target_range];
@@ -260,8 +301,8 @@
         }
     }
 
-    async function applyFormulaPreview(preview, selection, progress, evidence) {
-        await validateFormulaPreview(preview, selection);
+    async function applyFormulaPreview(preview, selection, progress, evidence, snapshot) {
+        await validateFormulaPreview(preview, selection, snapshot);
         var actions = preview.plan.actions;
         var completed = 0, frozen = 0, attempted = false, activeRange = "", expectedFormulas = [];
         try {
@@ -285,6 +326,7 @@
                         activeRange = action.target_range + " 중 " + (target.rowIndex + offset + 1) +
                             "~" + (target.rowIndex + offset + count) + "행";
                         var inspection = inspectFormulaTarget(part);
+                        if (action.overwrite === "allow") part.load("formulas");
                         if (offset > 0) {
                             part.load("formulasR1C1");
                             anchor.load("formulasR1C1");
@@ -298,7 +340,9 @@
                         var alreadyFilled = offset > 0 && part.formulasR1C1.every(function (row) {
                             return row[0] === expectedFormula;
                         });
-                        if (!inspection.constants.isNullObject || (!inspection.formulas.isNullObject && !alreadyFilled)) {
+                        if (action.overwrite === "allow" && !alreadyFilled) {
+                            validatePreviousCells(part, snapshot, offset);
+                        } else if (action.overwrite !== "allow" && (!inspection.constants.isNullObject || (!inspection.formulas.isNullObject && !alreadyFilled))) {
                             throw new Error("작성할 범위에 기존 값이나 수식이 있습니다.");
                         }
                         if (!alreadyFilled) {

@@ -48,7 +48,15 @@ function createHost({rows=90000, sourceColumns=2, tableColumns, data, autoFillTa
     }
     host.formulaAt = formulaAt; host.calculatedFormulaAt = calculatedFormulaAt;
     host.valueAt = valueAt; host.valueCopies = valueCopies;
+    function writeFormula(write) {
+        for (let row=write.r;row<write.r+write.n;row++) {
+            occupied.delete(row+','+write.c);
+            frozen.get(write.c)?.delete(row);
+        }
+        writes.push(write);
+    }
     function range(r,c,n,m) {
+        let loadedFormulas;
         const x={r,c,n,m,rowIndex:r,columnIndex:c,rowCount:n,columnCount:m,
             address:'Sheet1!'+letters(c)+(r+1)+(n===1&&m===1?'':':'+letters(c+m-1)+(r+n)),
             worksheet:null,
@@ -58,10 +66,10 @@ function createHost({rows=90000, sourceColumns=2, tableColumns, data, autoFillTa
                 pending.push(() => {
                     for (const prop of properties.split(',')) {
                         if (['text','values','formulas','formulasR1C1','valueTypes'].includes(prop)) {
-                            x[prop]=Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=> {
+                            const cells=Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=> {
                                 if (prop==='valueTypes') return r+i===host.errorRow?'Error':'String';
                                 const existing=occupied.get((r+i)+','+(c+j));
-                                if (prop==='formulas') return formulaAt(r+i,c+j);
+                                if (prop==='formulas') return existing ? existing.formula || (existing.value ?? '') : formulaAt(r+i,c+j) || valueAt(r+i,c+j);
                                 if (prop==='formulasR1C1') {
                                     const formula=existing ? existing.formula || existing.value || '' : formulaAt(r+i,c+j) || valueAt(r+i,c+j);
                                     // Contract double for the A1 references used by these tests; Excel performs conversion in production.
@@ -70,8 +78,10 @@ function createHost({rows=90000, sourceColumns=2, tableColumns, data, autoFillTa
                                             (fc?'C'+(bounds(col+row)[1]+1):'C['+(bounds(col+row)[1]-c-j)+']')) : formula;
                                 }
                                 if (data) return data(r+i,c+j);
-                                return existing ? existing.value||'' : '#literal';
+                                return existing ? existing.value ?? '' : valueAt(r+i,c+j);
                             }));
+                            if (prop==='formulas') loadedFormulas=cells;
+                            else x[prop]=cells;
                         }
                     }
                 }); return x;
@@ -93,7 +103,7 @@ function createHost({rows=90000, sourceColumns=2, tableColumns, data, autoFillTa
             autoFill(destination,type) {
                 assert.equal(type,'FillCopy'); const d=typeof destination==='string'?sheet.getRange(destination):destination;
                 assert(d.n<=1000);
-                pending.push(()=>writes.push({r:d.r,c:d.c,n:d.n,formula:translate(formulaAt(r,c),d.r-r,d.c-c)}));
+                pending.push(()=>writeFormula({r:d.r,c:d.c,n:d.n,formula:translate(formulaAt(r,c),d.r-r,d.c-c)}));
             },
             copyFrom(source,type) {
                 assert(n<=1000);
@@ -108,15 +118,15 @@ function createHost({rows=90000, sourceColumns=2, tableColumns, data, autoFillTa
                     });return;
                 }
                 assert.equal(type,'Formulas');
-                pending.push(()=>writes.push({r,c,n,formula:translate(formulaAt(source.r,source.c),r-source.r,c-source.c)}));
+                pending.push(()=>writeFormula({r,c,n,formula:translate(formulaAt(source.r,source.c),r-source.r,c-source.c)}));
             },
             calculate(){assert(n<=1000);},
         };
         Object.defineProperty(x,'formulas',{set(value){assert.equal(value.length,1);pending.push(()=>{
-            writes.push({r,c,n:1,formula:value[0][0]});
+            writeFormula({r,c,n:1,formula:value[0][0]});
             if(autoFillTable && tableColumns && c<tableColumns.length && r===1)
-                writes.push({r,c,n:rows,formula:value[0][0],autoFilled:true});
-        });},get(){return [[formulaAt(r,c)]];}, configurable:true});
+                writeFormula({r,c,n:rows,formula:value[0][0],autoFilled:true});
+        });},get(){return loadedFormulas || [[formulaAt(r,c)]];}, configurable:true});
         x.worksheet=sheet;
         return x;
     }

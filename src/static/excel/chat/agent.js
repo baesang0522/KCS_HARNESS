@@ -139,7 +139,10 @@
                 try {
                     var reply = await drive({run_id: saved.run_id}, request, saved.receipt);
                     chat.checkRequest(request);
-                    chat.appendMessage("assistant", reply.answer);
+                    // The task controller already displayed this failure before sending its receipt.
+                    var reportedFailure = saved.receipt.status !== "SUCCEEDED" && ["FAILED", "UNKNOWN"].includes(current.status) &&
+                        reply.answer === saved.receipt.message;
+                    if (!reportedFailure) chat.appendMessage("assistant", reply.answer);
                     chat.setBusy(false);
                     await options.handleUIAction(reply.ui_action, current.goal, reply.origin_request_id);
                 } catch (error) {

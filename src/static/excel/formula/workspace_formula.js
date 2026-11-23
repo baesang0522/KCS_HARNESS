@@ -14,7 +14,8 @@
                 }
                 var column = workspace.columns.find(function (c) { return String(c.column_id) === output.column_id; });
                 if (!column) throw new Error('결과 열이 삭제되었습니다. 다시 지정하세요.');
-                return {worksheet_id: workspace.worksheet_id, column_index: column.column_index};
+                return {worksheet_id: workspace.worksheet_id, column_index: column.column_index,
+                    column_id: String(column.column_id), header: column.header};
             },
             dependencies: function () { return dependencyRecord; },
             plan: function () { return appliedPlan; },
@@ -55,7 +56,7 @@
                     input_columns: columns.map(function (c) { return {column_id: String(c.column_id),
                         column_index: c.column_index, header: c.header, role: c.role, description: c.description || ""}; })};
             },
-            validateFormulaSource: async function (selection) {
+            validateFormulaSource: async function (selection, snapshot) {
                 var workspace = options.getWorkspace();
                 if (!selection.workspace_id) return;
                 if (!workspace || workspace.workspace_id !== selection.workspace_id ||
@@ -64,6 +65,13 @@
                 }
                 await Excel.run(async function (context) {
                     var info = await window.workspaceTable.layout(context, workspace);
+                    var destination = snapshot && snapshot.destination;
+                    if (destination) {
+                        var output = info.columns.find(function (column) { return String(column.column_id) === destination.column_id; });
+                        if (!output || output.column_index !== destination.column_index || output.header !== destination.header) {
+                            throw new Error("수식 결과 열이 바뀌었습니다. 다시 요청하세요.");
+                        }
+                    }
                     if (info.sheet.name !== selection.sheet_name || selection.row_start < info.body.rowIndex ||
                         selection.row_start + selection.row_count > info.body.rowIndex + info.body.rowCount ||
                         selection.input_columns.some(function (input) {

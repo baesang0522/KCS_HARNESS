@@ -194,6 +194,7 @@ def approve_preview(
             revised_actions.append(FormulaAction.model_validate({
                 **action.model_dump(),
                 "target_range": target_range,
+                "overwrite": payload.overwrite,
                 "anchor_cell": target_range.split(":", 1)[0],
             }))
         revised = FormulaPreview(

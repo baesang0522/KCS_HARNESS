@@ -85,3 +85,17 @@ class ConditionalUpdateTests(unittest.TestCase):
             self.assertEqual(record['executed_range']['condition'],result['operation']['condition'])
             self.assertEqual(record['executed_range']['matching_row_count'],1)
             self.assertEqual(record['executed_range'].get('row_filter'),prior)
+
+    def test_numeric_comparators_reach_the_tool_and_preserve_threshold_boundaries(self):
+        workspace=dict(columns=[dict(column_id='source'),dict(column_id='memo')])
+        tool=next(t for t in build_request_tools({'workspace':workspace}) if t.name=='update_matching_rows')
+        for operator, expected in [('lt',[True,False,False]), ('lte',[True,True,False]),
+                                   ('gt',[False,False,True]), ('gte',[False,True,True])]:
+            with self.subTest(operator=operator):
+                args=dict(condition_column_id='source',operator=operator,value='90',destination_column_id='memo',assigned_value='N',scope='all')
+                operation=Operation.model_validate(tool.invoke(args)['operation'])
+                self.assertEqual([operation.condition.matches(v) for v in ['89.9','90','90.1']],expected)
+                for value in ['', ' ', 'N/A', '90점']:
+                    self.assertIsNone(operation.condition.matches(value))
+                for value in ['NaN', 'Infinity', '90점']:
+                    with self.assertRaises(ValidationError): tool.invoke(args | dict(value=value))

@@ -105,3 +105,13 @@ test('automatic formula scope uses all current rows despite filter, old range an
     assert.equal(payload.address,'Sheet1!D2:D3093');assert.equal(payload.row_count,3092);
     assert.equal(payload.samples[0].cells[0],'r1c3');assert.equal(payload.samples.length,20);
 });
+
+test('existing formula destination identity is checked even when its old address contains identical values',async()=>{
+    const h=await setup(),target=await h.controller.formulaTarget({workspace_id:'workspace',column_ids:['trade']});
+    const excel=createHost({rows:90000,sourceColumns:30});excel.load('formula/formula_sheet.js');
+    const selection=await excel.window.formulaSheet.readFormulaContext(target);
+    const destination=await h.controller.resolveFormulaOutput({mode:'existing',column_id:'replaced'},selection);
+    await h.controller.validateFormulaSource(selection,{destination});
+    h.columns.find(c=>c.column_id==='replaced').column_index++;
+    await assert.rejects(()=>h.controller.validateFormulaSource(selection,{destination}),/결과 열이 바뀌/);
+});

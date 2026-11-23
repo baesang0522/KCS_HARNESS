@@ -70,7 +70,7 @@ async function setup() {
     h.window.readAgentData=async()=>({rows:[{identity:1,excel_row:2,values:['AA']},{identity:3,excel_row:4,values:['AA']}],verify:async()=>{}});
     await chat.initialize();
     h.document.getElementById('message').value='값을 확인해줘';
-    return {...h,chat,agent,context,requests,actions,state,workspace,setRespond:fn=>{h.respond=fn;},getRespond:()=>h.respond,setAction:fn=>{h.onAction=fn;}};
+    return {...h,api,chat,agent,context,requests,actions,state,workspace,setRespond:fn=>{h.respond=fn;},getRespond:()=>h.respond,setAction:fn=>{h.onAction=fn;}};
 }
 test('one chat request drives read-result-final and exposes exact data without writing',async()=>{
     const h=await setup();await h.chat.sendMessage();
@@ -237,4 +237,76 @@ test('agent handoff and automatic continuation preserve the originating chat rat
     await continued;
     assert.deepEqual(origins,['original-chat','original-chat']);
     assert(h.requests.filter(r => r.url.endsWith('/advance')).every(r => r.body.request_id !== 'original-chat'));
+});
+
+
+test('formula destination failure is displayed once while both job and agent record the failure',async()=>{
+    const h=await setup(),original=h.getRespond();
+    const message='선택한 결과 범위에 기존 값이나 수식이 있습니다.';
+    const preview={preview_id:'preview',plan:{actions:[{target_range:'C2:C4',anchor_cell:'C2',formula:'=1'}]}};
+    let advances=0,writes=0,finished;
+    const done=new Promise(resolve=>{finished=resolve;});
+    h.setRespond(async(url,body,options)=>{
+        if(url.endsWith('/advance')){
+            if(++advances===1)return h.state('WAITING_USER',{type:'confirm_selection',task_type:'formula'},'formula-step');
+            assert.equal(body.receipt.status,'FAILED');assert.equal(body.receipt.message,message);
+            const result=h.state('FAILED',null,null);result.answer=body.receipt.message;
+            return result;
+        }
+        if(url==='/formula-jobs'||url.endsWith('/analyze'))return {formula_job_id:'formula-job',status:'PREVIEW_READY',preview};
+        if(url.endsWith('/failed'))return {formula_job_id:'formula-job',status:'FAILED',preview};
+        return original(url,body,options);
+    });
+    h.load('formula/formula.js');
+    const controller=h.window.createFormulaController({api:h.api,
+        ui:{bind(){},open(){},reset(){},setStatus(){},showPreview(){assert.fail('failed output must not offer a preview');}},
+        excel:{readFormulaContext:async()=>({row_count:3}),readFormulaTarget:async()=>{throw new Error(message);},
+            applyFormulaPreview:async()=>{writes++;}},
+        resolveOutput:async()=>({worksheet_id:'sheet',column_index:2}),
+        isReady:()=>true,isBusy:h.chat.isBusy,setBusy:h.chat.setBusy,getConversationId:h.chat.getConversationId,
+        beginRequest:h.chat.beginRequest,endRequest:h.chat.endRequest,checkRequest:h.chat.checkRequest,reportStop:h.chat.reportStop,
+        onJobCreated:h.agent.bind,
+        complete:(text,outcome)=>{h.agent.complete(outcome,text);h.chat.appendMessage('assistant',text);}
+    });
+    h.setAction(async action=>{
+        if(action)controller.openAndSelect('분석대상여부 열 만들기', {workspace_id:'work',output:{mode:'existing',column_id:'result'}});
+        else finished();
+    });
+    await h.chat.sendMessage();
+    await Promise.race([done,new Promise((_,reject)=>{setTimeout(()=>reject(new Error('failure receipt stalled')),1000).unref();})]);
+    const text=h.document.getElementById('conversation').textContent;
+    assert.equal(text.split(message).length-1,1);
+    assert.equal(writes,0);
+    assert.equal(h.requests.filter(r=>r.url==='/formula-jobs').length,1);
+    assert.equal(h.requests.filter(r=>r.url.endsWith('/failed')).length,1);
+    assert.equal(h.requests.filter(r=>r.url.endsWith('/advance')).length,2);
+    assert(!h.requests.some(r=>r.url.endsWith('/approve')));
+});
+
+test('receipt echo suppression keeps extra server information and reports a separate failure again',async()=>{
+    for(const status of ['FAILED','UNKNOWN']) {
+        const h=await setup(),original=h.getRespond(),message='실행 중 오류';
+        let serverMessage=message,finished;
+        h.setRespond(async(url,body,options)=>{
+            if(url.endsWith('/advance')){
+                if(!body.receipt)return h.state('WAITING_USER',{type:'configure_operation',operation:{kind:'replace'}},'step');
+                const result=h.state(status,null,null);result.answer=serverMessage;return result;
+            }
+            return original(url,body,options);
+        });
+        h.setAction(async action=>{if(!action)finished();});
+        for(let attempt=0;attempt<3;attempt++) {
+            h.document.getElementById('message').value='다시 요청';await h.chat.sendMessage();
+            await h.agent.bind('operation','job-'+attempt);
+            const done=new Promise(resolve=>{finished=resolve;});
+            if(attempt===2)serverMessage='추가 확인: 쓰기 결과 확인이 필요합니다.';
+            h.chat.appendMessage('assistant',message);
+            h.agent.complete({kind:'operation',job_id:'job-'+attempt,status},message);h.agent.flush();
+            await Promise.race([done,new Promise((_,reject)=>{setTimeout(()=>reject(new Error('receipt stalled')),1000).unref();})]);
+        }
+        const text=h.document.getElementById('conversation').textContent;
+        assert.equal(text.split(message).length-1,3);
+        assert.equal(text.split(serverMessage).length-1,1);
+        assert.equal(h.requests.filter(r=>r.body?.receipt?.status===status).length,3);
+    }
 });

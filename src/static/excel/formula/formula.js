@@ -23,8 +23,9 @@
             revised.plan.actions.forEach(function (action, index) {
                 action.target_range = ranges[index];
                 action.anchor_cell = anchors[index];
+                action.overwrite = target.overwrite || "reject_nonblank";
             });
-            await excel.validateFormulaPreview(revised, selection);
+            await excel.validateFormulaPreview(revised, selection, target);
             if (run) options.checkRequest(run);
             preview = revised;
             targetSnapshot = target;
@@ -61,7 +62,7 @@
                     throw new Error("엑셀 안에서 추가 기능을 열어주세요.");
                 }
                 selection = await excel.readFormulaContext(options.getTarget ? await options.getTarget(inputScope, !useWorkspace) : null, inputScope && inputScope.reference_sheet_names || []);
-                if (options.validateSource) await options.validateSource(selection);
+                if (options.validateSource) await options.validateSource(selection, targetSnapshot);
                 options.checkRequest(run);
                 var names = (selection.input_columns || []).map(function (column) { return column.header; }).join(", ");
                 ui.setStatus((names || selection.address) + " · " + selection.row_count.toLocaleString() + "행으로 수식 계획을 만들고 있습니다…");
@@ -142,8 +143,8 @@
             options.setBusy(true);
             var approvalRequested = false, recorded = false;
             try {
-                if (options.validateSource) await options.validateSource(selection);
-                await excel.validateFormulaPreview(preview, selection);
+                if (options.validateSource) await options.validateSource(selection, targetSnapshot);
+                await excel.validateFormulaPreview(preview, selection, targetSnapshot);
                 approvalRequested = true;
                 writeAttempted = true;
                 var approved = await api.requestJson(
@@ -153,21 +154,23 @@
                         method: "POST",
                         headers: {"Content-Type": "application/json"},
                         body: JSON.stringify({
+                            overwrite: targetSnapshot.overwrite || "reject_nonblank",
                             target_ranges: preview.plan.actions.map(function (action) {
                                 return action.target_range;
                             })
                         })
                     }
                 );
-                if (approved.preview_id !== preview.preview_id) {
+                if (approved.preview_id !== preview.preview_id ||
+                    JSON.stringify(approved.plan.actions) !== JSON.stringify(preview.plan.actions)) {
                     throw new Error("확인한 계획과 승인된 계획이 다릅니다.");
                 }
-                if (options.validateSource) await options.validateSource(selection);
-                await excel.validateFormulaPreview(approved, selection);
+                if (options.validateSource) await options.validateSource(selection, targetSnapshot);
+                await excel.validateFormulaPreview(approved, selection, targetSnapshot);
                 if (options.prepareOutput) await options.prepareOutput(approved, selection);
                 var result = await excel.applyFormulaPreview(approved, selection, function (label, done, total) {
                     ui.setStatus(label + " · " + done.toLocaleString() + "/" + total.toLocaleString() + "셀");
-                }, options.recovery ? options.recovery.formula(formulaJob.formula_job_id, selection, selection.workspace_id ? options.recoveryWorkspace() : null) : null);
+                }, options.recovery ? options.recovery.formula(formulaJob.formula_job_id, selection, selection.workspace_id ? options.recoveryWorkspace() : null) : null, targetSnapshot);
                 applied = true;
                 var ids = options.getResultColumns ? await options.getResultColumns(result, selection) : [];
                 if (options.recovery && options.onResult) options.recovery.remember(formulaJob.formula_job_id, function () { return options.onResult(result, selection, ids); });

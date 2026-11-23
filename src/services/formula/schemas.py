@@ -147,7 +147,7 @@ class FormulaAction(BaseModel):
     formula: str = Field(min_length=2, max_length=8192)
     output_label: str = Field(default="결과", min_length=1, max_length=100)
     mode: Literal["single", "fill_down"]
-    overwrite: Literal["reject_nonblank"] = "reject_nonblank"
+    overwrite: Literal["reject_nonblank", "allow"] = "reject_nonblank"
 
     @field_validator("target_range")
     @classmethod
@@ -266,6 +266,7 @@ class FormulaApprovalRequest(BaseModel):
 
     target_range: str | None = Field(default=None, min_length=2, max_length=64)
     target_ranges: tuple[str, ...] = Field(default=(), max_length=3)
+    overwrite: Literal["reject_nonblank", "allow"] = "reject_nonblank"
 
     @field_validator("target_range")
     @classmethod
@@ -327,7 +328,7 @@ class FormulaJob(BaseModel):
 
 
 class FormulaOutput(OperationOutput):
-    """수식 결과는 오른쪽 새 열 또는 비어 있는 기존 열에 저장한다."""
+    """수식 결과는 오른쪽 새 열 또는 지정한 기존 열에 저장한다."""
     anchor: None = None
     side: Literal["after"] = "after"
     score_column_id: None = None

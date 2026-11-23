@@ -7,7 +7,7 @@ function setup(fail=false, config={}) {
     let handlers,timer;
     const requests=[],messages=[],status=[],bodies=[],events=[];
     let validations=0, scopeSeen, referencesSeen;
-    const preview={preview_id:'preview',plan:{actions:[{target_range:'C2:C90001',anchor_cell:'C2'}]}};
+    const preview={preview_id:'preview',plan:{actions:[{target_range:'C2:C90001',anchor_cell:'C2',overwrite:'reject_nonblank'}]}};
     const result={address:'Sheet1!C2:C90001',row_count:90000,targets:[{row_start:1,row_count:90000,column_start:2,column_count:1}]};
     const sandbox={window:{setTimeout:fn=>{timer=fn;},clearTimeout(){}}};
     vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../src/static/excel/formula/formula.js'),'utf8'),sandbox);
@@ -20,18 +20,20 @@ function setup(fail=false, config={}) {
             if(options.body)bodies.push({url,body:JSON.parse(options.body)});
             if(config.failAt && url.endsWith("/"+config.failAt))throw new Error("network lost");
             if(url.endsWith('/analyze') && config.analysis)return config.analysis;
-            if(url.endsWith('/approve'))return preview;
+            if(url.endsWith('/approve'))return {...preview,plan:{actions:preview.plan.actions.map(a=>({...a,overwrite:JSON.parse(options.body).overwrite}))}};
             if(url.endsWith('/failed'))return {formula_job_id:'job',status:'FAILED',preview};
             return {formula_job_id:'job',status:'PREVIEW_READY',preview};
         }},
         excel:{readFormulaContext:async(target,names)=>{referencesSeen=names;return {row_count:90000,...(config.references ? {reference_sheets:config.references} : {})};},prepareFormulaPreview:async()=>{if(config.prepareFails)throw new Error('output occupied');return {target_range:'C2:C90001',anchor_cell:'C2'};},
-            validateFormulaPreview:async()=>{},applyFormulaPreview:async (p,s,progress)=> {
+            readFormulaTarget:async()=>({target_range:'C2:C90001',anchor_cell:'C2',overwrite:'allow',previous_cells:['snapshot']}),
+            validateFormulaPreview:async(p,s,snapshot)=>{if(p.plan.actions[0].overwrite==='allow')assert.equal(snapshot.previous_cells[0],'snapshot');},applyFormulaPreview:async (p,s,progress,evidence,snapshot)=> {
+                if(config.output?.mode==='existing'){assert.equal(p.plan.actions[0].overwrite,'allow');assert.equal(snapshot.previous_cells[0],'snapshot');}
                 writes++;
                 progress('수식 작성',1000,90000);
                 if(fail)throw new Error('partial error');
                 return result;
             }},
-        resolveOutput:async()=>{if(config.resolveFails)throw new Error("unsupported placement");return null;},
+        resolveOutput:async()=>{if(config.resolveFails)throw new Error("unsupported placement");return config.output?.mode==='existing'?{column_index:2}:null;},
         getTarget:async scope=>{scopeSeen=scope;return null;},
         validateSource:async()=>{if(++validations===2&&config.moved)throw new Error('source moved');},
         getResultColumns:async()=>['result'],
@@ -157,4 +159,10 @@ test('planning clarification has no apply offer and waits for another request',a
  await h.start();await h.apply();
  assert.equal(h.shown,0);assert.equal(h.writes,0);assert.equal(h.messages.at(-1),'조회 열을 알려줘');
  assert(!h.requests.some(url=>url.endsWith('/approve')));
+});
+
+test('existing output approval carries overwrite policy and the same local snapshot through the write',async()=>{
+    const h=setup(false,{output:{mode:'existing',column_id:'result'}});await h.start();await h.apply();
+    assert.equal(h.writes,1);assert.equal(h.bodies.find(x=>x.url.endsWith('/approve')).body.overwrite,'allow');
+    assert(h.requests.some(x=>x.endsWith('/complete')));
 });
