@@ -12,13 +12,15 @@ Excel 추가 기능에서 원본 데이터를 작업표로 가져와 정제·비
 
 ## 실행
 
-Python 3.12 이상, `uv`, Codex CLI가 필요하다. 외부 모델은 먼저 `codex login`을 완료한다. 프로젝트 루트에서:
+Python 3.12 이상, `uv`가 필요하다. 외부 환경은 로컬 llama.cpp 서버(`http://127.0.0.1:9931/v1`)를 사용하므로 모델 서버를 먼저 실행한다. 프로젝트 루트에서:
 
 ```sh
 ./start-external.sh
 ```
 
 실행 파일은 잠금 파일 기준으로 의존성을 준비하고 `KCS_ENV=external`, 단일 프로세스로 서버를 시작한다.
+
+`external`은 내부망과 같은 llama.cpp 어댑터와 추론 옵션을 사용한다. 연결 주소·모델명은 `src/config.yml`의 `environments.external.llm`에서 설정한다. 모델명 기본값은 `gemma4-12b`이며 서버가 모델 ID를 검증하는 경우 `/v1/models`에 표시되는 ID와 맞춘다. `external-sj`의 OpenAI 연결과 `internal` 설정은 별도로 유지한다.
 
 - 화면: [Excel 작업창](http://localhost:8000/static/excel/taskpane-current.html)
 - API: [API 문서](http://localhost:8000/docs)

@@ -1,9 +1,15 @@
 environments:
   external:
     llm:
-      provider: codex_cli
-      model: "gpt-5.6-terra"
+      provider: openai_compatible
+      base_url: "http://127.0.0.1:9931/v1"
+      model: "gemma4-12b"
+      api_key: "not-needed"
+      temperature: 0.1
       timeout_seconds: 120
+      max_tokens: 2048
+      advice_max_tokens: 8192
+      max_retries: 2
   external-sj:
     llm:
       provider: openai_compatible

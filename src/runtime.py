@@ -64,7 +64,7 @@ def create_runtime() -> CustomsHarness:
         normal_extra = None
         advice_extra = None
 
-        if settings.environment == "internal":
+        if settings.environment in {"internal", "external"}:
             normal_extra = {
                 "reasoning_format": "deepseek",
                 "chat_template_kwargs": {"enable_thinking": False},
@@ -74,8 +74,8 @@ def create_runtime() -> CustomsHarness:
                 "chat_template_kwargs": {"enable_thinking": False},
             }
 
-        # 내부 서버는 max_tokens와 reasoning_content를 사용하는 기존 어댑터로 연결한다.
-        create_model = create_internal_model if settings.environment == "internal" else create_openai_model
+        # 내부망과 로컬 llama.cpp는 같은 요청 옵션과 응답 어댑터를 사용한다.
+        create_model = create_internal_model if settings.environment in {"internal", "external"} else create_openai_model
         model = create_model(
             **common,
             timeout_seconds=llm.timeout_seconds,

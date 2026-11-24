@@ -5,7 +5,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
-for program in uv codex; do
+for program in uv; do
     if ! command -v "$program" >/dev/null 2>&1; then
         printf '실행에 필요한 %s 명령을 찾을 수 없어. 설치 후 다시 실행해줘.\n' "$program" >&2
         exit 1
@@ -16,7 +16,7 @@ done
 uv sync --locked --inexact
 export KCS_ENV=external
 
-printf '\n외부용 서버 시작 (Codex CLI 연결)\n'
+printf '\n외부용 서버 시작 (로컬 llama.cpp 연결: http://127.0.0.1:9931/v1)\n'
 printf '화면: http://localhost:8000/static/excel/taskpane-current.html\n'
 printf 'API: http://localhost:8000/docs\n'
 printf '종료: Ctrl+C / \n\n'
