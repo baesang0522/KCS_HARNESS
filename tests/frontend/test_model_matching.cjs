@@ -13,7 +13,7 @@ async function setup(values=['SA516-70','MODEL: UNKNOWN','SA516-70','SM490A / SA
   if(url==='/operation-jobs')return job={source:body,model_references:[{model:'SA516-70',category:'열처리 강종'}]};
   if(url.includes('/preview')){
    if(h.cancelOnPreview){controller.cancelPending();throw new DOMException('중지','AbortError');}
-   const rows=body.rows.map(r=>({...r,values:r.values[0]==='SA516-70'?['SA516-70','열처리 강종']:r.values[0]==='SM490A / SA516-70'?['SA516-70\nSM490A','열처리 강종\n일반재']:['','']}));
+   const rows=body.rows.map(r=>({...r,values:r.values[0]==='SA516-70'?['SA516-70','열처리 강종']:r.values[0]==='SM490A / SA516-70'?['SA516-70','열처리 강종']:['','']}));
    return {headers:['모델명','모델명 종류'],changed_count:rows.filter(r=>r.values[0]).length,rows};
   }
   return job;
@@ -29,13 +29,14 @@ async function setup(values=['SA516-70','MODEL: UNKNOWN','SA516-70','SM490A / SA
 test('PDF preview shows both data columns and writes the paired classifications only after approval',async()=>{
  const f=await setup(),before=structuredClone(f.sheet.cells);await f.preview();
  assert.deepEqual(f.sheet.cells,before);
- assert.match(f.h.chatText(),/5행 중 3행/);assert.match(f.h.chatText(),/모델명 종류/);assert.match(f.h.chatText(),/열처리 강종/);assert.match(f.h.chatText(),/복수 후보 1행/);
+ assert.match(f.h.chatText(),/5행 중 3행/);assert.match(f.h.chatText(),/모델명 종류/);assert.match(f.h.chatText(),/열처리 강종/);assert.match(f.h.chatText(),/복수 후보 0행/);
+ assert.match(f.h.chatText(),/가장 긴 모델만 추출/);
  assert.doesNotMatch(f.h.chatText(),/사용할 방식을 골라|추출상태/);
  const request=f.requests.find(r=>r.url==='/operation-jobs').body;assert.equal(request.model_spec_column_id,f.work.columns[0].column_id);
  assert.equal(f.requests.filter(r=>r.url.includes('/preview'))[0].body.rows.length,4);
  await f.h.messages.command('적용');
  assert.deepEqual(f.sheet.cells[0],['id','모델규격명','모델명','모델명 종류','메모']);
- assert.deepEqual(f.sheet.cells.slice(1).map(r=>r.slice(2,4)),[['SA516-70','열처리 강종'],['',''],['SA516-70','열처리 강종'],['SA516-70\nSM490A','열처리 강종\n일반재'],['','']]);
+ assert.deepEqual(f.sheet.cells.slice(1).map(r=>r.slice(2,4)),[['SA516-70','열처리 강종'],['',''],['SA516-70','열처리 강종'],['SA516-70','열처리 강종'],['','']]);
  assert.deepEqual(f.sheet.cells.slice(1).map(r=>[r[1],r[4]]),before.slice(1).map(r=>r.slice(1)));
  assert.equal(f.stored.result_dependencies.length,1);
  assert.equal(f.requests.filter(r=>r.body.status==='APPLIED').at(-1).body.result_column_ids.length,2);

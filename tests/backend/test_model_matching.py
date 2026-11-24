@@ -44,8 +44,29 @@ class ModelMatchingTests(unittest.TestCase):
               dict(model='SM490A',category='일반재'),dict(model='SM490A',category='열처리'),
               dict(model='SM490A',category='일반재')]
         self.assertEqual(self.compare(['API 2W GR50; SM490A', 'API / API 2W GR50'],refs),
-            [['API 2W GR50\nSM490A\nSM490A','TMCP\n일반재\n열처리'],['API\nAPI 2W GR50','짧은 이름\nTMCP']])
+            [['API 2W GR50','TMCP'],['API 2W GR50','TMCP']])
+        self.assertEqual(self.compare(['SM490A'],refs), [['SM490A\nSM490A','일반재\n열처리']])
         self.assertEqual(self.compare(['AB1 AB1', 'AB1'],[dict(model='AB1',category='')]),[['AB1',''],['AB1','']])
+
+    def test_longest_match_across_cell_ignores_position_and_pdf_order(self):
+        refs = [dict(model='A', category='짧음'), dict(model='SM490A', category='일반재'),
+                dict(model='SM490B', category='다른 분류'), dict(model='AB    C', category='공백'),
+                dict(model='ABCDE', category='긴 이름')]
+        values = ['A / SM490A', 'SM490A / A', 'sm490a  /  a', 'A', 'XSM490A A',
+                  'AB C ABCDE', 'SM490B A SM490A', '', 'A / SM490A']
+        expected = [['SM490A','일반재']]*3 + [['A','짧음'],['A','짧음'],['ABCDE','긴 이름'],
+                    ['SM490A\nSM490B','일반재\n다른 분류'],['',''],['SM490A','일반재']]
+        self.assertEqual(self.compare(values, refs), expected)
+        self.assertEqual(self.compare(values[:6], list(reversed(refs))), expected[:6])
+
+    def test_job_preview_selects_longest_model_and_its_pdf_classification(self):
+        self.conversation.investigation.conditions.insert(0, Condition(target=ItemTarget(kind='item',group='짧은 분류',
+            specification='A',hs_codes=[],requirements=''),title='짧은 모델',description='원문',
+            status='confirmed',source_document_id=self.did,source_pages=[1]))
+        self.create()
+        response=self.client.post(self.url('preview'),json={'rows':[{'excel_row':2,'values':['A / SA516-70']}], 'selected_count':1})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['rows'][0]['values'],['SA516-70','PDF 분류'])
 
     def test_literal_punctuation_aliases_and_duplicate_rows(self):
         refs=[dict(model='AR400(NM400)',category='열처리'),dict(model='AB.12',category='종류')]

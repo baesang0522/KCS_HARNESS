@@ -202,6 +202,7 @@ def build_operations_tools(task_context: dict):
             output: OperationOutput | None = None,
     ) -> dict:
         """기본은 확인한 PDF 모델명을 모델규격명 열에서 찾아 모델명·PDF 분류를 새 열에 함께 추출한다.
+        일치 후보 중 대소문자·연속 공백을 통일한 이름이 가장 긴 모델만 추출한다. 최장 길이 동률·동일 모델의 다른 PDF 분류는 함께 보존한다.
         미검출은 빈칸이며 라벨 추출을 자동 실행하지 않는다. 사용자가 명시하면 alphanumeric/labelled를 사용한다.
         명시한 column_id를 역할 변경 없이 사용한다. 생략했을 때만 model_spec 역할의 유일한 열을 사용한다.
         null은 패턴 추천이다. 다른 열과 비교하는 조건부 추출은 formula다. 자동 적용하지 않는다."""

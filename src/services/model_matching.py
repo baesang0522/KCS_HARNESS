@@ -46,14 +46,10 @@ def compare(rows, models):
     for row in rows:
         value = mapping_key(row.values[0])
         if value not in cache:
-            hits = sorted((match.start(), -match.end(), key)
-                          for key, pattern in patterns.items() for match in pattern.finditer(value))
-            found, end = set(), -1
-            for start, negative_end, key in hits:
-                # 긴 모델명 안에 포함된 짧은 이름은 별도 모델로 중복 추출하지 않는다.
-                if -negative_end > end:
-                    found.add(key)
-                    end = -negative_end
+            found = {key for key, pattern in patterns.items() if pattern.search(value)}
+            longest = max(map(len, found), default=0)
+            # 셀 전체에서 가장 긴 일치만 선택하되 같은 길이의 후보와 PDF 분류는 보존한다.
+            found = {key for key in found if len(key) == longest}
             pairs = list(dict.fromkeys((item["model"], item["category"]) for item in models
                                       if mapping_key(item["model"]) in found))
             cache[value] = ["\n".join(pair[i] for pair in pairs) for i in range(2)]

@@ -213,7 +213,7 @@
             } else if (operation.kind === "dimensions") {
                 action = "규격 파싱 / " + data.names[index] + " / " + data.parsing_summary;
             } else if (operation.kind === "extract") {
-                action = operation.extraction_mode === "pdf" ? "PDF 기준 모델명 대조 / 대소문자·연속 공백 통일 / 미검출은 빈칸 / 추가 조건 판정 아님" : operation.extraction_mode === "labelled" ? "MODEL·CODE·GRADE 뒤의 값 추출" : "문자·숫자 모델명 후보 추출";
+                action = operation.extraction_mode === "pdf" ? "PDF 기준 모델명 대조 / 대소문자·연속 공백 통일 / 가장 긴 일치 모델명·최장 길이 동률 보존 / 미검출은 빈칸 / 추가 조건 판정 아님" : operation.extraction_mode === "labelled" ? "MODEL·CODE·GRADE 뒤의 값 추출" : "문자·숫자 모델명 후보 추출";
                 if (index === 1) action += operation.extraction_mode === "pdf" ? " / PDF 분류 그대로 / 모델명과 같은 순서" : " / 추출상태: 단일 후보·미검출·복수 후보";
             } else if (operation.kind === "split") {
                 action = (operation.delimiter === null ? "공백" : JSON.stringify(operation.delimiter)) +
