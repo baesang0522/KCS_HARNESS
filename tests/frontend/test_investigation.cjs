@@ -329,3 +329,45 @@ for (const failSecond of [false, true]) test(`multiple imports preserve row iden
     assert.equal(node('work-tools'),null);assert.equal(node('work-import').hidden,true);
     assert.equal(node('work-scope-settings'),null);assert.equal(node('work-advice-settings'),null);
 });
+
+test('source list opens visibly without scanning result rows and distinguishes loading, empty and failure',async()=>{
+    const {createDOM}=require('../helpers/taskpane_dom.cjs'),h=createDOM(),f=await narrowSource();
+    let stored={...f.work,workspace_id:'work',target:f.work.target},busy=false,controller,release,reads=0;
+    h.sandbox.Excel=f.h.Excel;h.sandbox.Office={context:{requirements:{isSetSupported:()=>true}}};
+    h.window.workspaceStore={current:async()=>stored,save:async work=>{stored=structuredClone(work);}};
+    h.window.sourceColumns={list:()=>{reads++;return new Promise(resolve=>{release=resolve;});}};
+    h.window.createSimilarityController=()=>({reset(){},busy(){}});
+    ['workspace/workspace_sheet.js','workspace/table_reader.js','operations/operations_sheet.js','operations/operations_ui.js',
+        'operations/operation_jobs.js','operations/operations.js','formula/workspace_formula.js','workspace/workspace_ui.js',
+        'workspace/result_dependencies.js','workspace/workspace_actions.js','workspace/workspace.js'].forEach(h.load);
+    h.captureWorkspaceActions();
+    controller=h.window.createWorkspaceController({messages:h.messages,api:{newRequestId:()=> 'job'},getConversationId:()=> 'conversation',
+        isBusy:()=>busy,setBusy:v=>{busy=v;controller?.setBusy(v);},showWorkspace:()=>controller.dismiss(),complete:noop,enterConversation:noop});
+    await h.workspaceActions.restore();
+    const node=id=>h.document.getElementById(id),before=structuredClone(f.sheet.cells);
+    let reconciles=0;
+    h.window.resultDependencies.reconcile=async()=>{reconciles++;throw Error('기존 결과 검사 오류');};
+    node('work-current').hidden=true;node('work-setup').hidden=false;
+    const opening=controller.openSourceColumns();
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(reads,1);assert.equal(reconciles,0);
+    for(let n=node('work-import-columns');n;n=n.parentNode)assert.equal(n.hidden,false);
+    assert.equal(node('work-setup').hidden,true);
+    assert.match(node('work-import-columns').textContent,/불러오는 중/);
+    assert.equal(node('work-import-add').disabled,true);
+    release([{column_id:'live:0',header:'금액',origin:'live'}]);await opening;
+    assert.equal(node('work-import-columns').querySelectorAll('input').length,1);
+    assert.match(node('work-import-columns').textContent,/금액/);assert.equal(busy,false);
+    h.window.sourceColumns.list=async()=>{throw Error('원본 시트를 찾을 수 없습니다');};
+    await controller.openSourceColumns();
+    assert.equal(node('work-import-columns').querySelectorAll('input').length,0);
+    assert.match(node('work-import-columns').textContent,/불러오지 못했습니다/);
+    assert.match(node('work-status').textContent,/원본 시트를 찾을 수 없습니다/);
+    assert.equal(node('work-import-add').disabled,true);assert.equal(busy,false);
+    h.window.sourceColumns.list=async()=>[];await controller.openSourceColumns();
+    assert.match(node('work-import-columns').textContent,/추가할 원본 열이 없습니다/);
+    assert.equal(reconciles,0);assert.deepEqual(f.sheet.cells,before);
+    // 실제 가져오기는 기존 결과 검사를 생략하지 않는다.
+    await h.workspaceActions['import-add']();assert.equal(reconciles,1);
+    assert.match(node('work-status').textContent,/기존 결과 검사 오류/);
+});

@@ -1,4 +1,4 @@
-"""명시한 PDF 검토 대상을 작업표 정제로 바꾸지 않도록 도구 호출을 검사한다."""
+"""명시한 작업표·PDF 검토 대상을 서로 바꾸지 않도록 도구 호출을 검사한다."""
 import re
 
 
@@ -29,6 +29,18 @@ def check_review_tool(context, name, arguments=None):
         request = re.sub(r"\s+", "", context.get("user_request", ""))
         named = [target for target in (context.get("investigation") or {}).get("review_targets", [])
                  if target.get("sheet_name") and re.sub(r"\s+", "", target["sheet_name"]) in request]
+        columns = [column for column in (context.get("workspace") or {}).get("columns", [])
+                   if column.get("header") and re.sub(r"\s+", "", column["header"]) in request]
+        references = (context.get("investigation") or {}).get("review_targets", [])
+        explicit_pdf = named or requested_review_kind(context) is not None or re.search(r"pdf|검토|추출", request, re.I) or any(
+            target.get("filename") and re.sub(r"\s+", "", target["filename"]) in request for target in references)
+        if ((arguments or {}).get("action") == "preprocess" and columns and not explicit_pdf
+                and not context.get("agent_execution")):
+            targets = ", ".join(f"{column['header']} (column_id={column['column_id']})" for column in columns)
+            raise ReviewTargetError(
+                f"사용자가 명시한 대상은 작업표의 {targets}입니다. PDF 검토 시트를 요청하지 않았습니다. "
+                "요청한 규칙을 유지하고 preprocess 또는 remove_words의 실제 작업표 column_id로 다시 호출하세요.",
+                answer="요청한 작업표 열에 맞는 정제 작업을 구성하지 못했어요. 작업표와 PDF 검토 시트 모두 수정하지 않았습니다.")
         if len(named) == 1 and str((arguments or {}).get("document_id")) != named[0]["document_id"]:
             raise ReviewTargetError("사용자가 명시한 검토 시트와 문서가 다릅니다. review_targets의 sheet_name과 document_id를 다시 확인하세요.")
         return
@@ -49,4 +61,6 @@ def check_review_tool(context, name, arguments=None):
 
 
 class ReviewTargetError(ValueError):
-    pass
+    def __init__(self, message, *, answer="PDF 검토 시트 대상 연결을 확인하지 못했어요. 첨부 문서 이름을 알려주세요. 작업표에는 실행하지 않았습니다."):
+        super().__init__(message)
+        self.answer = answer

@@ -51,9 +51,9 @@
                 columns = window.createWorkspaceColumns(selects, el("extra-columns"), profile.roles);
                 columns.bind(change); columns.showSelection(source); change();
             },
-            importColumns: function (available) {
+            importColumns: function (available, emptyText) {
                 el("import-confirm").checked = false;
-                el("import-columns").textContent = available.length ? "" : "추가할 원본 열이 없습니다";
+                el("import-columns").textContent = available.length ? "" : (emptyText || "추가할 원본 열이 없습니다");
                 importChoices = available.map(function (column) {
                     var label = document.createElement("label"), input = document.createElement("input");
                     label.className = "work-import-choice";

@@ -152,7 +152,9 @@ def build_workspace_tools(task_context: dict):
                         kind: Literal["supplier", "item", "other"] = "supplier", column: str = "회사명",
                         rules: list[Rule] = []) -> dict:
         """PDF 검토 시트의 수정 반영, 추출 재시도, 전처리를 채팅에서 준비한다.
-        거래처검토 시트/추출된 회사명의 대문자·회사약어 제거·공백 정리도 이 도구를 사용한다.
+        거래처검토 시트/추출된 회사명을 대상으로 명시한 대문자·회사약어 제거·공백 정리에 사용한다.
+        해외거래처상호처럼 workspace.columns의 열을 명시하고 PDF 대상을 요청하지 않았다면
+        회사 약어 제거 작업이어도 이 도구가 아니라 작업표 preprocess/remove_words를 사용한다.
         document_id는 investigation.review_targets 또는 조사 문서 목록의 실제 ID다. preprocess는 supplier(거래처)/item(품목)/other(기타)와 열 이름,
         요청한 전처리 규칙을 지정한다. 예: supplier 회사명, item 규격. 적용 전에 채팅 확인을 거친다."""
         documents = (task_context.get("investigation") or {}).get("documents", [])

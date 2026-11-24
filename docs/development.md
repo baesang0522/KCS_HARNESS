@@ -537,3 +537,15 @@ Git의 새 파일 목록을 확인합니다. API 소스에는 테스트용 실�
 검증: 프론트엔드 283개·백엔드 294개 통과. 기존 시트의 ‘규격→모델명’ 변경 및 셀 수정 후 버튼→확인→적용→완료 안내, 열 ID 저장 후 이름/순서 변경, 전처리 위치, 삭제 열 재생성 감지, 구형 거래처 4열 호환, 오류 시 스크롤 이동을 테스트했다. Excel API 대역 검증이며 실제 내부망 Excel 및 LLM은 직접 확인하지 않았다. 이미 저장된 AI 경고 문구를 임의로 지우지 않으며 프롬프트 변경은 다음 추출부터 적용된다.
 
 이번 내부 반영 파일: src/static/excel/documents/review_sheet.js, src/static/excel/documents/documents.js, src/services/investigation/extraction.py, src/prompts/investigation.yml. 압축 파일/패치는 만들지 않는다.
+
+
+### 작업표 열의 회사 약어 제거가 PDF 검토로 가는 요청 연결 수정 (2026-11-24)
+
+- [x] ‘해외거래처상호에서 CO, LTD, PTE 등 회사 약어 제거’처럼 작업표 열을 명시하고 PDF 대상을 요청하지 않은 경우를 구분한다. 시트명은 사용자 확인상 대상공급자이므로 이번 증상을 시트명 접두사 충돌로 단정하지 않는다.
+- [x] request_tools 프롬프트와 review_document 설명에서 작업 종류와 대상 구분을 명시했다. PDF 첨부·직전 PDF 작업·회사 약어 제거라는 이유만으로 작업표 열을 검토 시트로 바꾸지 않는다.
+- [x] check_review_tool에서 명시한 작업표 열을 PDF preprocess로 잘못 보낸 경우 실제 실행 전에 기존 재시도 경로로 돌려보낸다. 명시한 열 ID와 원래 규칙을 유지하도록 안내한다. PDF 참조·검토·추출을 함께 언급한 혼합 요청은 임의로 작업표로 고정하지 않는다.
+- [x] 재시도도 잘못된 PDF 도구이면 양쪽 모두 실행하지 않고 작업표 대상 구성 실패를 알린다. 기존처럼 엉뚱하게 PDF 문서명을 다시 묻지 않는다. PDF→작업표 오지정 검사와 PDF 반영/재시도, 수식 참조는 유지한다.
+
+검증: 백엔드 298개 통과. 대상공급자 PDF 및 직전 PDF 대화가 있는 상태에서 잘못된 review_document→작업표 preprocess/remove_words 교정, 두 번 실패 시 미실행, 공백이 있는 열 이름, 명시적 PDF 요청 및 기존 역방향 보호를 확인했다. 모의 모델 테스트이며 실제 내부망 모델의 최초 도구 선택은 직접 확인하지 않았다.
+
+내부 반영 실행 파일: src/agents/review_target.py, src/agents/request_graph.py, src/agents/tools/workspace.py, src/prompts/request_tools.yml. 압축/패치는 만들지 않는다.

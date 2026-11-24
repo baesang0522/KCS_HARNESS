@@ -122,7 +122,7 @@
             await window.workspaceStore.save(workspace);
             if (options.onWorkspaceReady) await options.onWorkspaceReady(referenceTarget());
         }
-        async function refresh() {
+        async function refresh(checkResults = true) {
             if (!workspace) return false;
             var previous = JSON.stringify(workspace.columns), lostTarget = false;
             await Excel.run(async function (context) {
@@ -154,6 +154,8 @@
                 if (lostTarget) ui.status("삭제된 열을 작업 대상에서 제외했습니다. 남아 있는 열로 이어서 작업할 수 있습니다.");
                 await save();
             }
+            // 열 목록을 여는 동안 기존 결과의 전체 행을 다시 읽을 필요는 없다. 가져오기 실행 시에는 검증한다.
+            if (!checkResults) return lostTarget;
             var linkedStages = (workspace.selection_stages || []).some(function (stage) { return (stage.request.condition_ids || []).length; });
             var versions = linkedStages && options.getConditionVersions ? await options.getConditionVersions() : null;
             if ((workspace.selection_stages || []).length && await dependencies.reconcileStages(workspace, versions)) {
@@ -411,11 +413,16 @@
                 if (action === "sources" || action === "scope") {
                     if (options.showWorkspace) options.showWorkspace();
                     ui.open(type); ui.mode(action === "sources" ? "import" : "scope");
+                    if (action === "sources") {
+                        ui.current(workspace, target);
+                        ui.importColumns([], "원본 열 목록을 불러오는 중…");
+                        ui.status("");
+                    }
                 }
                 // Read form values before refresh repaints the current settings.
                 var role = settings, sourceColumns = ui.importSelection(), filter = settings;
                 var importPolicy = ui.importPolicy();
-                await refresh(); operations.invalidate(); similarity.reset(); lastFormula = null;
+                await refresh(action !== "sources"); operations.invalidate(); similarity.reset(); lastFormula = null;
                 if (action === "scope") {
                     ui.current(workspace, target); ui.status("조건 열과 값을 선택하고 ‘범위 적용’을 누르세요.");
                     return;
@@ -444,6 +451,7 @@
                 ui.status(action === "import" ? imported + "개 열을 추가했습니다." : "현재 열과 설정으로 작업을 이어갑니다.");
                 if (action === "role") options.complete("‘" + column.header + "’ 열의 역할을 변경했어. 셀 값은 그대로야.");
             } catch (error) {
+                if (action === "sources") ui.importColumns([], "원본 열 목록을 불러오지 못했습니다. 아래 오류를 확인하고 다시 열어 주세요.");
                 if (previousRoles) workspace.columns.forEach(function (c) { c.role = previousRoles.get(String(c.column_id)); });
                 if (action === "import") {
                     try { ui.importColumns(await window.sourceColumns.list(workspace)); display(operations.targets()); }

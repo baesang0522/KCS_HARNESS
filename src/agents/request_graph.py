@@ -140,7 +140,7 @@ async def run_request_graph(runtime, messages, task_context: dict, *, log_contex
                 if isinstance(error, RepeatedReadError):
                     raise
                 if isinstance(error, ReviewTargetError):
-                    return {"decision": clarification("PDF 검토 시트 대상 연결을 확인하지 못했어요. 첨부 문서 이름을 알려주세요. 작업표에는 실행하지 않았습니다.")}
+                    return {"decision": clarification(error.answer)}
                 return {
                     "decision": clarification(
                         MODEL_RESPONSE_ERROR

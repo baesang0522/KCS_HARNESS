@@ -101,3 +101,69 @@ class ReviewRoutingTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ReviewTargetError,'문서가 다릅니다'):
             check_review_tool(ctx,'review_document',dict(document_id=ctx['investigation']['review_targets'][1]['document_id']))
         check_review_tool(ctx,'review_document',dict(document_id=did))
+
+    async def test_named_workspace_column_corrects_pdf_preprocessing_despite_previous_pdf_request(self):
+        request = '해외거래처상호에서 CO, LTD, PTE등 회사를 나타내는 축약어를 전부 제거해줘'
+        rules = [dict(operation='remove_words', words=['CO.,', 'CO.', 'CO', 'LTD.', 'LTD', 'PTE.', 'PTE'])]
+        for tool in ['preprocess', 'remove_words']:
+            with self.subTest(tool=tool):
+                ctx, did = context(); ctx['user_request'] = request
+                ctx['investigation']['review_targets'][0]['sheet_name'] = '대상공급자'
+                wrong = dict(name='review_document', args=dict(document_id=did, action='preprocess',
+                    kind='supplier', column='회사명', rules=rules), id='wrong-pdf')
+                args = dict(column_id='company', rules=rules) if tool == 'preprocess' else dict(column_id='company', words=rules[0]['words'])
+                model = SimpleNamespace(ainvoke=AsyncMock(side_effect=[AIMessage(content='', tool_calls=[wrong]),
+                    AIMessage(content='', tool_calls=[dict(name=tool, args=args, id='correct-workspace')])]))
+                runtime = SimpleNamespace(model=SimpleNamespace(bind_tools=lambda *a, **k:model), tools_prompt='test')
+                history = [HumanMessage(content='대상공급자 시트의 회사명을 정제해줘'),
+                           AIMessage(content='PDF 검토 작업을 준비할게요.'), HumanMessage(content=request)]
+                with patch('builtins.print') as logged:
+                    result = await run_request_graph(runtime, history, ctx)
+                events = [json.loads(call.args[0]) for call in logged.call_args_list]
+                self.assertEqual([e['tool_name'] for e in events if e['event']=='tool.completed'], [tool])
+                self.assertEqual(result['intent'], 'operation')
+                self.assertEqual(result['operation']['column_ids'], ['company'])
+                self.assertEqual(result['operation']['rules'][0]['words'], rules[0]['words'])
+                self.assertNotIn('document_action', result)
+                correction = model.ainvoke.call_args_list[1].args[0][-1].content
+                self.assertIn('해외거래처상호', correction)
+                self.assertIn('column_id=company', correction)
+
+    async def test_repeated_wrong_pdf_tool_never_requests_document_name_for_clear_workspace_request(self):
+        ctx, did = context(); ctx['user_request'] = '해외거래처상호에서 CO, LTD, PTE를 제거해줘'
+        ctx['investigation']['review_targets'][0]['sheet_name'] = '대상공급자'
+        model = SimpleNamespace(ainvoke=AsyncMock(side_effect=[AIMessage(content='', tool_calls=[dict(
+            name='review_document', args=dict(document_id=did, action='preprocess', rules=RULES), id=str(i))]) for i in range(2)]))
+        runtime = SimpleNamespace(model=SimpleNamespace(bind_tools=lambda *a, **k:model), tools_prompt='test')
+        with patch('builtins.print') as logged:
+            result = await run_request_graph(runtime, [HumanMessage(content=ctx['user_request'])], ctx)
+        events = [json.loads(call.args[0]) for call in logged.call_args_list]
+        self.assertFalse(any(e['event']=='tool.completed' for e in events))
+        self.assertEqual(result['intent'], 'clarify')
+        self.assertIn('요청한 작업표 열', result['answer'])
+        self.assertNotIn('문서 이름', result['answer'])
+        self.assertNotIn('document_action', result)
+
+    def test_explicit_review_targets_and_non_preprocessing_actions_are_not_blocked(self):
+        ctx, did = context();ctx['investigation']['review_targets'][0]['sheet_name'] = '대상공급자'
+        args = dict(document_id=did, action='preprocess')
+        for request in ['대상공급자 시트에서 해외거래처상호 열을 정제해줘',
+                        'PDF 검토 시트의 해외거래처상호 열을 정제해줘',
+                        '해외거래처.pdf의 해외거래처상호를 정제해줘', REQUESTS[0]]:
+            with self.subTest(request=request):
+                ctx['user_request'] = request
+                check_review_tool(ctx, 'review_document', args)
+        ctx['user_request'] = '해외거래처상호를 정제해줘'
+        for action in ['apply', 'retry']:
+            check_review_tool(ctx, 'review_document', dict(document_id=did, action=action))
+        ctx['agent_execution'] = True
+        check_review_tool(ctx, 'review_document', args)
+
+    def test_explicit_workspace_header_needs_no_workspace_keyword_and_handles_spacing(self):
+        ctx, did = context();ctx['investigation']['review_targets'][0]['sheet_name'] = '대상공급자'
+        ctx['user_request'] = '해외 거래처 상호에서 회사 약어 지워줘'
+        with self.assertRaisesRegex(ReviewTargetError, 'column_id=company'):
+            check_review_tool(ctx, 'review_document', dict(document_id=did, action='preprocess'))
+        check_review_tool(ctx, 'preprocess')
+        ctx['user_request'] = '회사명을 정제해줘'
+        check_review_tool(ctx, 'review_document', dict(document_id=did, action='preprocess'))
