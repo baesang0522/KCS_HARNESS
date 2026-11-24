@@ -421,7 +421,6 @@
                 }
                 // Read form values before refresh repaints the current settings.
                 var role = settings, sourceColumns = ui.importSelection(), filter = settings;
-                var importPolicy = ui.importPolicy();
                 await refresh(action !== "sources"); operations.invalidate(); similarity.reset(); lastFormula = null;
                 if (action === "scope") {
                     ui.current(workspace, target); ui.status("조건 열과 값을 선택하고 ‘범위 적용’을 누르세요.");
@@ -441,7 +440,7 @@
                     return;
                 }
                 else if (action === "import") {
-                    await window.workspaceActions.importColumns(workspace, sourceColumns, importPolicy, ui, async function (count) {
+                    await window.workspaceActions.importColumns(workspace, sourceColumns, ui, async function (count) {
                         imported = count;
                         await save();
                     });

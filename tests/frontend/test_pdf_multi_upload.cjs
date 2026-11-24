@@ -3,7 +3,7 @@ const {createDOM} = require('../helpers/taskpane_dom.cjs');
 const {createInvestigationHost} = require('../helpers/investigation_host.cjs');
 const supplier = {target:{kind:'supplier',group:'1',category:'제조사',company_name:'회사(ACME)'},source_pages:[1]};
 const item = {target:{kind:'item',group:'1',hs_codes:['7208511000'],specification:'SA516-70',requirements:'134mm 이상'},source_pages:[1]};
-async function setup() {
+async function setup(useTaskpane = false) {
     const h=createDOM(), excel=createInvestigationHost();h.excel=excel;h.node=id=>h.document.getElementById(id);
     let serial=0;const docs=new Map();
     h.state={revision:0,conditions:[],reviews:{},document_notes:{},workspace:null};
@@ -30,6 +30,26 @@ async function setup() {
     }};
     excel.window.apiClient=h.api;excel.load('documents/review_sheet.js');h.window.investigationSheet=excel.window.investigationSheet;
     ['chat/chat.js','documents/documents.js','documents/investigation.js'].forEach(h.load);
+    if(useTaskpane){
+        // 실제 taskpane의 버튼 → localCommand → previewApply 연결과 busy 처리를 사용한다.
+        h.window.apiClient=h.api;
+        for(const [factory,key] of [['createTaskMessages','messages'],['createDocumentsController','documents'],['createInvestigationController','investigation']]){
+            const create=h.window[factory];h.window[factory]=options=>{h[key]=create(options);return h[key];};
+        }
+        const createChat=h.window.createChatController;
+        h.window.createChatController=options=>{
+            h.chat=createChat(options);const initialize=h.chat.initialize;
+            h.chat.initialize=()=>{h.initializing=initialize();return h.initializing;};return h.chat;
+        };
+        h.window.createWriteRecovery=()=>({reset(){},async refresh(){}});
+        h.window.createWorkspaceController=()=>({reset(){},dismiss(){},cancelPending(){},setBusy(){},
+            referenceTarget:()=>null,isProcessing:()=>false,context:async()=>null});
+        h.window.createFormulaUI=()=>({});
+        h.window.createFormulaController=()=>({reset(){},dismiss(){},setBusy(){}});
+        h.window.createReviewPreprocess=()=>({reset(){}});
+        h.window.createAgentController=()=>({async load(){},flush(){},detach(){}});
+        h.load('taskpane.js');await h.initializing;
+    }else{
     h.chat=h.window.createChatController({api:h.api,getWorkspace:()=>null,closeTaskCards(){},resetTasks(){},handleUIAction(){},
         onConversationChanged:id=>Promise.all([h.documents.load(id),h.investigation.load(id)]),
         onBusy:()=>h.documents?.updateControls()});
@@ -38,6 +58,7 @@ async function setup() {
     h.documents=h.window.createDocumentsController({...shared,beforeUpload:h.investigation.prepare,readConditions:h.investigation.extract,
         reviewInfo:h.investigation.info,applyReview:h.investigation.previewApply,preprocessReview:async()=>{}});
     await h.chat.initialize();
+    }
     h.upload=async(...names)=>{h.node('document-file').files=names.map(name=>({name}));await h.node('document-file').emit('change');};
     return h;
 }
@@ -74,6 +95,71 @@ test('Excel failure offers only retry until its sheet exists, including after re
     assert.equal(h.calls.filter(c=>c.url.includes('/extractions/')).length,1);
 });
 
+test('reflection button rechecks an existing edited sheet after a late extraction failure',async()=>{
+ const h=await setup(true),sheet=h.window.investigationSheet,ensure=sheet.ensure;
+ sheet.ensure=async(...args)=>{await ensure(...args);throw Error('검토 시트 활성화 응답 실패');};
+ await h.upload('거래처.pdf');
+ const doc=h.documents.items()[0];
+ assert.equal(h.investigation.info(doc.document_id).ready,false);
+ assert.equal(h.excel.sheets.length,1);
+ h.excel.sheets[0].cells[4][1]='실패 후 수정한 회사';
+ const button=h.node('documents-apply');
+ assert.equal(button.disabled,false,'a stale ready flag must not disable reflection');
+ await button.emit('click');
+ assert.match(h.chatText(),/실패 후 수정한 회사/);
+ assert.equal(h.node('documents-panel').hidden,true);
+ await h.messages.command('적용');
+ assert.equal(h.state.reviews[doc.document_id][0].target.company_name,'실패 후 수정한 회사');
+ assert.equal(h.investigation.info(doc.document_id).ready,true);
+ assert.equal(h.calls.filter(c=>c.url.includes('/extractions/')).length,1);
+});
+
+test('reflection click after model extraction failure explains the missing review instead of doing nothing',async()=>{
+ const h=await setup(true),original=h.api.requestJson;
+ h.api.requestJson=async(url,opts)=>{if(url.includes('/extractions/'))throw Error('모델 추출 실패');return original(url,opts);};
+ await h.upload('거래처.pdf');
+ assert.equal(h.node('documents-apply').disabled,false);
+ await h.node('documents-apply').emit('click');
+ assert.equal(h.node('documents-panel').hidden,false);
+ assert.match(h.node('documents-status').textContent,/추출.*완료.*재시도/);
+ assert.equal(h.calls.filter(c=>c.url.includes('/reviews/')).length,0);
+ assert.equal(h.action('적용'),undefined);
+});
+
+for(const phase of ['server','excel','metadata']) test(`reflection waiting on ${phase} can be stopped and chat resumes before the late response`,async()=>{
+ const h=await setup(true);await h.upload('거래처.pdf');
+ const original=h.api.requestJson,read=h.window.investigationSheet.read,isReady=h.window.investigationSheet.isReady;
+ let entered,release;
+ const waiting=new Promise(resolve=>entered=resolve),held=new Promise(resolve=>release=resolve);
+ if(phase==='excel')h.window.investigationSheet.read=async(...args)=>{entered();await held;return read(...args);};
+ else if(phase==='metadata')h.window.investigationSheet.isReady=async(...args)=>{entered();await held;return isReady(...args);};
+ else h.api.requestJson=async(url,opts)=>{
+  if(url.endsWith('/investigation')){entered();await held;return structuredClone(h.state);}
+  return original(url,opts);
+ };
+ assert.equal(h.node('documents-apply').disabled,false);
+ const clicking=h.node('documents-apply').emit('click');await waiting;
+ const send=h.document.querySelector('.send');
+ try{
+  assert.equal(send.disabled,false,'reflection must expose the existing stop action while waiting');
+  assert.equal(send.getAttribute('aria-label'),'요청 중지');
+  await h.node('composer').emit('submit');
+  await Promise.race([clicking,new Promise((_,reject)=>{setTimeout(()=>reject(Error('reflection stop did not release chat')),500).unref();})]);
+  assert.equal(h.chat.isBusy(),false);
+  assert.match(h.chatText(),/수정.*중지/);
+  assert.equal(h.action('적용'),undefined);
+  assert.equal(h.calls.filter(c=>c.url.includes('/reviews/')).length,0);
+  h.window.investigationSheet.read=read;
+  h.window.investigationSheet.isReady=isReady;
+  h.api.requestJson=async(url,opts)=>url==='/chat'?{answer:'다시 응답합니다.',ui_action:null}:original(url,opts);
+  h.node('message').value='현재 상태 알려줘';await h.chat.sendMessage();
+  assert.match(h.chatText(),/다시 응답합니다/);
+ }finally{release();await clicking;}
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(h.action('적용'),undefined,'late reads must never resurrect a cancelled approval');
+ assert.equal(h.chat.isBusy(),false);
+});
+
 test('reflection button previews both PDFs without typing and saves only after chat approval',async()=>{
  const h=await setup();await h.upload('거래처.pdf','품목.pdf');const ids=Object.keys(h.state.reviews);
  h.excel.sheets[0].cells[4][1]='수정된 회사';h.excel.sheets[1].cells[4][3]='150mm 이상';
@@ -96,6 +182,29 @@ test('normal reading and sheet creation never show retry guidance; actual failur
  await h.upload('품목.pdf');assert.match(h.node('documents-list').textContent,/추출 재시도/);
  h.window.investigationSheet.ensure=ensure;const doc=h.documents.items()[1];await h.investigation.extract(doc.document_id,doc.filename);
  assert.doesNotMatch(h.node('documents-list').textContent,/재시도/);
+});
+
+test('failed PDF model extraction retries the same attachment with a new request and restores editing',async()=>{
+ const h=await setup(),original=h.api.requestJson,attempts=[];
+ h.api.requestJson=async(url,opts)=>{
+  if(url.includes('/extractions/')){
+   attempts.push({url,document:JSON.parse(opts.body).document_id});
+   if(attempts.length===1)throw Error('모델 응답 실패');
+  }
+  return original(url,opts);
+ };
+ await h.upload('거래처.pdf');
+ assert.equal(h.documents.items().length,1);assert.equal(h.chat.isBusy(),false);
+ assert.match(h.node('documents-list').textContent,/추출 실패/);
+ const doc=h.documents.items()[0];
+ assert.equal(await h.investigation.extract(doc.document_id,doc.filename),true);
+ assert.equal(attempts.length,2);assert.equal(attempts[0].document,attempts[1].document);
+ assert.notEqual(attempts[0].url,attempts[1].url);
+ assert.equal(h.calls.filter(c=>c.url.includes('/documents/')&&c.opts.method==='POST').length,1);
+ h.excel.sheets[0].cells[4][1]='재시도 후 수정';
+ await h.investigation.previewApply();await h.messages.command('적용');
+ assert.equal(h.state.reviews[doc.document_id][0].target.company_name,'재시도 후 수정');
+ assert.equal(h.chat.isBusy(),false);
 });
 test('one changed review among three only reflects that PDF and emits one completion',async()=>{
  const h=await setup();await h.upload('거래처.pdf','품목.pdf','추가거래처.pdf');const ids=Object.keys(h.state.reviews);

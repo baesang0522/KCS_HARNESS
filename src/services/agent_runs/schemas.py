@@ -68,5 +68,6 @@ class AgentRun:
     message: str = ""
     user_request: str = ""
     code_grouping_request: str | None = None
+    pdf_context_summary: str | None = None
     steps: int = 0
     deadline: float | None = None

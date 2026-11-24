@@ -182,7 +182,7 @@ class ScopeRequest(StrictModel):
 class OperationOutput(StrictModel):
     score_column_id: ColumnId | None = None
     mode: Literal["new", "existing"] = "new"
-    column_id: ColumnId | None = None
+    column_id: ColumnId | None = Field(default=None, description="mode=existing이면 사용자가 요청한 저장 대상 열의 실제 workspace.columns.column_id를 반드시 지정한다. 열 이름은 ID가 아니다.")
     name: str | None = Field(default=None, min_length=1, max_length=200)
     anchor: ColumnId | None = None
     side: Literal["before", "after"] = "after"
@@ -207,7 +207,7 @@ class OperationOutput(StrictModel):
         if self.score_column_id and (self.mode != "existing" or self.score_column_id == self.column_id):
             raise ValueError("유사도 점수는 그룹명과 다른 기존 열이어야 합니다.")
         if self.mode == "existing" and not self.column_id:
-            raise ValueError("반영할 기존 열 ID를 지정하세요.")
+            raise ValueError('반영할 기존 열 ID를 지정하세요. output={"mode":"existing","column_id":"workspace.columns의 실제 ID"}로 전달하세요. 새 열에 저장하려면 {"mode":"new"}입니다.')
         if self.mode == "new" and self.column_id is not None:
             raise ValueError("새 열에는 기존 대상 열 ID를 지정하지 마세요.")
         if self.name is not None and not self.name.strip():

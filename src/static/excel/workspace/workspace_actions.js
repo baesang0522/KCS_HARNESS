@@ -79,14 +79,14 @@
         return {column: column, previousRoles: previousRoles};
     }
 
-    async function importColumns(workspace, sourceColumns, importPolicy, ui, onImported) {
+    async function importColumns(workspace, sourceColumns, ui, onImported) {
         var imported = 0;
         if (!sourceColumns.length) throw new Error("추가할 원본 열을 선택하세요.");
         if (workspace.columns.length + sourceColumns.length > 200) throw new Error("작업 표는 최대 200열입니다. 선택한 열 수를 줄이세요.");
         for (var sourceColumn of sourceColumns) {
             var result = await window.sourceColumns.append(workspace, sourceColumn.column_id, function (label, done, total) {
                 ui.status("열 가져오기 " + (imported + 1) + "/" + sourceColumns.length + " · " + label + " · " + done + "/" + total);
-            }, Object.assign({}, importPolicy, {header: sourceColumn.header}));
+            }, {header: sourceColumn.header});
             workspace.columns = workspace.columns.concat(result.columns);
             imported++;
             await onImported(imported);

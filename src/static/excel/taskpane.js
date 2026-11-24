@@ -43,6 +43,7 @@
     function completeTask(text, outcome) {
         if (agent && outcome) agent.complete(outcome, text);
         if (workspace) workspace.dismiss();
+        document.getElementById('notice').textContent = '';
         messages.say(text);
         if (recovery && outcome) recovery.refresh();
     }

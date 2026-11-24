@@ -1,7 +1,8 @@
+import asyncio
 import json
 import unittest
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from langchain_core.messages import AIMessage
 from pydantic import ValidationError
@@ -20,6 +21,26 @@ from services.recommendation.analysis import generate_advice
 
 
 class InvestigationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_status_read_does_not_wait_for_model_holding_conversation_lock(self):
+        from api.investigation import read_investigation
+        from repositories.conversation_repository import MemoryConversationRepository
+        repository = MemoryConversationRepository()
+        cid = await repository.create()
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(conversations=repository)))
+        async with repository.edit(cid) as conversation:
+            conversation.investigation.goal = '저장된 조사'
+            pending = conversation.investigation.model_copy(deep=True)
+            pending.goal = '아직 추출 중인 조사'
+            pending.revision += 1
+            result = await asyncio.wait_for(read_investigation(UUID(cid), request), 0.5)
+            self.assertEqual(result['goal'], '저장된 조사')
+            result['document_notes']['local-only'] = ['응답 수정']
+            self.assertEqual(conversation.investigation.document_notes, {})
+            conversation.investigation = pending
+        committed = await read_investigation(UUID(cid), request)
+        self.assertEqual(committed['goal'], '아직 추출 중인 조사')
+        self.assertEqual(committed['revision'], 1)
+
     def workspace(self):
         return dict(workspace_id=uuid4(), worksheet_id='sheet', table_id='table',
                     sheet_name='조사', task_type='investigation', row_count=100,

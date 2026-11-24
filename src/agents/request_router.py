@@ -85,7 +85,7 @@ class RequestDecision(BaseModel):
         return self
 
 
-async def route_request(runtime, messages, *, task_context: dict, log_context=None):
+async def route_request(runtime, messages, *, task_context: dict, log_context=None, pdf_documents=None):
     workspace = task_context.get("workspace")
     validation_context = {
         "workspace_task_type": (
@@ -93,7 +93,7 @@ async def route_request(runtime, messages, *, task_context: dict, log_context=No
         ),
     }
 
-    result = await run_request_graph(runtime, messages, task_context, log_context=log_context)
+    result = await run_request_graph(runtime, messages, task_context, log_context=log_context, pdf_documents=pdf_documents)
     decision = RequestDecision.model_validate(result, context=validation_context)
     reasons = []
 

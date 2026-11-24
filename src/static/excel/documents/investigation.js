@@ -5,6 +5,25 @@
         var sheet = options.sheet || window.investigationSheet;
         function endpoint() { return '/conversations/' + encodeURIComponent(cid) + '/investigation'; }
         function status(text) { document.getElementById('documents-status').textContent = text; if (options.messages) options.messages.say(text); }
+        function progress(text) {
+            document.getElementById('documents-status').textContent = text;
+            document.getElementById('notice').textContent = text + ' · 보내기 위치의 중지 버튼으로 멈출 수 있어요.';
+        }
+        function waitForRead(run, pending) {
+            if (!run) return pending;
+            // Excel.run 자체는 중단할 수 없으므로 읽기 응답 대기만 해제하고 늦은 결과는 버린다.
+            return new Promise(function (resolve, reject) {
+                var signal = run.controller.signal, settled = false;
+                function finish(callback, value) {
+                    if (settled) return;
+                    settled = true; signal.removeEventListener('abort', stop); callback(value);
+                }
+                function stop() { finish(reject, new DOMException('수정 내용 확인을 중지했습니다.', 'AbortError')); }
+                signal.addEventListener('abort', stop);
+                Promise.resolve(pending).then(function (value) { finish(resolve, value); }, function (error) { finish(reject, error); });
+                if (signal.aborted) stop();
+            });
+        }
         function show() {
             document.getElementById('documents-panel').hidden = false;
             document.getElementById('documents-toggle').textContent = '추출내용 닫기';
@@ -15,8 +34,9 @@
             target.textContent = state && state.workspace ? '작업표: ' + state.workspace.sheet_name : '작업표를 준비하면 자동으로 연결돼요.';
             if (options.onChanged) options.onChanged();
         }
-        async function refresh() {
-            var expected = version, result = await options.api.requestJson(endpoint());
+        async function refresh(run) {
+            var expected = version, result = await waitForRead(run, options.api.requestJson(endpoint(), run ? {signal: run.controller.signal} : undefined));
+            if (run) options.checkRequest(run);
             if (expected !== version) throw new Error('대화가 바뀌었어요.');
             state = result; render(); return state;
         }
@@ -40,23 +60,25 @@
             if (!state) throw new Error('조사 정보를 아직 읽지 못했어요. 화면을 새로 불러와 주세요.');
             if (state.workspace && !sameTarget(state.workspace, target)) throw new Error('이 대화는 이미 작업표 하나로 조사 중이에요. 새 조사는 새 대화에서 시작하세요.');
         }
-        async function bind(target) {
+        async function bind(target, run) {
             if (!cid || !target) return;
             validateWorkspace(target);
             if (state && state.workspace && sameTarget(state.workspace, target) && state.workspace.sheet_name === target.sheet_name) return;
-            if (binding) return binding;
+            if (binding) return waitForRead(run, binding);
             var expected = version, url = endpoint();
             binding = (async function () {
-                var result = await options.api.requestJson(url + '/workspace', {
-                    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(target)});
+                var result = await waitForRead(run, options.api.requestJson(url + '/workspace', {
+                    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(target), signal: run && run.controller.signal}));
+                if (run) options.checkRequest(run);
                 if (expected !== version) throw new Error('대화가 바뀌었어요.');
                 state = result; render();
             })();
             try { await binding; } finally { if (expected === version) binding = null; }
         }
-        async function prepare() {
-            await refresh();
-            await bind(options.getWorkspace());
+        async function prepare(run) {
+            await refresh(run);
+            await bind(options.getWorkspace(), run);
+            if (run) options.checkRequest(run);
         }
         async function extract(documentId, filename) {
             if (options.isBusy() || !cid) return;
@@ -64,7 +86,7 @@
             extracting.add(documentId); failed.delete(documentId);
             options.setBusy(true); show(); render();
             try {
-                await prepare(); options.checkRequest(run);
+                await prepare(run); options.checkRequest(run);
                 if (expected !== version) return;
                 if (!Object.prototype.hasOwnProperty.call(state.document_notes, documentId)) {
                     var requestId = options.api.newRequestId();
@@ -100,6 +122,7 @@
             options.setBusy(true);
             try {
                 await prepare();
+                if (!await sheet.isReady(conversationId, documentId, state.reviews[documentId] || [])) throw new Error('검토 시트 작성이 완료되지 않았어요. 해당 PDF의 추출 재시도를 요청해 주세요. 기존 시트의 수정 내용은 유지돼요.');
                 var draft = await sheet.read(conversationId, documentId);
                 if (!draft) throw new Error('먼저 검토 시트를 열어 주세요.');
                 if (approvedDraft && sheet.canonical(draft.rows) !== sheet.canonical(approvedDraft.rows)) throw new Error('확인 이후 검토 시트가 바뀌었어요. 수정 반영을 다시 요청하세요.');
@@ -132,14 +155,25 @@
         }
         async function previewApply(documentIds) {
             if (options.isBusy()) return;
+            var run = options.beginRequest();
             options.setBusy(true);
             var drafts = [], conversationId = cid, expected = version;
             try {
-                await prepare();
+                progress('PDF 수정 반영 준비 · 서버의 조사 상태를 확인하고 있어요…');
+                await prepare(run);
                 var ids = documentIds || Object.keys(state.reviews || {});
+                if (!ids.length) throw new Error('PDF 추출이 완료되지 않아 반영할 검토 시트가 없어요. 채팅으로 해당 PDF의 추출 재시도를 요청해 주세요.');
                 for (var id of ids) {
-                    var draft = await sheet.read(cid, id);
+                    options.checkRequest(run);
+                    progress('PDF 수정 반영 준비 · Excel 검토 시트를 읽고 있어요… ' + (drafts.length + 1) + '/' + ids.length);
+                    if (!Object.prototype.hasOwnProperty.call(state.document_notes, id)) throw new Error('PDF 추출이 완료되지 않았어요. 채팅으로 해당 PDF의 추출 재시도를 요청해 주세요.');
+                    if (!await waitForRead(run, sheet.isReady(cid, id, state.reviews[id] || []))) throw new Error('검토 시트 작성이 완료되지 않았어요. 해당 PDF의 추출 재시도를 요청해 주세요. 기존 시트의 수정 내용은 유지돼요.');
+                    options.checkRequest(run);
+                    var draft = await waitForRead(run, sheet.read(cid, id));
+                    options.checkRequest(run);
                     if (!draft) throw new Error('PDF 검토 시트를 먼저 준비해 주세요.');
+                    if (version !== expected) return;
+                    readySheets.add(id); failed.delete(id);
                     var current = state.reviews[id] || [];
                     var changed = sheet.canonical(draft.rows) !== sheet.canonical(current) || sheet.canonical(draft.baseline) !== sheet.canonical(current);
                     var pending = state.conditions.some(function (condition) { return condition.source_document_id === id && condition.status !== 'confirmed'; });
@@ -160,7 +194,18 @@
                     }
                     status('PDF ' + batch.completed + '개의 ' + label + '을 반영했어요.');
                 }, cancel: function () { status('조사 조건 반영을 취소했어요. 검토 시트 수정값은 남아 있어요.'); }}, ['조건 내용', '근거 페이지'], rows);
-            } finally { options.setBusy(false); }
+            } catch (error) {
+                if (run.cancelled || error.name === 'AbortError') {
+                    await options.reportStop(run);
+                    if (version === expected) status('수정 반영 준비를 중지했어요. 검토 시트의 수정값은 그대로이며 다시 반영을 요청할 수 있어요.');
+                    return;
+                }
+                throw error;
+            } finally {
+                options.endRequest(run);
+                document.getElementById('notice').textContent = '';
+                options.setBusy(false); if (version === expected) render();
+            }
         }
         function info(did) {
             return state ? {ready: Object.prototype.hasOwnProperty.call(state.document_notes, did) && readySheets.has(did),

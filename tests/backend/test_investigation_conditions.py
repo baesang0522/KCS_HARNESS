@@ -202,7 +202,7 @@ class InvestigationConditionTests(unittest.TestCase):
         for index in range(12):
             self.conversation.turns.append(StoredTurn(request_id=str(uuid4()), question=f'질문{index}', answer='답', reasoning=[]))
         captured = {}
-        async def route(runtime, messages, *, task_context, log_context=None):
+        async def route(runtime, messages, *, task_context, log_context=None, pdf_documents=None):
             captured.update(context=task_context, messages=messages)
             return RequestDecision(intent='general', answer='기억한 조건'), []
         with patch('services.chat.service.route_request', new=route):
@@ -222,7 +222,7 @@ class InvestigationConditionTests(unittest.TestCase):
         self.assertEqual(self.read()['conditions'], [])
 
     def test_chat_condition_request_returns_valid_ui_action(self):
-        async def route(runtime, messages, *, task_context, log_context=None):
+        async def route(runtime, messages, *, task_context, log_context=None, pdf_documents=None):
             return RequestDecision(intent='investigation', answer='조건 화면'), []
         with patch('services.chat.service.route_request', new=route):
             result = self.client.post('/chat', json=dict(conversation_id=self.cid, request_id=str(uuid4()), message='PDF 조사 조건 보여줘'))

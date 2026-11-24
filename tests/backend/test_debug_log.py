@@ -33,12 +33,49 @@ class DebugLogTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(output.call_args.kwargs['flush'])
         self.assertEqual(len(output.call_args.args[0].splitlines()), 1)
 
+    def test_bulk_excel_data_is_counted_without_copying_values_to_logs(self):
+        rows = [{'values': ['PRIVATE CELL'], 'excel_row': 2}] * 100000
+        groups = [{'values': ['PRIVATE CODE', 'PRIVATE GROUP', '100'], 'count': 100000}]
+        observation = {'kind': 'read', 'column_ids': ['2', '5', '6'],
+                       'row_count': 100000, 'groups': groups}
+        payload = {'receipt': {'rows': rows}, 'workspace': {'sample_rows': rows[:2]},
+                   'observation': observation, 'read_results': [{'result': observation}],
+                   'row_ids': list(range(100000))}
+        with patch('builtins.print') as output:
+            log_event('model.started', task_context=payload)
+        printed = output.call_args.args[0]
+        logged = self.events(output)[0]['task_context']
+        self.assertLess(len(printed), 1500)
+        self.assertNotIn('PRIVATE', printed)
+        self.assertEqual(logged['receipt']['rows'], {'count': 100000, 'omitted': True})
+        self.assertEqual(logged['observation']['groups'], {'count': 1, 'omitted': True})
+        self.assertEqual(logged['workspace']['sample_rows'], {'count': 2, 'omitted': True})
+        self.assertEqual(logged['row_ids'], {'count': 100000, 'omitted': True})
+        self.assertEqual(logged['observation']['column_ids'], ['2', '5', '6'])
+        self.assertEqual(logged['observation']['row_count'], 100000)
+        self.assertIs(payload['receipt']['rows'], rows)
+        self.assertEqual(rows[-1]['values'], ['PRIVATE CELL'])
+        self.assertIs(payload['read_results'][0]['result']['groups'], groups)
+
+    def test_column_id_types_and_validation_errors_remain_visible(self):
+        arguments = {'column_ids': [2, 3, 5, 6]}
+        errors = [{'type': 'string_type', 'loc': ['column_ids', 0], 'msg': 'Input should be a valid string'}]
+        with patch('builtins.print') as output:
+            log_event('tool.failed', arguments=arguments, error_message=errors, attempt=2, will_retry=False)
+        logged = self.events(output)[0]
+        self.assertEqual(logged['arguments'], arguments)
+        self.assertEqual(logged['error_message'], errors)
+        self.assertFalse(logged['will_retry'])
+
     async def test_success_records_input_result_timing_and_ids(self):
         context = {'api_key': 'private-value'}
         with patch('builtins.print') as output:
             result = await run_request_graph(self.runtime(self.reply()), [HumanMessage(content='사용자 요청')], context,
                                             log_context={'conversation_id': 'conv', 'request_id': 'req'})
         events = self.events(output)
+        sizes = next(item for item in events if item['event'] == 'model.input_size')
+        self.assertIn('context_section_chars', sizes)
+        events = [item for item in events if item['event'] != 'model.input_size']
         self.assertEqual([item['event'] for item in events], ['model.started', 'model.completed', 'tool.started', 'tool.completed'])
         self.assertEqual(events[2]['arguments'], {'question': '어느 열?'})
         self.assertEqual(events[3]['result'], result)

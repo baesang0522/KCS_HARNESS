@@ -18,7 +18,8 @@
             picker.disabled = options.isBusy() || !cid;
             panel.querySelectorAll('button,input').forEach(function (el) { el.disabled = options.isBusy(); });
             document.getElementById('documents-close').disabled = false;
-            applyReview.disabled = options.isBusy() || reflecting || !cid || !options.applyReview || !items.some(function (item) { return options.reviewInfo && options.reviewInfo(item.document_id).ready; });
+            // 추출 종료 직전 오류로 ready가 누락될 수 있다. 반영 시 실제 시트를 확인한다.
+            applyReview.disabled = options.isBusy() || reflecting || !cid || !options.applyReview || !items.length;
         }
         function button(parent, label, action) {
             var b = node('button', label); b.type = 'button'; b.addEventListener('click', action); parent.appendChild(b);

@@ -95,9 +95,10 @@ async def create_formula_job(payload: CreateFormulaJobRequest, repository, formu
         ][-5:]
         recent_messages = []
         for turn in conversation.turns[-5:]:
+            question, answer = turn.model_history()
             recent_messages.extend([
-                FormulaConversationMessage(role="user", content=turn.question),
-                FormulaConversationMessage(role="assistant", content=turn.answer),
+                FormulaConversationMessage(role="user", content=question),
+                FormulaConversationMessage(role="assistant", content=answer),
             ])
         planning_context = FormulaPlanningContext(
             previous_instruction=(

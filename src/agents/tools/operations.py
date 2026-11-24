@@ -1,5 +1,6 @@
 """정제·비교 미리보기를 구성하는 도구."""
 from typing import Literal
+import re
 from langchain_core.tools import tool
 from services.formula.schemas import FormulaOutput
 from services.operations.schemas import Mapping, Operation, OperationOutput, Rule, RowFilter, extraction_column_id
@@ -82,6 +83,14 @@ def build_operations_tools(task_context: dict):
         숫자 초과는 gt, 이상은 gte, 미만은 lt, 이하는 lte다. 빈칸·숫자가 아닌 값은 제외한다.
         맞지 않는 행은 유지한다. 비슷한 회사 판단, 새 열 생성, 복합 조건에는 사용하지 않는다.
         """
+        run = task_context.get("agent_run") or {}
+        request = "\n".join([task_context.get("user_request") or "", run.get("user_request") or "", run.get("user_reply") or ""])
+        previous = ((run.get("observation") or {}).get("source") or {}).get("operation") or {}
+        supplier_matching = previous.get("kind") == "match_suppliers" or (
+            re.search(r"유사도|매칭", request) and re.search(r"회사|거래처|그룹", request))
+        if supplier_matching and assigned_value.upper() in {"Y", "N"} and not re.search(
+                r"(?<![A-Za-z0-9_])" + re.escape(assigned_value) + r"(?![A-Za-z0-9_])", request, re.IGNORECASE):
+            raise ValueError("사용자 원문에는 Y/N 값 변경 요청이 없습니다. 거래처 그룹 매칭에 판정값 변경을 추가하지 마세요. 요청한 매칭이 완료됐다면 answer_question으로 결과를 보고하세요.")
         result = prepare_operation(kind="set", column_ids=[condition_column_id],
                       condition=dict(column_id=condition_column_id, operator=operator, value=value),
                       destination_column_id=destination_column_id, assigned_value=assigned_value, condition_scope=scope)

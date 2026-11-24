@@ -12,14 +12,14 @@
         function button(parent, label, callback) {
             var node = document.createElement('button'); node.type = 'button'; node.textContent = label;
             var live = true;
-            function update(dispose) { if (dispose === true) live = false; node.disabled = !live || chat.isBusy(); }
+            function update(dispose) { if (dispose === true) { live = false; callback = null; } node.disabled = !live || chat.isBusy(); }
             controls.add(update);
             node.addEventListener('click', async function () {
                 if (!live || chat.isBusy()) return;
                 try { await callback(); } catch (error) { say(error.message); }
             });
             parent.appendChild(node); update();
-            return {disable: function () { live = false; update(); controls.delete(update); }, node: node};
+            return {disable: function () { update(true); controls.delete(update); }, node: node};
         }
         function table(parent, headers, rows) {
             var details = document.createElement('details'), summary = document.createElement('summary');
@@ -52,12 +52,13 @@
             var message = say(text), active = true, buttons = [];
             if (rows) table(message, headers, rows);
             var proposal = {
-                disable: function () { active = false; buttons.forEach(function (b) { b.disable(); }); if (current === proposal) current = null; },
+                disable: function () { active = false; handlers = null; buttons.forEach(function (b) { b.disable(); }); if (current === proposal) current = null; },
                 run: async function (name) {
                     if (!active || chat.isBusy()) return false;
+                    var handler = handlers[name];
                     proposal.disable();
                     chat.appendMessage('user', name === 'apply' ? '적용' : '취소');
-                    try { await handlers[name](); } catch (error) { say(error.message); }
+                    try { await handler(); } catch (error) { say(error.message); }
                     return true;
                 }
             };

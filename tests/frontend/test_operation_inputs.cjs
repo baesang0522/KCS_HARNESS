@@ -36,3 +36,15 @@ test('a conflicting new column name is resolved in the preview before approval',
  const h=setup();h.ui.configure({...h.operation,output:{mode:'new',name:'공급자명'}});h.ui.bind({apply(){},edit(){}});h.ui.preview(preview(h));
  assert.match(h.chatText(),/새 열 ‘공급자명 2’/);
 });
+
+test('retired confirmations never run callbacks and the active callback still runs once',async()=>{
+ const h=setup();let first=0,second=0;
+ const old=h.messages.confirm('old',{apply:()=>first++,cancel:()=>first++});
+ const oldButton=h.action('적용');
+ h.messages.confirm('new',{apply:()=>second++,cancel:()=>second++});
+ await oldButton.emit('click');await old.run('cancel');
+ await h.messages.command('적용');await h.messages.command('적용');
+ assert.equal(first,0);assert.equal(second,1);
+ const reset=h.messages.confirm('reset',{apply:()=>first++,cancel:()=>first++});
+ h.messages.reset();await reset.run('apply');assert.equal(first,0);
+});

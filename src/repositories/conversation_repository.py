@@ -23,6 +23,13 @@ class StoredTurn:
     review_sheets: list[dict] = field(default_factory=list)
     advice_requested: bool = False
     recommendation_progress: str | None = None
+    model_question: str | None = None
+    model_answer: str | None = None
+
+    def model_history(self):
+        """화면에는 원문 답변을 보존하고 다음 추론에는 조회 위치만 전달한다."""
+        return (self.question if self.model_question is None else self.model_question,
+                self.answer if self.model_answer is None else self.model_answer)
 
 
 @dataclass
@@ -52,6 +59,14 @@ class MemoryConversationRepository:
         conversation_id = str(uuid4())
         self._conversations[conversation_id] = MemoryConversation()
         return conversation_id
+
+    def investigation_snapshot(self, conversation_id: str) -> InvestigationState:
+        conversation = self._conversations.get(conversation_id)
+        if conversation is None:
+            raise ConversationNotFound(conversation_id)
+        # PDF 추출은 별도 상태를 만들고 완료 시 교체한다. 읽기 조회는 장시간 모델 잠금을
+        # 기다리지 않고 마지막 저장 상태를 복사한다. 이 구간에는 await가 없다.
+        return conversation.investigation.model_copy(deep=True)
 
     def recommendation_progress(self, conversation_id: str, request_id: str) -> str:
         conversation = self._conversations.get(conversation_id)

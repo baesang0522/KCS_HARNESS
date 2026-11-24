@@ -244,7 +244,7 @@ test('imports an initially unselected original column into an existing sorted an
     assert.deepEqual(Array.from(choices,c=>c.header),['금액','상호']);
     assert(choices.every(c=>c.origin==='live'));
     sheet.cells.splice(1,3,...sheet.cells.slice(1).reverse());sheet.cells[1][1]='manually cleaned';
-    const result=await h.window.sourceColumns.append(work,'live:0',noop,{original_order_confirmed:true,header:'금액'});
+    const result=await h.window.sourceColumns.append(work,'live:0',noop,{header:'금액'});
     assert.deepEqual(sheet.cells.slice(1).map(r=>[r[0],r[2]]),[[4,30],[3,20],[2,10]]);
     assert.equal(sheet.cells[1][1],'manually cleaned');
     work.columns.push(...result.columns);
@@ -252,29 +252,29 @@ test('imports an initially unselected original column into an existing sorted an
     assert.deepEqual(original.cells[1],[10,'A','AB1']);
 });
 
-test('live import refuses missing row-order confirmation, source changes and stale header before writing',async()=>{
+test('live import automatically rejects source changes and stale headers before writing',async()=>{
     for(const change of [f=>f.original.cells.reverse(), f=>f.original.cells[2][2]='modified',
         f=>f.original.cells[0][0]='renamed', f=>f.original.cells.splice(2,1)]) {
         const f=await narrowSource();change(f);const before=structuredClone(f.sheet.cells);
-        await assert.rejects(()=>f.h.window.sourceColumns.append(f.work,'live:0',noop,{original_order_confirmed:true,header:'금액'}));
+        await assert.rejects(()=>f.h.window.sourceColumns.append(f.work,'live:0',noop,{header:'금액'}));
         assert.deepEqual(f.sheet.cells,before);
     }
-    const f=await narrowSource();
-    await assert.rejects(()=>f.h.window.sourceColumns.append(f.work,'live:0',noop,{header:'금액'}),/정렬·추가·삭제/);
 });
 
-test('live import UI requires an explicit original-order check and clears it on column change',async()=>{
+test('live import UI enables selected columns without an original-order checkbox',async()=>{
     const {createDOM}=require('../helpers/taskpane_dom.cjs'),h=createDOM();h.load('workspace/workspace_ui.js');
     const ui=h.window.createWorkspaceUI(),node=id=>h.document.getElementById(id);ui.bind({});
     ui.importColumns([{column_id:'live:0',header:'금액',origin:'live'},{column_id:'live:1',header:'상호',origin:'live'}]);
     ui.busy(false,false);assert.equal(node('work-import-add').disabled,true);
     const checks=node('work-import-columns').querySelectorAll('input');
     checks[0].checked=true;await checks[0].emit('change');
-    node('work-import-confirm').checked=true;await node('work-import-confirm').emit('change');
+    assert.equal(node('work-import-confirm'),null);
     assert.equal(node('work-import-add').disabled,false);assert.equal(ui.importSelection()[0].header,'금액');
     checks[1].checked=true;await checks[1].emit('change');
     assert.deepEqual(Array.from(ui.importSelection(),c=>c.header),['금액','상호']);
-    assert.equal(node('work-import-add').disabled,true);assert.equal(ui.importPolicy().original_order_confirmed,false);
+    assert.equal(node('work-import-add').disabled,false);
+    ui.busy(true,false);assert.equal(node('work-import-add').disabled,true);
+    ui.busy(false,false);assert.equal(node('work-import-add').disabled,false);
 });
 
 for (const failSecond of [false, true]) test(`multiple imports preserve row identity and saved links; second failure=${failSecond}`,async()=>{
@@ -302,7 +302,6 @@ for (const failSecond of [false, true]) test(`multiple imports preserve row iden
     assert.equal(node('work-scope-settings'),null);assert.equal(node('work-advice-settings'),null);
     assert.equal(node('op-settings'),null);
     for(const check of node('work-import-columns').querySelectorAll('input')){check.checked=true;await check.emit('change');}
-    node('work-import-confirm').checked=true;await node('work-import-confirm').emit('change');
     await node('work-import-add').emit('click');
     assert.equal(node('work-tools'),null);assert.equal(node('work-scope'),null);
     assert.equal(node('work-title').textContent,'열 추가');
@@ -312,7 +311,6 @@ for (const failSecond of [false, true]) test(`multiple imports preserve row iden
         assert.equal(stored.columns.length,2);assert.match(node('work-status').textContent,/1개 열은 추가됐고.*두 번째 열/);
         const checks=node('work-import-columns').querySelectorAll('input');assert.equal(checks.length,1);
         checks[0].checked=true;await checks[0].emit('change');
-        node('work-import-confirm').checked=true;await node('work-import-confirm').emit('change');
         await node('work-import-add').emit('click');
         assert.deepEqual(calls,['live:0','live:1','live:1']);
     }

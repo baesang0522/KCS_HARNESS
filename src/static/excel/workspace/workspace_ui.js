@@ -14,12 +14,11 @@
         function updateImport() {
             var selected = importSelection();
             var live = selected.some(function (column) { return column.origin === "live"; });
-            el("import-order").hidden = !live;
             el("import-count").textContent = selected.length + "개 선택";
             el("import-hint").textContent = !selected.length ? "" : live
                 ? "처음 선택하지 않은 열은 현재 원본에서 읽습니다. 기존 보관값을 대조하고 작업표의 원본 행 번호에 맞춰 추가합니다. 작업표를 정렬한 것은 괜찮습니다."
                 : "처음 보관한 열은 조사 시작 당시의 값을 원본 행 번호로 맞춰 추가합니다.";
-            el("import-add").disabled = importBusy || !selected.length || (live && !el("import-confirm").checked);
+            el("import-add").disabled = importBusy || !selected.length;
         }
         function status(text) { el("status").textContent = text; if (el("panel").hidden) document.getElementById("notice").textContent = text; }
         return {
@@ -52,13 +51,12 @@
                 columns.bind(change); columns.showSelection(source); change();
             },
             importColumns: function (available, emptyText) {
-                el("import-confirm").checked = false;
                 el("import-columns").textContent = available.length ? "" : (emptyText || "추가할 원본 열이 없습니다");
                 importChoices = available.map(function (column) {
                     var label = document.createElement("label"), input = document.createElement("input");
                     label.className = "work-import-choice";
                     input.type = "checkbox"; input.value = String(column.column_id); input.disabled = importBusy;
-                    input.addEventListener("change", function () { el("import-confirm").checked = false; updateImport(); });
+                    input.addEventListener("change", updateImport);
                     label.appendChild(input); label.appendChild(document.createTextNode(column.header));
                     el("import-columns").appendChild(label);
                     return {column: column, input: input};
@@ -67,7 +65,6 @@
                 if (el("import").scrollIntoView) el("import").scrollIntoView({block: "start"});
             },
             importSelection: importSelection,
-            importPolicy: function () { return {original_order_confirmed: !!el("import-confirm").checked}; },
             mapping: function () { return columns ? columns.getMapping() : []; },
             extras: function () { return columns ? columns.getExtraColumns() : []; },
             valid: function (valid, count, extras, rows) {
@@ -96,7 +93,6 @@
             },
             status: status,
             bind: function (handlers) {
-                el("import-confirm").addEventListener("change", updateImport);
                 ["select", "start", "import-add"
                 ].forEach(function (name) {
                     el(name).addEventListener("click", handlers[name]);

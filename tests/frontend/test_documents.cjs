@@ -140,9 +140,9 @@ test('drawer sits outside chat immediately above footer and closes without chang
  await h.node('documents-toggle').emit('click');
  await h.node('documents-close').emit('click');assert.equal(main.scrollTop,460);assert.equal(h.node('message').value,'작성 중인 질문');
 });
-test('reflection button requires ready review data and blocks duplicate or busy requests',async()=>{
+test('reflection button allows review recheck after upload and blocks duplicate or busy requests',async()=>{
  const h=await setup(),button=h.node('documents-apply');assert.equal(button.disabled,true);await button.emit('click');assert.equal(h.reflected,0);
- await h.upload();assert.equal(button.disabled,true);h.ready=true;h.documents.render();assert.equal(button.disabled,false);
+ await h.upload();assert.equal(button.disabled,false);assert.equal(h.ready,false);
  h.chat.setBusy(true);await button.emit('click');assert.equal(h.reflected,0);h.chat.setBusy(false);
  let finish;h.reflect=()=>{h.reflected++;return new Promise(resolve=>finish=resolve);};
  const pending=button.emit('click');await button.emit('click');assert.equal(h.reflected,1);assert.equal(button.disabled,true);

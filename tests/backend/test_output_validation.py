@@ -6,12 +6,32 @@ from unittest.mock import AsyncMock, patch
 from langchain_core.messages import AIMessage, ToolMessage
 from pydantic import ValidationError
 from agents.request_tools import build_request_tools
-from agents.request_graph import run_request_graph
+from agents.request_graph import run_request_graph, resolve_named_output
 from services.operations.schemas import OperationOutput
 from services.formula.schemas import FormulaOutput
 
 
 class OutputValidationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_existing_output_named_without_id_resolves_current_unique_column(self):
+        for output in [dict(mode='existing', name='group'), json.dumps(dict(mode='existing', name='group'))]:
+            model = SimpleNamespace(ainvoke=AsyncMock(return_value=AIMessage(content='', tool_calls=[
+                dict(name='match_suppliers', args=dict(output=output), id='named-output')
+            ])))
+            runtime = SimpleNamespace(model=SimpleNamespace(bind_tools=lambda *a, **k: model), tools_prompt='test')
+            with patch('builtins.print'):
+                result = await run_request_graph(runtime, [], self.context)
+            self.assertEqual(result['operation']['output']['column_id'], 'group')
+            model.ainvoke.assert_awaited_once()
+
+    def test_missing_or_ambiguous_output_is_not_assigned_to_selected_or_last_column(self):
+        for output in [dict(mode='existing'), dict(mode='existing', name='absent'),
+                       dict(mode='existing', name='group', column_id='deleted')]:
+            args = dict(output=output)
+            self.assertEqual(resolve_named_output(args, self.context), args)
+        self.context['workspace']['columns'].append(dict(column_id='group2', header='group'))
+        args = dict(output=dict(mode='existing', name='group'))
+        self.assertEqual(resolve_named_output(args, self.context), args)
+
     def setUp(self):
         self.context={'workspace': {'columns': [dict(column_id=k,header=k,role='company_name' if k=='company' else 'reference')
                           for k in ['company','group','score']], 'target_column_ids':['company'], 'row_count':100000}}

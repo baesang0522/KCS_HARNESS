@@ -51,7 +51,7 @@
             bubble.appendChild(details); document.getElementById("conversation").appendChild(bubble); render();
         }
         async function pause(message) {
-            attached = false; pending = null;
+            attached = false; pending = null; writeVerification = null;
             if (current && !["CANCELLED", "UNKNOWN", "COMPLETED"].includes(current.status)) {
                 try { current = await post(path(current.run_id) + "/pause", {message: message || ""}); }
                 catch (error) { notice.textContent = "화면의 자동 진행은 멈췄지만 서버 상태는 확인하지 못했습니다. " + error.message; }
@@ -84,7 +84,7 @@
                     if (verify) await verify();
                     chat.checkRequest(request);
                     displayResult(state.observation, state.workspace);
-                    notice.textContent = state.answer;
+                    notice.textContent = state.status === "WAITING_EXCEL" ? state.answer : "";
                     if (state.status !== "WAITING_EXCEL") {
                         var handoff = state.status === "WAITING_USER" && state.step && !state.step.job ? state.step.action : null;
                         writeVerification = handoff && handoff.auto_apply ? verify : null;
@@ -160,9 +160,9 @@
                 await writeVerification();
                 if (!attached) throw new Error("그룹 연결을 중지했습니다.");
             },
-            detach: function () { attached = false; pending = null; pendingSend = null; },
+            detach: function () { attached = false; pending = null; pendingSend = null; writeVerification = null; },
             load: async function () {
-                attached = false; pending = pendingSend = null; shown.clear();
+                attached = false; pending = pendingSend = null; writeVerification = null; shown.clear();
                 current = (await api.requestJson(path(), {cache: "no-store"})).run;
                 if (current) {
                     displayResult(current.observation, current.workspace);

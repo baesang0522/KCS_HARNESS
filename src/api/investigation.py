@@ -14,8 +14,8 @@ router = APIRouter(prefix="/conversations/{conversation_id}/investigation", tags
 
 @router.get("")
 async def read_investigation(conversation_id: UUID, request: Request):
-    async with request.app.state.conversations.edit(str(conversation_id)) as conversation:
-        return public_investigation(conversation.investigation)
+    state = request.app.state.conversations.investigation_snapshot(str(conversation_id))
+    return public_investigation(state)
 
 
 @router.put("")

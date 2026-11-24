@@ -50,11 +50,10 @@
     }
     async function readLive(workspace, columnId, options, progress) {
         // shortcut: 원본에는 행 ID가 없어 중복 행 재정렬은 검출할 수 없다. 원본 정렬을 지원할 때 고유 키 연결로 바꾼다.
-        if (!options || !options.original_order_confirmed) throw new Error('원본 행을 정렬·추가·삭제하지 않았는지 확인하세요. 작업표 정렬은 괜찮습니다.');
         return Excel.run(async function (context) {
             var live = await liveLayout(context, workspace), table = window.workspaceTable;
             var column = live.columns.find(function (c) { return c.column_id === columnId; });
-            if (!column || column.header !== options.header) throw new Error('추가할 원본 열이 바뀌었습니다. 열 목록을 다시 여세요.');
+            if (!column || !options || column.header !== options.header) throw new Error('추가할 원본 열이 바뀌었습니다. 열 목록을 다시 여세요.');
             var links = sourceLinks(workspace);
             if (!links.length) throw new Error('원본과 비교할 보관 열이 없습니다. 원본으로 새 작업을 시작하세요.');
             links.forEach(function (link) {

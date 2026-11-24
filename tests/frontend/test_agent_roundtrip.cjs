@@ -79,6 +79,7 @@ test('one chat request drives read-result-final and exposes exact data without w
     assert.equal(h.actions.length,0);assert.equal(h.chat.isBusy(),false);
     assert.match(h.document.getElementById('conversation').textContent,/실제 2행 확인/);
     assert.match(h.document.getElementById('conversation').textContent,/실행 결과 · 2행/);
+    assert.equal(h.document.getElementById('notice').textContent,'');
 });
 test('stop while Excel is reading cancels the exact server step and ignores late data',async()=>{
     const h=await setup();let finish,started;const ready=new Promise(r=>started=r);
@@ -276,6 +277,7 @@ test('formula destination failure is displayed once while both job and agent rec
     await Promise.race([done,new Promise((_,reject)=>{setTimeout(()=>reject(new Error('failure receipt stalled')),1000).unref();})]);
     const text=h.document.getElementById('conversation').textContent;
     assert.equal(text.split(message).length-1,1);
+    assert.equal(h.document.getElementById('notice').textContent,'');
     assert.equal(writes,0);
     assert.equal(h.requests.filter(r=>r.url==='/formula-jobs').length,1);
     assert.equal(h.requests.filter(r=>r.url.endsWith('/failed')).length,1);

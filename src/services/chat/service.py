@@ -10,6 +10,7 @@ from services.investigation.service import investigation_context
 from services.debug_log import log_event
 from services.formula.service import formula_job_context
 from services.execution_history import execution_history_context, same_formula_workspace
+from services.investigation.model_context import history_summary
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,8 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
 
         messages = []
         for turn in conversation.turns[-10:]:
-            messages.extend([HumanMessage(content=turn.question), AIMessage(content=turn.answer)])
+            question, answer = turn.model_history()
+            messages.extend([HumanMessage(content=question), AIMessage(content=answer)])
 
         messages.append(HumanMessage(content=message))
         state = conversation.workflow
@@ -139,11 +141,14 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
                     )
             else:
                 decision, reasoning = await route_request(runtime, messages, task_context=context,
-                    log_context={"conversation_id": conversation_id, "request_id": request_id})
+                    log_context={"conversation_id": conversation_id, "request_id": request_id},
+                    pdf_documents=conversation.documents)
             answer = decision.answer
             if decision.intent == "agent":
                 from services.agent_runs.service import start_run
                 run = start_run(conversation, decision, workspace, message, operation_jobs, formula_jobs, request_id)
+                if history_summary(context):
+                    run.pdf_context_summary = history_summary(context)
                 action = {"type": "agent_run", "run_id": run.id}
             else:
                 from services.agent_runs.service import pause_active
@@ -158,6 +163,7 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
         await conversation.save_turn(StoredTurn(
             request_id=request_id, question=message, answer=answer, reasoning=reasoning,
             ui_action=action, request_context=workspace, review_sheets=review_sheets or [], advice_requested=advice_requested,
+            model_question=history_summary(context), model_answer=history_summary(context),
         ))
         if decision.intent == "start_task":
             state.task_type = workspace["task_type"] if workspace and decision.task_type == "formula" else decision.task_type

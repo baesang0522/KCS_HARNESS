@@ -104,7 +104,7 @@ class AgentTests(unittest.TestCase):
             self.advance('answer_question', dict(answer='실제 결과 확인 완료'), self.receipt(first, rows=self.rows))
         events = [json.loads(call.args[0]) for call in output.call_args_list]
         received = [item for item in events if item['event'] == 'agent.advance.received'][-1]
-        self.assertEqual(received['payload']['receipt']['rows'], self.rows)
+        self.assertEqual(received['payload']['receipt']['rows'], {'count': len(self.rows), 'omitted': True})
         self.assertEqual(received['payload']['receipt']['step_id'], first['step']['step_id'])
         tool = next(item for item in events if item['event'] == 'tool.started' and item['tool_name'] == 'answer_question')
         self.assertEqual(tool['conversation_id'], self.cid)
@@ -112,6 +112,10 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(tool['run_id'], self.rid)
         completed = [item for item in events if item['event'] == 'agent.advance.completed'][-1]
         self.assertEqual(completed['result']['status'], 'COMPLETED')
+        self.assertEqual(completed['result']['observation']['groups'], {'count': 2, 'omitted': True})
+        # Logging must not alter the evidence sent to the model or kept for later steps.
+        self.assertEqual(self.calls[-1]['agent_run']['observation']['groups'][0]['values'], ['AA'])
+        self.assertEqual(self.agent_run.read_results[-1]['result']['groups'][0]['count'], 2)
 
     def test_full_read_compare_result_loop_and_duplicate_receipt(self):
         self.start();first=self.read()
@@ -366,6 +370,42 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(len(self.app.state.operation_jobs),3)
         self.assertEqual(self.agent_run.steps,7)
 
+    def test_numeric_column_ids_read_then_propagate_verified_representative_code(self):
+        self.workspace.update(columns=[dict(column_id=key, header=header, role='reference') for key, header in
+            [('2', '해외공급자부호'), ('3', '해외공급자상호'), ('5', '해외공급자상호 그룹'), ('6', '유사도 점수')]],
+            target_column_ids=['5'])
+        message = '유사도점수가 100점인 해외거래처부호가 있으면 해당 해외거래처부호를 가진 값들은 같은 그룹명으로 통일해줄래?'
+        self.start(message, message)
+        state = self.advance('read_workspace', dict(column_ids=[2, 3, 5, 6]))
+        self.assertEqual(state['status'], 'WAITING_EXCEL')
+        self.assertEqual(state['step']['action']['read']['column_ids'], ['2', '3', '5', '6'])
+        rows = [dict(identity=1, excel_row=2, values=['00123', 'COMPANY A', '그룹 A', '100']),
+                dict(identity=2, excel_row=3, values=['00123', 'COMPANY B', '', '60'])]
+        state = self.advance('read_workspace', dict(column_ids=[2, 3, 5, 6],
+            condition=dict(column_id=6, operator='equals', value='100')), self.receipt(state, rows=rows))
+        self.assertEqual(state['step']['action']['read']['condition'],
+                         dict(column_id='6', operator='equals', value='100'))
+        state = self.advance('apply_group_by_code', dict(code_column_id=2, group_column_id=5,
+            score_column_id=6, code='00123', group='그룹 A'), self.receipt(state, rows=rows[:1]))
+        self.assertEqual(state['status'], 'WAITING_USER')
+        self.assertTrue(state['step']['action']['auto_apply'])
+        operation = state['step']['action']['operation']
+        self.assertEqual(operation['destination_column_id'], '5')
+        self.assertEqual(operation['condition'], dict(column_id='2', operator='equals', value='00123'))
+        self.assertEqual(operation['assigned_value'], '그룹 A')
+        self.assertEqual(self.queue, [])
+
+    def test_unknown_numeric_column_id_is_not_interpreted_as_column_position(self):
+        self.start()
+        self.queue.append(('read_workspace', dict(column_ids=[1])))
+        state = self.advance('read_workspace', dict(column_ids=[1]))
+        self.assertEqual(state['status'], 'WAITING_USER')
+        self.assertIsNone(state['step'])
+        self.assertIsNone(state['observation'])
+        self.assertIn('열 식별자', state['answer'])
+        self.assertNotIn('이해하지 못', state['answer'])
+        self.assertFalse(self.app.state.operation_jobs)
+
     def test_automatic_group_requires_unambiguous_real_100_point_evidence(self):
         args=dict(code_column_id='code',group_column_id='group',score_column_id='score',code='A',group='그룹 A')
         for case in ['missing','conflict','blank','wrong_value','wrong_score','same_column']:
@@ -415,6 +455,25 @@ class AgentTests(unittest.TestCase):
         result=self.advance('answer_question',dict(answer='요청한 비교를 마쳤어.'),self.receipt(state,rows=self.rows))
         self.assertEqual(result['status'],'COMPLETED')
         self.assertFalse(self.app.state.operation_jobs)
+
+    def test_matching_goal_cannot_add_y_update_from_model_summary_or_observed_values(self):
+        message = 'PDF 회사명과 유사도를 비교하고 그룹명으로 묶어줘'
+        self.start(message)
+        self.agent_run.goal = message + ' 이후 판정을 Y로 변경'
+        state = self.read()
+        self.queue.append(('update_matching_rows', dict(condition_column_id='name', operator='not_blank',
+            value='', destination_column_id='flag', assigned_value='Y')))
+        result = self.advance('answer_question', dict(answer='요청한 비교 결과를 확인했어.'),
+                              self.receipt(state, rows=self.rows))
+        self.assertEqual(result['status'], 'COMPLETED')
+        self.assertIsNone(result['step'])
+        self.assertFalse(self.app.state.operation_jobs)
+
+    def test_explicit_y_matching_followup_remains_available(self):
+        self.start('PDF 회사명과 유사도를 비교한 후 판정 열을 Y로 변경해줘')
+        state = self.write_step()
+        self.assertEqual(state['step']['action']['operation']['destination_column_id'], 'flag')
+        self.assertEqual(state['step']['action']['operation']['assigned_value'], 'Y')
 
     def test_new_goal_does_not_inherit_prior_code_grouping_but_explicit_resume_keeps_it(self):
         self.start_code_groups();old=self.agent_run

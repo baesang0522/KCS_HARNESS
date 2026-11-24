@@ -7,12 +7,24 @@ from contextlib import contextmanager
 
 _SECRET_KEYS = {"authorization", "cookie", "setcookie", "password", "passwd",
                 "apikey", "token", "accesstoken", "refreshtoken", "secret", "clientsecret"}
+_DATA_COLLECTION_KEYS = {"rows", "groups", "sample_rows"}
 
 
 def redact(value):
     if isinstance(value, dict):
-        return {key: "[REDACTED]" if str(key).lower().replace("_", "").replace("-", "") in _SECRET_KEYS
-                else redact(item) for key, item in value.items()}
+        result = {}
+        for key, item in value.items():
+            if str(key).lower().replace("_", "").replace("-", "") in _SECRET_KEYS:
+                result[key] = "[REDACTED]"
+            elif isinstance(item, (list, tuple)) and (
+                key in _DATA_COLLECTION_KEYS or key == "row_ids" or str(key).endswith("_row_ids")
+            ):
+                # 로그용 사본만 요약한다. 원본·모델 입력·API 응답은 유지하며
+                # 대규모 셀 배열을 순회하거나 JSON으로 직렬화하지 않는다.
+                result[key] = {"count": len(item), "omitted": True}
+            else:
+                result[key] = redact(item)
+        return result
     if isinstance(value, (list, tuple)):
         return [redact(item) for item in value]
     return value

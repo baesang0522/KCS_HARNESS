@@ -58,9 +58,13 @@ operation.status.completed         origin_request_id=R job_id=J status=APPLIED
 
 ## 데이터와 시간의 의미
 
-새 작업 로그는 ID·단계·상태·행 수·결과 열 ID·오류·시간을 기록한다. 셀 배열, 수식 본문, PDF 원문, 쓰기 증거의 값·해시를 새 작업 로그에 복사하지 않는다. 기존 모델·도구 로그는 종전처럼 작업 문맥·인자·응답을 기록하므로 업무 데이터가 포함될 수 있다. 오류 문구에도 데이터가 들어갈 수 있다.
+새 작업 로그는 ID·단계·상태·행 수·결과 열 ID·오류·시간을 기록한다. 셀 배열, 수식 본문, PDF 원문, 쓰기 증거의 값·해시를 새 작업 로그에 복사하지 않는다. 공통 JSON 로그에서 `rows`, `groups`, `sample_rows`, `row_ids` 및 `*_row_ids` 배열은 원문 대신 `{"count": 항목수, "omitted": true}`로 기록한다. `groups.count`는 값 조합 수이며 전체 행 수는 함께 기록된 `row_count`다. `agent.advance`의 요청·응답과 `model.started`의 observation/read_results 모두 같은 규칙을 적용한다. 실제 모델 입력, API 응답, 화면 결과, 저장된 실행 근거는 생략하지 않는다.
+
+열 ID와 도구 인자의 자료형, 재시도 횟수, 오류 내용은 유지한다. 따라서 숫자 열 ID와 문자열 열 ID의 차이도 로그로 확인할 수 있다. 이 처리는 로그 크기를 줄이는 것으로, 완전한 업무 데이터 익명화는 아니다. 사용자 요청·도구의 단일 조건값·답변·오류 문구에는 업무 데이터가 포함될 수 있다.
 
 `elapsed_ms`는 각 API 처리 시간이다. 사용자 승인 대기 시간이나 Excel 쓰기 시간 전체가 아니다. 별도 로그 파일 저장·순환은 없으며 서버 출력을 파일로 저장했다면 `rg '요청-ID-또는-작업-ID' server.log`로 연결된 기록을 찾을 수 있다.
+
+`model.input_size`는 실제 전달 문맥의 `context_section_chars`, 시스템 지침의 `system_chars`, 도구 정의의 `tool_schema_chars`, 메시지별 `message_chars`를 기록한다. 문자 수이며 모델 토큰 수로 해석하지 않는다. PDF 조회 응답은 이번 그래프 호출의 도구 메시지에만 추가되므로 원문 조회 직후 메시지 크기 증가를 확인할 수 있다. 다음 일반 요청의 investigation에는 문서·검토 시트·상태 요약만 들어간다.
 
 ## 구현 위치
 
