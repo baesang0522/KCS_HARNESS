@@ -105,9 +105,12 @@
         toggle.addEventListener('keydown', escape);
         applyReview.addEventListener('click', async function () {
             if (applyReview.disabled || reflecting) return;
-            reflecting = true; updateControls(); close();
-            try { await options.applyReview(); }
-            catch (error) { status.textContent = error.message; show(true); }
+            reflecting = true; updateControls();
+            try { await options.applyReview(); close(); }
+            catch (error) {
+                status.textContent = error.message; show(true);
+                document.getElementById('documents-content').scrollTop = 0;
+            }
             finally { reflecting = false; updateControls(); }
         });
         render();

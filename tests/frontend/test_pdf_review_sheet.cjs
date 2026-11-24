@@ -32,9 +32,9 @@ test('item alternatives retain HS OR and specification-specific thickness condit
     assert.deepEqual(plain((await h.review.read('c','d')).rows),rows);
     assert.throws(()=>h.review.parse('item',[['1','','','','1']]),/HS/);
 });
-test('renamed headers, missing tables, formula cells and malformed pages reject before save',async()=>{
+test('renamed headers work while missing tables, formula cells and malformed pages reject before save',async()=>{
     const h=setup();await h.review.ensure('c','d','파일.pdf',[row()]);const s=h.sheets[0],t=s.tables.items[0];
-    s.cells[3][0]='바꾼 열';await assert.rejects(h.review.read('c','d'),/열 이름/);s.cells[3][0]='그룹명';
+    s.cells[3][0]='바꾼 열';assert.deepEqual(plain((await h.review.read('c','d')).rows),[row()]);
     s.cells[4][1]='=NOW()';await assert.rejects(h.review.read('c','d'),/수식/);s.cells[4][1]='회사';
     s.cells[4][2]='1쪽';await assert.rejects(h.review.read('c','d'),/근거 페이지/);s.cells[4][2]='1';
     s.tables.items=[];await assert.rejects(h.review.read('c','d'),/table not found/);
@@ -103,7 +103,8 @@ test('236 review rows survive Excel creation, edits, preprocessing and saved bas
 test('legacy four-column sheets remain readable and preprocess their actual company column',async()=>{
  const h=setup();await h.review.ensure('chat','doc','파일.pdf',[row()]);const sheet=h.sheets[0],table=sheet.tables.items[0];
  sheet.cells[3]=['그룹','구분','회사명','근거 페이지'];sheet.cells[4]=['01','바오 스틸','Baoshan Iron & Steel Co., Ltd.','1'];
- table.columns.items.push({...table.columns.items[2],name:'근거 페이지',id:'legacy-page'});
+ table.columns.add(null,null,'근거 페이지');sheet.cells[3]=['그룹','구분','회사명','근거 페이지'];sheet.cells[4]=['01','바오 스틸','Baoshan Iron & Steel Co., Ltd.','1'];
+ const meta=h.settings.get('kcs.pdf-review.chat.doc');delete meta.entries[0].column_ids;delete meta.entries[0].legacy;
  assert.deepEqual(plain((await h.review.read('chat','doc')).rows),[row()]);
  const targets=await h.review.preprocessTargets('chat','doc');assert.equal(targets[2].label,'회사명');
  const snapshot=await h.review.readPreprocess('chat','doc',targets[2]);await h.review.writePreprocess('chat','doc',snapshot,['EDITED']);
@@ -157,4 +158,35 @@ test('five-character basenames stay literal and longer names use the review kind
  assert.equal(h.sheets[1].cells[0][0],'가나다라마바.pdf');
  h.sheets[1].name='사용자 지정';await h.review.ensure('c','b','가나다라마바.pdf',[row(),item]);
  assert.equal(h.sheets[1].name,'사용자 지정');
+});
+
+
+test('old item sheet accepts specification renamed to model name and remembers roles across later renames and moves',async()=>{
+ const h=setup(),rows=[{target:{kind:'item',group:'일반재',hs_codes:['7208'],specification:'A',requirements:'두께 10mm 이상'},source_pages:[2]}];
+ await h.review.ensure('c','d','모델명.pdf',rows);
+ const sheet=h.sheets[0],entry=h.settings.get('kcs.pdf-review.c.d').entries[0];delete entry.column_ids;delete entry.legacy;
+ sheet.cells[3][2]='모델명';sheet.cells[4][2]='B';
+ let draft=await h.review.read('c','d');assert.equal(draft.rows[0].target.specification,'B');
+ assert.equal(draft.rows[0].target.requirements,'두께 10mm 이상');
+ assert.equal(h.settings.get('kcs.pdf-review.c.d').entries[0].column_ids.length,5);
+ sheet.cells[3]=['분류 이름','세번','이름','추가 기준','페이지'];h.moveColumn(sheet,2,0);
+ draft=await h.review.read('c','d');assert.equal(draft.rows[0].target.specification,'B');assert.equal(draft.rows[0].target.group,'일반재');
+ const target=(await h.review.preprocessTargets('c','d')).find(t=>t.label==='이름');assert.equal(target.column_index,0);
+ const snapshot=await h.review.readPreprocess('c','d',target);await h.review.writePreprocess('c','d',snapshot,['C']);
+ draft=await h.review.read('c','d');assert.equal(draft.rows[0].target.specification,'C');
+ await h.review.markSaved('c','d',draft.rows);assert.equal((await h.review.read('c','d')).baseline[0].target.specification,'C');
+});
+test('new review tables preserve roles through renaming and movement and reject a deleted role even with a reused name',async()=>{
+ const h=setup();await h.review.ensure('c','d','파일.pdf',[row()]);const sheet=h.sheets[0],table=sheet.tables.items[0];
+ sheet.cells[3]=['이름1','이름2','이름3'];h.moveColumn(sheet,1,0);
+ assert.deepEqual(plain((await h.review.read('c','d')).rows),[row()]);
+ table.columns.items.shift();sheet.cells.forEach(r=>r.shift());table.columns.add(0,null,'회사명');
+ await assert.rejects(h.review.read('c','d'),/연결된 열이 삭제/);
+});
+test('old ambiguous renamed columns are not guessed and can bind after original names are restored',async()=>{
+ const h=setup();await h.review.ensure('c','d','파일.pdf',[row()]);const sheet=h.sheets[0];
+ delete h.settings.get('kcs.pdf-review.c.d').entries[0].column_ids;sheet.cells[3]=['다른이름1','다른이름2','근거 페이지'];
+ await assert.rejects(h.review.read('c','d'),/열 연결을 확인/);
+ sheet.cells[3]=['그룹명','회사명','근거 페이지'];assert.deepEqual(plain((await h.review.read('c','d')).rows),[row()]);
+ sheet.cells[3]=['다른이름1','다른이름2','페이지'];assert.deepEqual(plain((await h.review.read('c','d')).rows),[row()]);
 });

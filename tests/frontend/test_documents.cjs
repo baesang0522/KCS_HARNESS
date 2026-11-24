@@ -146,11 +146,22 @@ test('reflection button requires ready review data and blocks duplicate or busy 
  h.chat.setBusy(true);await button.emit('click');assert.equal(h.reflected,0);h.chat.setBusy(false);
  let finish;h.reflect=()=>{h.reflected++;return new Promise(resolve=>finish=resolve);};
  const pending=button.emit('click');await button.emit('click');assert.equal(h.reflected,1);assert.equal(button.disabled,true);
- assert.equal(h.node('documents-panel').hidden,true);finish();await pending;assert.equal(button.disabled,false);
+ assert.equal(h.node('documents-panel').hidden,false);finish();await pending;assert.equal(button.disabled,false);assert.equal(h.node('documents-panel').hidden,true);
  assert.equal(h.requests.some(r=>r.url==='/chat'),false);
 });
-test('failed reflection request reopens the drawer with its error and permits retry',async()=>{
+test('failed reflection request keeps the drawer open with its error and permits retry',async()=>{
  const h=await setup();await h.upload();h.ready=true;h.documents.render();h.reflect=async()=>{throw Error('검토 시트를 다시 확인하세요.');};
  await h.node('documents-apply').emit('click');assert.equal(h.node('documents-panel').hidden,false);
  assert.match(h.node('documents-status').textContent,/검토 시트를 다시 확인/);assert.equal(h.node('documents-apply').disabled,false);
+});
+
+
+test('reflection errors keep the drawer open and reveal the actual error above a scrolled list',async()=>{
+ const h=await setup();await h.upload();h.ready=true;h.documents.render();
+ const content=h.node('documents-content');content.scrollTop=900;
+ h.reflect=async()=>{assert.equal(h.node('documents-panel').hidden,false);throw Error('검토 열 연결 오류');};
+ await h.node('documents-apply').emit('click');
+ assert.equal(h.node('documents-panel').hidden,false);assert.equal(content.scrollTop,0);
+ assert.equal(h.node('documents-status').textContent,'검토 열 연결 오류');assert.equal(h.node('documents-apply').disabled,false);
+ h.reflect=async()=>{};await h.node('documents-apply').emit('click');assert.equal(h.node('documents-panel').hidden,true);
 });

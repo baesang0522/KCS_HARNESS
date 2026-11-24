@@ -60,7 +60,26 @@
     async function metadata(context, cid, did) {
         var setting = context.workbook.settings.getItemOrNullObject(key(cid, did));
         setting.load('value'); await context.sync();
-        return setting.isNullObject ? null : setting.value;
+        if (setting.isNullObject) return null;
+        var meta = setting.value, changed = false;
+        for (var entry of meta.entries) {
+            if (entry.column_ids) continue;
+            var table = context.workbook.worksheets.getItem(entry.worksheet_id).tables.getItem(entry.table_id);
+            var header = table.getHeaderRowRange();
+            header.load('values'); table.columns.load('items/id,items/index'); await context.sync();
+            var names = header.values[0], legacy = entry.kind === 'supplier' && names.length === legacySupplierHeaders.length;
+            var expected = legacy ? legacySupplierHeaders : headers[entry.kind];
+            var indexes = expected.map(function (name) { return names.indexOf(name); });
+            var missing = indexes.map(function (index, role) { return index < 0 ? role : -1; }).filter(function (role) { return role >= 0; });
+            var unused = names.map(function (_, index) { return index; }).filter(function (index) { return !indexes.includes(index); });
+            // 예전 시트에는 열 ID가 없다. 남은 역할과 열이 하나씩일 때만 이름 변경을 복원한다.
+            if (missing.length === 1 && unused.length === 1) indexes[missing[0]] = unused[0];
+            if (indexes.some(function (index) { return index < 0; })) throw new Error('이전 검토 시트의 열 연결을 확인할 수 없어요. 열 이름을 한 번만 원래대로 복원하고 다시 반영해 주세요. 이후에는 이름을 바꿀 수 있어요.');
+            entry.column_ids = indexes.map(function (index) { return String(table.columns.items.find(function (column) { return column.index === index; }).id); });
+            entry.legacy = legacy; changed = true;
+        }
+        if (changed) { context.workbook.settings.add(key(cid, did), meta); await context.sync(); }
+        return meta;
     }
     async function isReady(cid, did, rows) {
         requireExcel();
@@ -105,12 +124,13 @@
                     range.numberFormat = grid.map(function (row) { return row.map(function () { return '@'; }); });
                     range.values = grid.map(function (row) { return row.map(function (value) { return value ? "'" + value : ''; }); });
                     var table = sheet.tables.add(range, true);
-                    sheet.load('id,name'); table.load('id');
+                    sheet.load('id,name'); table.load('id'); table.columns.load('items/id,items/index');
                     range.format.columnWidth = 120; range.format.wrapText = true;
                     sheet.getRange(kind === 'item' ? 'D:D' : 'B:B').format.columnWidth = 280;
                     sheet.freezePanes.freezeRows(4);
                     await context.sync();
-                    meta.entries.push({kind: kind, worksheet_id: sheet.id, table_id: String(table.id)});
+                    meta.entries.push({kind: kind, worksheet_id: sheet.id, table_id: String(table.id),
+                        column_ids: table.columns.items.slice().sort(function (a, b) { return a.index - b.index; }).map(function (column) { return String(column.id); }), legacy: false});
                     context.workbook.settings.add(key(cid, did), meta); await context.sync();
                 } catch (error) {
                     throw new Error('검토 시트 작성이 완료되지 않았어요. ‘' + name + '’ 시트가 남아 있을 수 있어요. ' + error.message);
@@ -131,7 +151,7 @@
             var rows = [];
             for (var entry of meta.entries) {
                 var snapshot = await tableSnapshot(context, entry);
-                rows = rows.concat(parse(entry.kind, snapshot.values, snapshot.legacy, meta.baseline));
+                rows = rows.concat(parse(entry.kind, snapshot.values.map(function (row) { return snapshot.column_order.map(function (index) { return row[index]; }); }), snapshot.legacy, meta.baseline));
             }
             return {rows: rows, baseline: meta.baseline};
         });
@@ -139,10 +159,14 @@
     async function tableSnapshot(context, entry) {
         var table = context.workbook.worksheets.getItem(entry.worksheet_id).tables.getItem(entry.table_id);
         var header = table.getHeaderRowRange(), count = table.rows.getCount();
-        header.load('values'); await context.sync();
-        var legacy = entry.kind === 'supplier' && JSON.stringify(header.values[0]) === JSON.stringify(legacySupplierHeaders);
-        if (!legacy && JSON.stringify(header.values[0]) !== JSON.stringify(headers[entry.kind])) throw new Error('검토 표의 열 이름과 순서를 원래대로 돌려 주세요.');
-        var snapshot = {worksheet_id: entry.worksheet_id, table_id: entry.table_id, kind: entry.kind, legacy: legacy, headers: header.values[0], values: []};
+        header.load('values'); table.columns.load('items/id,items/index'); await context.sync();
+        var order = entry.column_ids.map(function (id) {
+            var column = table.columns.items.find(function (item) { return String(item.id) === id; });
+            if (!column) throw new Error('검토 표에서 연결된 열이 삭제됐어요. 열 삭제를 되돌린 뒤 다시 반영해 주세요. 열 이름과 순서는 바꿀 수 있어요.');
+            return column.index;
+        });
+        var snapshot = {worksheet_id: entry.worksheet_id, table_id: entry.table_id, kind: entry.kind, legacy: !!entry.legacy,
+            column_order: order, headers: header.values[0], values: []};
         if (!count.value) return snapshot;
         var body = table.getDataBodyRange();
         body.load('rowIndex,columnIndex,rowCount,columnCount'); await context.sync();

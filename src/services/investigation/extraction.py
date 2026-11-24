@@ -69,7 +69,8 @@ async def extract_conditions(conversation, payload, runtime, request_id):
         while offset < len(entries):
             if request_id in conversation.cancelled_requests:
                 raise ConflictError("사용자가 조사 조건 읽기를 중지했습니다.")
-            base = {"goal": state.goal, "filename": document.filename, "context_pages": group_sources(context)}
+            base = {"goal": state.goal, "filename": document.filename, "context_pages": group_sources(context),
+                    "direct_conditions_count": len(table_conditions)}
             try:
                 batch = next_source_chunk(entries, offset, prompt, base, schema)
             except ValueError as error:
@@ -111,6 +112,8 @@ async def extract_conditions(conversation, payload, runtime, request_id):
             available = {(item["page_number"], item["source_id"]): item for item in [*context, *batch]}
             current = {(item["page_number"], item["source_id"]) for item in batch}
             for candidate in [*extracted.conditions, *getattr(extracted, "table_rules", [])]:
+                if isinstance(candidate, CatalogRule) and not (candidate.hs_codes or candidate.requirements.strip() or candidate.uncertainty.strip()):
+                    continue  # 표 위치만 반환한 빈 제안은 적용할 조건도 경고할 누락도 없다.
                 if not isinstance(candidate, CatalogRule) and (not candidate.title.strip() or not candidate.description.strip()):
                     raise ModelProcessingError("빈 조사 조건이 반환되어 저장하지 않았습니다.")
                 references = set()

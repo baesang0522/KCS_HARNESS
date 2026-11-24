@@ -58,6 +58,7 @@ class PDFHybridTests(unittest.IsolatedAsyncioTestCase):
             dict(groups=['열처리 강종'], requirements='두께 134mm 이상', evidence=[dict(page_number=1, source_id=2)])]
         state = await self.extract()
         self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0]['direct_conditions_count'], 236)
         sent = json.dumps(self.calls[0]['pages'], ensure_ascii=False)
         self.assertNotIn('MODEL-117', sent)
         self.assertNotIn('GENERAL-0', sent)
@@ -255,3 +256,23 @@ class PDFHybridTests(unittest.IsolatedAsyncioTestCase):
         catalog, remainder = split_catalog(document)
         self.assertEqual(catalog, [])
         self.assertEqual(remainder.pages[0].text, page['text'])
+
+    async def test_empty_table_rules_do_not_warn_but_real_uncertainty_and_document_warnings_survive(self):
+        self.document([dict(page_number=1, text='설명', readable=True), self.table_page(2)])
+        empty = dict(table_ids=['p2t1'], evidence=[dict(page_number=2, source_id=1)])
+        self.result['table_rules'] = [empty, dict(**empty, uncertainty='적용 범위 확인 필요')]
+        self.result['warnings'] = ['하단 글자가 가려져 판독 확인 필요']
+        state = await self.extract()
+        self.assertEqual(len(state.conditions), 3)
+        self.assertEqual(len(state.document_notes[self.did]), 2)
+        self.assertIn('적용 범위 확인 필요', state.document_notes[self.did][0])
+        self.assertEqual(state.document_notes[self.did][1], '하단 글자가 가려져 판독 확인 필요')
+        self.assertEqual(self.calls[0]['direct_conditions_count'], 3)
+
+    async def test_only_empty_table_rule_leaves_direct_rows_without_warning(self):
+        self.document([dict(page_number=1, text='보고서 양식', readable=True), self.table_page(2)])
+        self.result['table_rules'] = [dict(table_ids=['p2t1'], requirements='  ', uncertainty=' ',
+                                         evidence=[dict(page_number=2, source_id=1)])]
+        state = await self.extract()
+        self.assertEqual(len(state.conditions), 3)
+        self.assertEqual(state.document_notes[self.did], [])

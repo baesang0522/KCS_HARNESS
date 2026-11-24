@@ -140,3 +140,14 @@ test('a failed batch reports partial completion once and retries only remaining 
  assert.equal(messages.at(-1),'PDF 1개의 수정 내용을 반영했어요.');
  assert.equal(h.calls.filter(c=>c.url.endsWith('/reviews/'+ids[0])).length,1);
 });
+
+
+test('renaming specification header on an existing item sheet still previews and confirms edited models',async()=>{
+ const h=await setup();await h.upload('품목.pdf');const did=Object.keys(h.state.reviews)[0],sheet=h.excel.sheets[0];
+ delete h.excel.settings.get('kcs.pdf-review.conversation.'+did).entries[0].column_ids;
+ sheet.cells[3][2]='모델명';sheet.cells[4][2]='EDITED-MODEL';
+ await h.node('documents-apply').emit('click');assert.equal(h.node('documents-panel').hidden,true);
+ assert.match(h.chatText(),/PDF 1개의 수정 내용/);assert.equal(h.calls.filter(c=>c.url.includes('/reviews/')).length,0);
+ await h.messages.command('적용');assert.equal(h.state.reviews[did][0].target.specification,'EDITED-MODEL');
+ assert.match(h.node('documents-status').textContent,/PDF 1개의 수정 내용을 반영했어요/);
+});
