@@ -4,6 +4,7 @@ import json
 from pydantic import ValidationError
 
 from services.documents.tables import is_model_table, split_model_cell, table_markdown
+from services.debug_log import log_event
 from services.errors import ModelProcessingError
 from services.investigation.schemas import Condition, Evidence, ItemTarget
 from services.investigation.service import target_description
@@ -53,26 +54,43 @@ def split_catalog(document):
     return catalog, remainder
 
 
+def select_catalog_scope(catalog, rule):
+    selected = catalog
+    for field, value_of in (("table_ids", lambda cell: cell[0]), ("row_numbers", lambda cell: cell[1]),
+                           ("groups", lambda cell: cell[2].target.group),
+                           ("specifications", lambda cell: cell[2].target.specification)):
+        values = getattr(rule, field)
+        if values:
+            available = {value_of(cell) for cell in selected}
+            unknown = set(values) - available
+            if unknown:
+                return [], dict(field=field, unknown_values=sorted(unknown), available_values=sorted(available))
+            selected = [cell for cell in selected if value_of(cell) in values]
+    return selected, {} if selected else dict(field="scope", unknown_values=[], available_values=[])
+
+
 def apply_catalog_rules(catalog, rules):
-    seen = set()
+    seen, warnings = set(), []
     for rule, evidence in rules:
         key = rule.model_dump_json()
         if key in seen:
             continue
         seen.add(key)
-        selected = catalog
-        for field, values in ((0, rule.table_ids), (1, rule.row_numbers)):
-            if values:
-                if not set(values) <= {cell[field] for cell in selected}:
-                    raise ModelProcessingError("AI가 공통 조건의 표·행 위치를 잘못 지정했습니다. 조건은 저장하지 않았습니다.")
-                selected = [cell for cell in selected if cell[field] in values]
-        for field, values in (("group", rule.groups), ("specification", rule.specifications)):
-            if values:
-                if not set(values) <= {getattr(cell[2].target, field) for cell in selected}:
-                    raise ModelProcessingError("AI가 공통 조건의 분류·규격을 잘못 지정했습니다. 조건은 저장하지 않았습니다.")
-                selected = [cell for cell in selected if getattr(cell[2].target, field) in values]
-        if not selected:
-            raise ModelProcessingError("공통 조건에 대응하는 표 항목을 찾지 못했습니다. 조건은 저장하지 않았습니다.")
+        selected, issue = select_catalog_scope(catalog, rule)
+        if issue:
+            scope = {field: getattr(rule, field) for field in ("table_ids", "row_numbers", "groups", "specifications")}
+            log_event("pdf.catalog_rule.unresolved", level="WARNING", **issue, requested_scope=scope,
+                      document_id=evidence[0].document_id,
+                      evidence=[ref.model_dump() for ref in rule.evidence])
+            scope_text = "; ".join(f"{label}: {', '.join(scope[field])}" for field, label in
+                (("table_ids", "표"), ("row_numbers", "순번"), ("groups", "분류"), ("specifications", "규격")) if scope[field])
+            details = "; ".join(filter(None, ["HS: " + ", ".join(rule.hs_codes) if rule.hs_codes else "",
+                                             rule.requirements, rule.uncertainty]))
+            quotes = " / ".join(f"{item.page_number}페이지: {item.quote}" for item in evidence)
+            warnings.append(f"표 항목은 추출했지만 다음 공통 조건은 적용 위치를 확인하지 못해 반영하지 않았습니다. "
+                            f"조건: {details or '원문 근거 참조'}. 요청 범위: {scope_text or '전체 표'}. 근거: {quotes}")
+            # 일부 위치만 맞더라도 이 규칙 전체를 보류해 적용 범위를 임의로 바꾸지 않는다.
+            continue
         for _, _, condition in selected:
             target = condition.target.model_dump()
             if rule.hs_codes:
@@ -101,3 +119,4 @@ def apply_catalog_rules(catalog, rules):
             condition.source_pages = sorted({item.page_number for item in condition.evidence})
             if rule.uncertainty.strip() and rule.uncertainty.strip() not in condition.uncertainty.split('\n'):
                 condition.uncertainty = '\n'.join(filter(None, [condition.uncertainty, rule.uncertainty.strip()]))
+    return warnings

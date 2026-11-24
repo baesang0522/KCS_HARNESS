@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage
@@ -115,20 +116,94 @@ class PDFHybridTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('OTHER CO', json.dumps(self.calls[0]['pages']))
         self.assertNotIn('AR400', json.dumps(self.calls[0]['pages']))
 
-    async def test_invalid_scope_or_evidence_never_saves_partial_direct_rows(self):
-        for rule in [self.rule(table_ids=['p99t1'], requirements='조건'),
-                     self.rule(groups=['없는 열'], requirements='조건'),
-                     self.rule(specifications=['없는 모델'], requirements='조건'),
-                     self.rule(row_numbers=['999'], requirements='조건'),
-                     dict(requirements='조건', evidence=[dict(page_number=99, source_id=1)]),
-                     dict(requirements='조건', evidence=[dict(page_number=2, source_id=1)])]:
-            with self.subTest(rule=rule):
+    async def test_invalid_scope_preserves_rows_and_reports_unapplied_condition_and_evidence(self):
+        for field, values, available in [('table_ids', ['p2t1', 'p99t1'], ['p2t1']),
+                                         ('groups', ['일반재', '없는 열'], ['열처리 강종', '일반재']),
+                                         ('specifications', ['A', '없는 모델'], ['A', 'AR400(NM400)', 'SA516']),
+                                         ('row_numbers', ['1', '999'], ['1', '2'])]:
+            with self.subTest(field=field):
+                self.conversation = MemoryConversation()
                 self.document([dict(page_number=1, text='원문 조건', readable=True), self.table_page(2)])
-                self.result['table_rules'] = [rule]
-                with self.assertRaises(ModelProcessingError):
-                    await self.extract()
-                self.assertEqual(self.conversation.investigation.revision, 0)
-                self.assertEqual(self.conversation.investigation.conditions, [])
+                rule = self.rule(**{field: values}, hs_codes=['7208'], requirements='폭 2000mm 이하',
+                                 uncertainty='범위 확인 필요')
+                self.result['table_rules'] = [rule, rule]
+                with patch('services.investigation.catalog.log_event') as log:
+                    state = await self.extract()
+                self.assertEqual(len(state.conditions), 3)
+                self.assertEqual(state.revision, 1)
+                self.assertTrue(all(c.target.hs_codes == [] for c in state.conditions))
+                self.assertEqual([c.target.requirements for c in state.conditions], ['', '', '(두께 10mm 이상)'])
+                self.assertTrue(all(c.source_pages == [2] for c in state.conditions))
+                self.assertEqual(len(state.document_notes[self.did]), 1)
+                warning = state.document_notes[self.did][0]
+                for value in [*values, '7208', '폭 2000mm 이하', '범위 확인 필요', '1페이지: 원문 조건', '반영하지 않았습니다']:
+                    self.assertIn(value, warning)
+                log.assert_called_once()
+                args, fields = log.call_args
+                self.assertEqual(args, ('pdf.catalog_rule.unresolved',))
+                self.assertEqual(fields['requested_scope'][field], values)
+                self.assertEqual(fields['unknown_values'], sorted(set(values) - set(available)))
+                self.assertEqual(fields['available_values'], sorted(available))
+                self.assertEqual(str(fields['document_id']), self.did)
+
+    async def test_valid_rules_survive_unresolved_rule_without_applying_its_valid_subset(self):
+        self.document([dict(page_number=1, text='원문 조건', readable=True), self.table_page(2)])
+        self.result['table_rules'] = [self.rule(hs_codes=['7208']),
+            self.rule(table_ids=['p2t1'], row_numbers=['2'], groups=['일반재'], requirements='잘못 연결된 조건'),
+            self.rule(specifications=['SA516'], requirements='폭 2000mm 이하')]
+        state = await self.extract()
+        self.assertEqual(len(state.conditions), 3)
+        self.assertTrue(all(c.target.hs_codes == ['7208'] for c in state.conditions))
+        self.assertEqual([c.target.requirements for c in state.conditions], ['', '', '(두께 10mm 이상)\n폭 2000mm 이하'])
+        self.assertEqual(len(state.document_notes[self.did]), 1)
+        self.assertIn('잘못 연결된 조건', state.document_notes[self.did][0])
+
+    async def test_unknown_evidence_still_rejects_with_diagnostic_before_scope_validation(self):
+        self.document([dict(page_number=1, text='원문 조건', readable=True), self.table_page(2)])
+        self.result['table_rules'] = [dict(table_ids=['p99t1'], requirements='조건',
+                                         evidence=[dict(page_number=99, source_id=1)])]
+        with patch('services.investigation.extraction.log_event') as log:
+            with self.assertRaisesRegex(ModelProcessingError, '근거 위치'):
+                await self.extract()
+        self.assertEqual(self.conversation.investigation.revision, 0)
+        self.assertEqual(self.conversation.investigation.conditions, [])
+        event = next(call for call in log.call_args_list if call.args == ('pdf.evidence.rejected',))
+        self.assertEqual(event.kwargs['reason'], 'unknown_source')
+        self.assertEqual(event.kwargs['invalid_reference'], dict(page_number=99, source_id=1))
+
+    async def test_marker_only_rule_preserves_236_cells_and_valid_rule_and_logs_after_model_completion(self):
+        rows = [[str(i + 1), f'GENERAL-{i}', f'MODEL-{i}'] for i in range(118)]
+        document = self.document([dict(page_number=1, text='전체 HS는 7208이다.', readable=True), self.table_page(2, rows)])
+        original, _ = split_catalog(document)
+        unsupported = dict(table_ids=['p2t1'], hs_codes=['9999'], requirements='폭 2000mm 이하',
+                           evidence=[dict(page_number=2, source_id=1)])
+        self.result['table_rules'] = [unsupported, unsupported, self.rule(hs_codes=['7208'])]
+        with patch('services.investigation.extraction.log_event') as log:
+            state = await self.extract()
+        self.assertEqual(len(state.conditions), 236)
+        self.assertEqual([c.target.specification for c in state.conditions], [c.target.specification for _,_,c in original])
+        self.assertTrue(all(c.target.hs_codes == ['7208'] and c.target.requirements == '' for c in state.conditions))
+        self.assertTrue(all(len(c.evidence) == 2 and c.source_pages == [1, 2] for c in state.conditions))
+        self.assertEqual(len(state.document_notes[self.did]), 1)
+        for value in ['표 위치 안내', '9999', '폭 2000mm 이하', 'p2t1', '반영하지 않았습니다']:
+            self.assertIn(value, state.document_notes[self.did][0])
+        events = [call.args[0] for call in log.call_args_list]
+        self.assertLess(events.index('pdf.model.completed'), events.index('pdf.evidence.rejected'))
+        event = next(call for call in log.call_args_list if call.args == ('pdf.evidence.rejected',))
+        self.assertEqual(event.kwargs['reason'], 'table_marker_only')
+        self.assertEqual(event.kwargs['candidate']['evidence'], unsupported['evidence'])
+        self.assertEqual(event.kwargs['direct_conditions'], 236)
+
+    async def test_marker_only_standalone_proposal_does_not_replace_direct_models(self):
+        self.document([dict(page_number=1, text='보고서 양식', readable=True), self.table_page(2)])
+        self.result['conditions'] = [dict(title='AI 제안', description='근거 없는 추가 조건', uncertainty='확인 필요',
+            target=dict(kind='item', group='일반재', hs_codes=[], specification='A', requirements='새 조건'),
+            evidence=[dict(page_number=2, source_id=1)])]
+        state = await self.extract()
+        self.assertEqual(len(state.conditions), 3)
+        self.assertEqual(state.conditions[0].target.requirements, '')
+        self.assertTrue(all(c.source_pages == [2] and len(c.evidence) == 1 for c in state.conditions))
+        self.assertIn('근거 없는 추가 조건', state.document_notes[self.did][0])
 
     async def test_incompatible_hs_rules_fail_without_overwriting_original_state(self):
         self.document([dict(page_number=1, text='원문 조건', readable=True), self.table_page(2)])

@@ -118,6 +118,9 @@ async def extract_conditions(conversation, payload, runtime, request_id):
                 for item in candidate.evidence:
                     quote = sources.get((item.page_number, item.source_id))
                     if (item.page_number, item.source_id) not in available:
+                        log_event("pdf.evidence.rejected", level="WARNING", **ids, offset=offset,
+                                  reason="unknown_source", candidate=candidate.model_dump(mode="json"),
+                                  invalid_reference=item.model_dump(), available_references=sorted(available))
                         raise ModelProcessingError(
                             f"AI가 ‘{getattr(candidate, 'title', '공통 조건')}’의 근거 위치를 잘못 지정했습니다 "
                             f"({item.page_number}쪽, 구절 {item.source_id}). PDF는 유지했으며 조건은 저장하지 않았습니다. 추출 다시 시도를 눌러 주세요.")
@@ -127,7 +130,25 @@ async def extract_conditions(conversation, payload, runtime, request_id):
                     evidence.append(Evidence(page_number=item.page_number, quote=quote,
                                              document_id=document.document_id, filename=document.filename))
                 if not evidence:
-                    raise ModelProcessingError("조건의 설명문 근거가 없습니다. 조건은 저장하지 않았습니다.")
+                    log_event("pdf.evidence.rejected", level="WARNING", **ids, offset=offset,
+                              reason="table_marker_only", candidate=candidate.model_dump(mode="json"),
+                              direct_conditions=len(table_conditions))
+                    if not table_conditions:
+                        raise ModelProcessingError("조건의 설명문 근거가 없습니다. 조건은 저장하지 않았습니다.")
+                    if isinstance(candidate, CatalogRule):
+                        details = "; ".join(filter(None, ["HS: " + ", ".join(candidate.hs_codes) if candidate.hs_codes else "",
+                                                         candidate.requirements, candidate.uncertainty]))
+                        scope = "; ".join(f"{label}: {', '.join(getattr(candidate, field))}" for field, label in
+                            (("table_ids", "표"), ("row_numbers", "순번"), ("groups", "분류"), ("specifications", "규격"))
+                            if getattr(candidate, field))
+                        details = "; ".join(filter(None, [details, scope])) or "공통 조건"
+                    else:
+                        details = "; ".join(filter(None, [candidate.title, candidate.description, candidate.uncertainty]))
+                    warning = ("표 항목은 추출했지만 AI가 표 위치 안내만 근거로 제안한 다음 내용은 "
+                               f"원문 설명문 근거가 없어 반영하지 않았습니다: {details}")
+                    if warning not in warnings:
+                        warnings.append(warning)
+                    continue
                 # Context is repeated for interpretation, not for extracting the same rows again.
                 if not references & current:
                     continue
@@ -162,7 +183,7 @@ async def extract_conditions(conversation, payload, runtime, request_id):
             offset += len(batch)
     if request_id in conversation.cancelled_requests:
         raise ConflictError("사용자가 조사 조건 읽기를 중지했습니다.")
-    apply_catalog_rules(catalog, table_rules)
+    warnings.extend(apply_catalog_rules(catalog, table_rules))
     next_state.extracted_conditions[document_id] = [item.model_copy(deep=True) for item in next_state.conditions
                                                    if belongs_to_document(item, document_id)]
     next_state.document_notes[document_id] = warnings + [

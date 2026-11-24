@@ -75,10 +75,10 @@ class Extraction(StrictModel):
 
 
 class CatalogRule(StrictModel):
-    table_ids: list[str] = Field(default_factory=list)
+    table_ids: list[str] = Field(default_factory=list, description="직접 추출 표의 table_id를 그대로 사용. 예: p2t1은 PDF 2페이지의 첫 표. 빈 배열은 전체 표.")
     groups: list[str] = Field(default_factory=list)
     specifications: list[str] = Field(default_factory=list)
-    row_numbers: list[str] = Field(default_factory=list)
+    row_numbers: list[str] = Field(default_factory=list, description="원문 표 첫 열의 순번 문자열. 페이지 내 행 위치나 source_id가 아니다. 빈 배열은 전체 순번.")
     hs_codes: list[Annotated[str, Field(pattern=r"^[0-9.]{4,14}$")]] = Field(default_factory=list)
     requirements: str = ""
     evidence: list[SourceReference] = Field(min_length=1)
