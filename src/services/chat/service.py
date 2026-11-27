@@ -1,4 +1,5 @@
 import logging
+import re
 
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -13,6 +14,13 @@ from services.execution_history import execution_history_context, same_formula_w
 from services.investigation.model_context import history_summary
 
 logger = logging.getLogger(__name__)
+
+# 열이나 조건을 덧붙인 자연어 요청은 라우터가 해석한다.
+DIRECT_ADVICE_REQUEST = re.compile(
+    r"\s*(?:(?:AI|LLM)\s*(?:정제\s*)?|정제\s*)의견(?:을)?"
+    r"(?:\s*(?:좀\s*)?(?:줘|주세요|받기|부탁해요|부탁해))?[.!?]*\s*",
+    re.IGNORECASE,
+)
 
 
 def workflow_snapshot(state, formula_jobs: dict) -> dict:
@@ -114,22 +122,14 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
         if len(conversation.turns) >= 100:
             raise ConflictError("개발용 대화 길이 제한입니다. 새 대화를 시작하세요.")
 
-        messages = []
-        for turn in conversation.turns[-10:]:
-            question, answer = turn.model_history()
-            messages.extend([HumanMessage(content=question), AIMessage(content=answer)])
-
-        messages.append(HumanMessage(content=message))
         state = conversation.workflow
         action, reasoning = None, []
+        context = {}
         try:
-            context = build_task_context(state, formula_jobs, operation_jobs=operation_jobs,
-                                         conversation_id=conversation_id, workspace=workspace,
-                                         investigation=investigation_context(conversation, workspace, review_sheets))
-            from services.agent_runs.service import active_context
-            context["agent_run"] = active_context(conversation, workspace)
-            context["user_request"] = message
-            if advice_requested:
+            direct_advice = advice_requested or DIRECT_ADVICE_REQUEST.fullmatch(message)
+            if direct_advice and not workspace:
+                decision = RequestDecision(intent="clarify", answer="먼저 분석할 작업 시트를 준비해 주세요.")
+            elif direct_advice:
                 subject = resolve_advice_subject(workspace)
                 if subject is None:
                     decision = RequestDecision(intent="clarify", answer="기업·거래처와 모델규격 중 어느 쪽의 AI 의견이 필요한가요?")
@@ -140,6 +140,17 @@ async def process_chat(*, runtime, repository, formula_jobs: dict, operation_job
                         answer="대상 열의 전체 데이터를 읽어 조언을 준비하겠습니다.",
                     )
             else:
+                messages = []
+                for turn in conversation.turns[-10:]:
+                    question, answer = turn.model_history()
+                    messages.extend([HumanMessage(content=question), AIMessage(content=answer)])
+                messages.append(HumanMessage(content=message))
+                context = build_task_context(state, formula_jobs, operation_jobs=operation_jobs,
+                                             conversation_id=conversation_id, workspace=workspace,
+                                             investigation=investigation_context(conversation, workspace, review_sheets))
+                from services.agent_runs.service import active_context
+                context["agent_run"] = active_context(conversation, workspace)
+                context["user_request"] = message
                 decision, reasoning = await route_request(runtime, messages, task_context=context,
                     log_context={"conversation_id": conversation_id, "request_id": request_id},
                     pdf_documents=conversation.documents)

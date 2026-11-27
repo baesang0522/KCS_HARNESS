@@ -5,7 +5,8 @@ from uuid import uuid4
 from agents.request_tools import build_request_tools
 from services.recommendation.service import resolve_advice_subject
 from services.chat.service import process_chat
-from repositories.conversation_repository import MemoryConversationRepository
+from agents.request_router import RequestDecision
+from repositories.conversation_repository import MemoryConversationRepository, StoredTurn
 
 
 class AdviceSubjectTests(unittest.IsolatedAsyncioTestCase):
@@ -34,3 +35,25 @@ class AdviceSubjectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['ui_action']['advice_subject'],'model')
         self.assertEqual(await process_chat(**args),result)
         self.assertEqual(self.workspace['advice_subject'],'company')
+
+    async def test_plain_advice_skips_router_but_column_specific_request_keeps_history(self):
+        repo = MemoryConversationRepository()
+        cid = await repo.create()
+        async with repo.edit(cid) as conversation:
+            for i in range(10):
+                await conversation.save_turn(StoredTurn(str(i), '이전 질문', '이전 답변', []))
+        args = dict(runtime=None, repository=repo, formula_jobs={}, operation_jobs={},
+                    conversation_id=cid, workspace=self.workspace)
+        with patch('services.chat.service.route_request', new_callable=AsyncMock) as router:
+            with patch.object(StoredTurn, 'model_history', side_effect=AssertionError):
+                for message in ['LLM 의견 줘', 'AI 정제 의견을 주세요.', '정제 의견 줘']:
+                    reply = await process_chat(**args, request_id=str(uuid4()), message=message)
+                    self.assertEqual(reply['ui_action']['type'], 'analyze_data')
+                    self.assertEqual(reply['ui_action']['advice_subject'], 'model')
+            router.assert_not_awaited()
+            router.return_value = (RequestDecision(intent='general', answer='확인'), [])
+            message = '거래처명 열만 보고 AI 의견 줘'
+            await process_chat(**args, request_id=str(uuid4()), message=message)
+            messages = router.await_args.args[1]
+            self.assertEqual(len(messages), 21)
+            self.assertEqual(messages[-1].content, message)
